@@ -1,0 +1,332 @@
+{% extends "admin/base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>
+        <i class="bi bi-speedometer2"></i>
+        Панель управления
+    </h1>
+    <div class="text-muted">
+        Добро пожаловать, {{ admin.display_name }}!
+    </div>
+</div>
+
+<!-- Статистические карточки -->
+<div class="row mb-4" id="stats-cards">
+    <div class="col-xl-3 col-lg-6 col-md-6 mb-3">
+        <div class="card bg-primary text-white shadow">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        <i class="bi bi-people display-4"></i>
+                    </div>
+                    <div>
+                        <h4 class="mb-0" id="total-users">-</h4>
+                        <small>Всего пользователей</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-lg-6 col-md-6 mb-3">
+        <div class="card bg-success text-white shadow">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        <i class="bi bi-box-seam display-4"></i>
+                    </div>
+                    <div>
+                        <h4 class="mb-0" id="total-products">-</h4>
+                        <small>Всего товаров</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-lg-6 col-md-6 mb-3">
+        <div class="card bg-info text-white shadow">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        <i class="bi bi-person-check display-4"></i>
+                    </div>
+                    <div>
+                        <h4 class="mb-0" id="active-users">-</h4>
+                        <small>Активных пользователей</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-xl-3 col-lg-6 col-md-6 mb-3">
+        <div class="card bg-warning text-white shadow">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        <i class="bi bi-heart display-4"></i>
+                    </div>
+                    <div>
+                        <h4 class="mb-0" id="total-favorites">-</h4>
+                        <small>Товаров в избранном</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Последние пользователи -->
+    <div class="col-lg-6">
+        <div class="card shadow">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">
+                    <i class="bi bi-clock-history"></i>
+                    Последние пользователи
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Пользователь</th>
+                                <th>Telegram ID</th>
+                                <th>Избранных</th>
+                                <th>Регистрация</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-users">
+                            <tr>
+                                <td colspan="4" class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Загрузка...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer">
+                <a href="/admin/users" class="btn btn-primary btn-sm">
+                    Все пользователи <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Популярные товары -->
+    <div class="col-lg-6">
+        <div class="card shadow">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">
+                    <i class="bi bi-star-fill"></i>
+                    Популярные товары
+                </h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Товар</th>
+                                <th>Категория</th>
+                                <th>В избранном</th>
+                                <th>Скидка</th>
+                            </tr>
+                        </thead>
+                        <tbody id="popular-products">
+                            <tr>
+                                <td colspan="4" class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Загрузка...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer">
+                <a href="/admin/products" class="btn btn-primary btn-sm">
+                    Все товары <i class="bi bi-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Быстрые действия -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card shadow">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">
+                    <i class="bi bi-lightning-charge"></i>
+                    Быстрые действия
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3 mb-2">
+                        <a href="/admin/products/create" class="btn btn-success w-100">
+                            <i class="bi bi-plus-circle"></i> Добавить товар
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-2">
+                        <a href="/admin/users" class="btn btn-info w-100">
+                            <i class="bi bi-people"></i> Управление пользователями
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-2">
+                        <button class="btn btn-warning w-100" onclick="refreshStats()">
+                            <i class="bi bi-arrow-clockwise"></i> Обновить статистику
+                        </button>
+                    </div>
+                    <div class="col-md-3 mb-2">
+                        <a href="/" class="btn btn-outline-primary w-100" target="_blank">
+                            <i class="bi bi-box-arrow-up-right"></i> Перейти на сайт
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Функции для загрузки данных дашборда
+async function loadDashboardStats() {
+    try {
+        const response = await fetch('/admin/api/dashboard/stats', {
+            headers: {
+                'Authorization': 'Bearer ' + getCookie('admin_token')
+            }
+        });
+        
+        if (response.ok) {
+            const stats = await response.json();
+            
+            document.getElementById('total-users').textContent = stats.total_users;
+            document.getElementById('total-products').textContent = stats.total_products;
+            document.getElementById('active-users').textContent = stats.active_users;
+            document.getElementById('total-favorites').textContent = stats.total_favorites || 0;
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки статистики:', error);
+    }
+}
+
+async function loadRecentUsers() {
+    try {
+        const response = await fetch('/admin/api/dashboard/recent-users', {
+            headers: {
+                'Authorization': 'Bearer ' + getCookie('admin_token')
+            }
+        });
+        
+        if (response.ok) {
+            const users = await response.json();
+            const tbody = document.getElementById('recent-users');
+            
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3">Нет данных</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = users.map(user => `
+                <tr>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <div class="me-2">
+                                <span class="badge ${user.is_active ? 'bg-success' : 'bg-secondary'}">
+                                    ${user.is_active ? 'Активен' : 'Неактивен'}
+                                </span>
+                            </div>
+                            <div>
+                                <div class="fw-bold">${user.full_name}</div>
+                                <small class="text-muted">@${user.username || 'Не указан'}</small>
+                            </div>
+                        </div>
+                    </td>
+                    <td><code>${user.telegram_id}</code></td>
+                    <td>
+                        <span class="badge bg-primary">${user.favorites_count}</span>
+                    </td>
+                    <td>
+                        <small>${new Date(user.created_at).toLocaleDateString('ru-RU')}</small>
+                    </td>
+                </tr>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки пользователей:', error);
+    }
+}
+
+async function loadPopularProducts() {
+    try {
+        const response = await fetch('/admin/api/dashboard/popular-products', {
+            headers: {
+                'Authorization': 'Bearer ' + getCookie('admin_token')
+            }
+        });
+        
+        if (response.ok) {
+            const products = await response.json();
+            const tbody = document.getElementById('popular-products');
+            
+            if (products.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="text-center py-3">Нет данных</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = products.map(product => `
+                <tr>
+                    <td>
+                        <div class="fw-bold text-truncate" style="max-width: 200px;" title="${product.name}">
+                            ${product.name}
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge bg-secondary">${product.category || 'Без категории'}</span>
+                    </td>
+                    <td>
+                        <span class="badge bg-success">${product.favorites_count}</span>
+                    </td>
+                    <td>
+                        ${product.has_discount 
+                            ? `<span class="badge bg-warning">${product.discount_percent}%</span>`
+                            : '<span class="text-muted">Нет</span>'
+                        }
+                    </td>
+                </tr>
+            `).join('');
+        }
+    } catch (error) {
+        console.error('Ошибка загрузки товаров:', error);
+    }
+}
+
+function refreshStats() {
+    loadDashboardStats();
+    loadRecentUsers();
+    loadPopularProducts();
+    
+    showToast('Статистика обновлена', 'success');
+}
+
+// Загружаем данные при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadDashboardStats();
+    loadRecentUsers();
+    loadPopularProducts();
+});
+</script>
+{% endblock %} 

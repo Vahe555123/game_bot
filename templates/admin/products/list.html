@@ -1,0 +1,329 @@
+{% extends "admin/base.html" %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/admin/dashboard">Главная</a></li>
+        <li class="breadcrumb-item active">Товары</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1><i class="bi bi-box-seam"></i> Управление товарами</h1>
+    <a href="/admin/products/create" class="btn btn-success">
+        <i class="bi bi-plus-circle"></i> Добавить товар
+    </a>
+</div>
+
+<!-- Фильтры и поиск -->
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-4">
+                <label for="searchProducts" class="form-label">Поиск товаров</label>
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="searchProducts" placeholder="По названию, описанию, издателю">
+                </div>
+            </div>
+            <div class="col-md-2">
+                <label for="filterCategory" class="form-label">Категория</label>
+                <select class="form-select" id="filterCategory">
+                    <option value="">Все категории</option>
+                    {% for category in categories %}
+                    <option value="{{ category }}">{{ category }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="filterActive" class="form-label">Статус</label>
+                <select class="form-select" id="filterActive">
+                    <option value="">Все товары</option>
+                    <option value="true">Только активные</option>
+                    <option value="false">Только неактивные</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label for="pageSize" class="form-label">Показать</label>
+                <select class="form-select" id="pageSize" onchange="loadProducts()">
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">&nbsp;</label>
+                <div class="d-grid">
+                    <button class="btn btn-primary" onclick="loadProducts()">
+                        <i class="bi bi-funnel"></i> Применить
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Таблица товаров -->
+<div class="card">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Список товаров</h5>
+        <div class="text-muted">
+            Всего: <span id="totalProducts">-</span>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Товар</th>
+                        <th>Категория</th>
+                        <th>Цены</th>
+                        <th>Скидка</th>
+                        <th>Популярность</th>
+                        <th>Статус</th>
+                        <th>Действия</th>
+                    </tr>
+                </thead>
+                <tbody id="productsTable">
+                    <tr>
+                        <td colspan="7" class="text-center py-4">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Загрузка...</span>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card-footer">
+        <nav aria-label="Пагинация товаров">
+            <ul class="pagination mb-0" id="productsPagination">
+                <!-- Пагинация будет добавлена через JavaScript -->
+            </ul>
+        </nav>
+    </div>
+</div>
+
+<!-- Модальное окно подтверждения -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Подтверждение действия</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p id="confirmMessage">Вы уверены, что хотите выполнить это действие?</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" id="confirmButton">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentPage = 1;
+
+async function loadProducts(page = 1) {
+    const search = document.getElementById('searchProducts').value;
+    const category = document.getElementById('filterCategory').value;
+    const activeOnly = document.getElementById('filterActive').value;
+    const limit = document.getElementById('pageSize').value;
+    
+    const params = new URLSearchParams({
+        page: page,
+        limit: limit
+    });
+    
+    if (search) params.append('search', search);
+    if (category) params.append('category', category);
+    if (activeOnly) params.append('active_only', activeOnly);
+    
+    try {
+        const response = await fetch(`/admin/api/products/?${params}`, {
+            headers: {
+                'Authorization': 'Bearer ' + getCookie('admin_token')
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            renderProductsTable(data.products);
+            renderPagination(data.page, data.limit, data.total);
+            document.getElementById('totalProducts').textContent = data.total;
+            currentPage = data.page;
+        } else {
+            showToast('Ошибка загрузки товаров', 'error');
+        }
+    } catch (error) {
+        console.error('Ошибка:', error);
+        showToast('Ошибка сети', 'error');
+    }
+}
+
+function renderProductsTable(products) {
+    const tbody = document.getElementById('productsTable');
+    
+    if (products.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4">Товары не найдены</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = products.map(product => `
+        <tr>
+            <td>
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        <i class="bi bi-box-seam fs-3 text-primary"></i>
+                    </div>
+                    <div style="min-width: 200px;">
+                        <div class="fw-bold text-truncate" style="max-width: 250px;" title="${product.name}">
+                            ${product.name}
+                        </div>
+                        <small class="text-muted">${formatDate(product.created_at)}</small>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <span class="badge bg-secondary">${product.category || 'Без категории'}</span>
+            </td>
+            <td>
+                <div class="small">
+                    <div>UAH: ${product.uah_price || 'Н/Д'}</div>
+                    <div>TRL: ${product.trl_price || 'Н/Д'}</div>
+                    ${product.product_type ? `<div class="text-muted">${product.product_type}</div>` : ''}
+                </div>
+            </td>
+            <td>
+                ${product.has_discount && product.discount_percent
+                    ? `<span class="badge bg-warning">${product.discount_percent}%</span>`
+                    : '<span class="text-muted">Нет</span>'
+                }
+            </td>
+            <td>
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-heart-fill text-danger me-1"></i>
+                    <span class="badge bg-primary">${product.favorites_count}</span>
+                </div>
+            </td>
+            <td>
+                <span class="badge ${product.is_active ? 'bg-success' : 'bg-secondary'}">
+                    ${product.is_active ? 'Активен' : 'Неактивен'}
+                </span>
+            </td>
+            <td>
+                <div class="btn-group btn-group-sm">
+                    <a href="/admin/products/${product.id}" class="btn btn-outline-primary" title="Просмотр">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                    <a href="/admin/products/${product.id}/edit" class="btn btn-outline-warning" title="Редактировать">
+                        <i class="bi bi-pencil"></i>
+                    </a>
+                    <button class="btn ${product.is_active ? 'btn-outline-danger' : 'btn-outline-success'}" 
+                            onclick="toggleProductActive(${product.id}, ${product.is_active})"
+                            title="${product.is_active ? 'Деактивировать' : 'Активировать'}">
+                        <i class="bi ${product.is_active ? 'bi-pause' : 'bi-play'}"></i>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function renderPagination(page, limit, total) {
+    const totalPages = Math.ceil(total / limit);
+    const pagination = document.getElementById('productsPagination');
+    
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    
+    // Предыдущая страница
+    html += `<li class="page-item ${page <= 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="event.preventDefault(); loadProducts(${page - 1})">Предыдущая</a>
+    </li>`;
+    
+    // Номера страниц
+    for (let i = Math.max(1, page - 2); i <= Math.min(totalPages, page + 2); i++) {
+        html += `<li class="page-item ${i === page ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="event.preventDefault(); loadProducts(${i})">${i}</a>
+        </li>`;
+    }
+    
+    // Следующая страница
+    html += `<li class="page-item ${page >= totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="event.preventDefault(); loadProducts(${page + 1})">Следующая</a>
+    </li>`;
+    
+    pagination.innerHTML = html;
+}
+
+function toggleProductActive(productId, isActive) {
+    const action = isActive ? 'деактивировать' : 'активировать';
+    const confirmMessage = `Вы уверены, что хотите ${action} этот товар?`;
+    
+    showConfirm(confirmMessage, async () => {
+        try {
+            const response = await fetch(`/admin/api/products/${productId}/toggle-active`, {
+                method: 'PUT',
+                headers: {
+                    'Authorization': 'Bearer ' + getCookie('admin_token')
+                }
+            });
+            
+            if (response.ok) {
+                showToast('Статус товара изменен', 'success');
+                loadProducts(currentPage);
+            } else {
+                showToast('Ошибка изменения статуса', 'error');
+            }
+        } catch (error) {
+            console.error('Ошибка:', error);
+            showToast('Ошибка сети', 'error');
+        }
+    });
+}
+
+function showConfirm(message, callback) {
+    document.getElementById('confirmMessage').textContent = message;
+    document.getElementById('confirmButton').onclick = () => {
+        bootstrap.Modal.getInstance(document.getElementById('confirmModal')).hide();
+        callback();
+    };
+    new bootstrap.Modal(document.getElementById('confirmModal')).show();
+}
+
+function formatDate(dateString) {
+    return new Date(dateString).toLocaleDateString('ru-RU', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+    });
+}
+
+// Поиск с задержкой
+let searchTimeout;
+document.getElementById('searchProducts').addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        loadProducts(1);
+    }, 500);
+});
+
+// Загружаем данные при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadProducts();
+});
+</script>
+{% endblock %} 

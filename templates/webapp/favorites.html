@@ -1,0 +1,1112 @@
+{% extends "base.html" %}
+
+{% block title %}PlayStation Store - Избранное{% endblock %}
+
+{% block header_actions %}
+<div class="header-search">
+    <input type="text" class="header-search-input" id="globalSearchInput" placeholder="Поиск игр...">
+    <button class="header-filter-btn" id="filterToggleBtn">
+        <i class="fas fa-filter"></i>
+    </button>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Filters Section -->
+<div class="search-section fade-in"
+    style="padding: 0; background: transparent; box-shadow: none; border: none; margin-bottom: 0;">
+    <div style="display: none;"></div>
+
+    <!-- Filters Dropdown -->
+    <div class="filters-dropdown" id="filtersDropdown">
+        <div class="filter-row">
+            <select class="filter-select" id="categoryFilter">
+                <option value="">Все категории</option>
+            </select>
+            <select class="filter-select" id="regionSelect">
+                <option value="">Все регионы</option>
+                <option value="en-ua">🇺🇦 Украина</option>
+                <option value="en-tr">🇹🇷 Турция</option>
+                <option value="en-in">🇮🇳 Индия</option>
+            </select>
+        </div>
+
+        <div class="filter-row">
+            <select class="filter-select" id="platformFilter">
+                <option value="">Все платформы</option>
+                <option value="PS4">🎮 Только PS4</option>
+                <option value="PS5">🎮 Только PS5</option>
+                <option value="BOTH">🎮 PS4 и PS5</option>
+            </select>
+            <select class="filter-select" id="playersFilter">
+                <option value="">Количество игроков</option>
+                <option value="singleplayer">👤 Одиночная игра</option>
+                <option value="coop">🤝 Кооператив</option>
+            </select>
+        </div>
+
+        <div class="price-range-row">
+            <input type="number" class="form-control" id="minPrice" placeholder="Мин. цена">
+            <input type="number" class="form-control" id="maxPrice" placeholder="Макс. цена">
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="discountOnly">
+            <label for="discountOnly" class="checkbox-label">Только со скидкой</label>
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="psPlusOnly">
+            <label for="psPlusOnly" class="checkbox-label">Доступно в PS Plus</label>
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="eaAccessOnly">
+            <label for="eaAccessOnly" class="checkbox-label">Доступно в EA Access</label>
+        </div>
+
+        <div class="filter-actions">
+            <button class="btn btn-secondary" id="clearFiltersBtn">
+                <i class="fas fa-times"></i>
+                Очистить
+            </button>
+            <button class="btn btn-primary" id="applyFiltersBtn">
+                <i class="fas fa-check"></i>
+                Применить
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Header -->
+<div class="favorites-header fade-in">
+    <h2>Мои избранные игры</h2>
+    <p>Здесь собраны ваши любимые игры из PlayStation Store</p>
+    <script>
+
+
+
+        // Создаем минимальные версии классов, если app.js не загрузился
+        function createFallbackClasses() {
+            // Минимальная версия TelegramWebApp
+            class SimpleTelegramWebApp {
+                constructor() {
+                    this.tg = window.Telegram?.WebApp;
+                    this.isInitialized = true;
+                    if (this.tg) {
+                        this.tg.ready();
+                        this.tg.expand();
+                    }
+                }
+
+                getUserId() {
+                    if (this.tg?.initDataUnsafe?.user?.id) {
+                        return this.tg.initDataUnsafe.user.id;
+                    }
+                    // Fallback для тестирования
+                    return 628176879;
+                }
+
+                showBackButton(callback) {
+                    if (this.tg?.BackButton) {
+                        this.tg.BackButton.onClick(callback);
+                        this.tg.BackButton.show();
+                    }
+                }
+
+                hapticFeedback(type, style) {
+                    if (this.tg?.HapticFeedback) {
+                        try {
+                            if (type === 'impact') {
+                                this.tg.HapticFeedback.impactOccurred(style);
+                            } else if (type === 'notification') {
+                                this.tg.HapticFeedback.notificationOccurred(style);
+                            }
+                        } catch (e) { }
+                    }
+                }
+            }
+
+            // Минимальная версия APIClient
+            class SimpleAPIClient {
+                constructor() {
+                    this.baseURL = '/api';
+                }
+
+                async request(endpoint, options = {}) {
+                    const url = `${this.baseURL}${endpoint}`;
+
+                    const response = await fetch(url, {
+                        headers: {
+                            'Content-Type': 'application/json',
+                            ...options.headers
+                        },
+                        ...options
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    return await response.json();
+                }
+
+                async get(endpoint) {
+                    return this.request(endpoint, { method: 'GET' });
+                }
+
+                async delete(endpoint) {
+                    return this.request(endpoint, { method: 'DELETE' });
+                }
+            }
+
+            // Создаем глобальные объекты
+            window.tgApp = new SimpleTelegramWebApp();
+            window.apiClient = new SimpleAPIClient();
+        }
+
+        class FavoritesManager {
+            constructor() {
+                this.tgApp = window.tgApp; // Use global instance
+                this.apiClient = window.apiClient; // Use global API client
+                this.favorites = new Set();
+                this.currentCurrency = localStorage.getItem('currency') || 'UAH';
+                this.productToRemove = null;
+
+                this.init().catch(error => {
+                    console.error('Ошибка инициализации:', error);
+                });
+            }
+
+            async init() {
+                // Wait for Telegram WebApp to be ready
+                await this.waitForTelegramReady();
+
+                // Check if apiClient is available
+                if (!this.apiClient) {
+                    this.showError('Ошибка инициализации API');
+                    return;
+                }
+
+                // Enable back button
+                this.tgApp.showBackButton(() => {
+                    window.location.href = '/webapp';
+                });
+
+                this.setupEventListeners();
+                this.loadFavorites();
+            }
+
+            async waitForTelegramReady() {
+                // Wait up to 3 seconds for Telegram WebApp to initialize
+                const maxWait = 3000;
+                const checkInterval = 100;
+                let waited = 0;
+
+                while (waited < maxWait) {
+                    if (this.tgApp && this.tgApp.isInitialized) {
+                        return;
+                    }
+                    await new Promise(resolve => setTimeout(resolve, checkInterval));
+                    waited += checkInterval;
+                }
+
+                console.warn('Telegram WebApp не готов');
+            }
+
+            setupEventListeners() {
+                // Product clicks
+                document.addEventListener('click', (e) => {
+                    if (e.target.closest('.product-card') && !e.target.closest('.favorite-btn') && !e.target.closest('.remove-btn')) {
+                        const productCard = e.target.closest('.product-card');
+                        const productId = productCard.dataset.productId;
+                        const productRegion = productCard.dataset.productRegion; // Получаем регион товара
+
+                        if (productId) {
+                            // Сохраняем регион товара перед переходом
+                            if (productRegion) {
+                                console.log('💾 Saving product region to localStorage:', productRegion);
+                                localStorage.setItem('selectedRegion', productRegion);
+                            }
+
+                            sessionStorage.setItem('productDetailReturn', JSON.stringify({ from: 'favorites' }));
+
+                            this.tgApp.hapticFeedback('impact', 'light');
+                            window.location.href = `/webapp/product/${productId}`;
+                        }
+                    }
+
+                    if (e.target.closest('.favorite-btn')) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const productId = e.target.closest('.favorite-btn').dataset.productId;
+                        this.showRemoveConfirmation(productId);
+                    }
+
+                    if (e.target.closest('.remove-btn')) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const productId = e.target.closest('.remove-btn').dataset.productId;
+                        this.showRemoveConfirmation(productId);
+                    }
+                });
+
+                // Confirm remove
+                document.getElementById('confirmRemoveBtn').addEventListener('click', () => {
+                    if (this.productToRemove) {
+                        this.removeFromFavorites(this.productToRemove);
+                        this.closeConfirmModal();
+                    }
+                });
+            }
+
+            async loadFavorites() {
+                const userId = this.tgApp.getUserId();
+
+                if (!userId) {
+                    this.showEmptyState();
+                    return;
+                }
+
+                if (!this.apiClient) {
+                    this.showError('API клиент недоступен');
+                    this.showEmptyState();
+                    return;
+                }
+
+                this.showLoading(true);
+
+                try {
+                    // Load favorites with product details
+                    const favoritesResponse = await this.apiClient.get(`/users/${userId}/favorites/`);
+
+                    console.log('📥 Loaded favorites:', favoritesResponse.length);
+
+                    if (favoritesResponse.length === 0) {
+                        this.showEmptyState();
+                        return;
+                    }
+
+                    // Extract products from favorites
+                    const products = favoritesResponse.map(f => {
+                        const product = f.product;
+                        if (product) {
+                            // ВАЖНО: Проверяем, что регион товара совпадает с сохраненным регионом в избранном
+                            console.log(`✅ Favorite product: ${product.name?.substring(0, 30)} - Region: ${product.region}, Saved region: ${f.region}`);
+                        }
+                        return product;
+                    }).filter(p => p !== null);
+
+                    const favoriteIds = favoritesResponse.map(f => f.product_id);
+
+                    if (products.length === 0) {
+                        this.showEmptyState();
+                        return;
+                    }
+
+                    this.favorites = new Set(favoriteIds);
+                    this.renderFavorites(products);
+
+                } catch (error) {
+                    console.error('Ошибка загрузки избранного:', error);
+                    this.showError('Ошибка загрузки избранного');
+                    this.showEmptyState();
+                } finally {
+                    this.showLoading(false);
+                }
+            }
+
+            renderFavorites(products) {
+                const container = document.getElementById('favoritesContainer');
+                const template = document.getElementById('favoriteProductTemplate');
+
+                if (!container || !template) {
+                    return;
+                }
+
+                container.innerHTML = '';
+
+                if (products.length === 0) {
+                    this.showEmptyState();
+                    return;
+                }
+
+                this.hideEmptyState();
+
+                console.log('📋 Rendering favorites:', products.length, 'products');
+
+                let successCount = 0;
+                products.forEach((product, index) => {
+                    console.log(`📦 Product ${index + 1}:`, {
+                        id: product.id,
+                        name: product.name?.substring(0, 30),
+                        region: product.region
+                    });
+
+                    const productCard = this.createProductCard(product, template);
+                    if (productCard) {
+                        container.appendChild(productCard);
+                        successCount++;
+                    }
+                });
+
+                if (successCount === 0) {
+                    this.showEmptyState();
+                }
+            }
+
+            createProductCard(product, template) {
+                if (!template) {
+                    return null;
+                }
+
+                const card = template.content.cloneNode(true);
+                const cardElement = card.querySelector('.product-card');
+
+                if (!cardElement) {
+                    return null;
+                }
+
+                // Set product ID and region
+                cardElement.dataset.productId = product.id;
+                if (product.region) {
+                    cardElement.dataset.productRegion = product.region;
+                    console.log(`💾 Set region ${product.region} for product ${product.id}`);
+                }
+
+                // Set image
+                const img = card.querySelector('.product-image');
+                const placeholder = card.querySelector('.product-placeholder');
+
+                if (product.image) {
+                    img.src = product.image;
+                    img.alt = product.name;
+                    img.style.display = 'block';
+                    img.addEventListener('load', () => {
+                        placeholder.style.display = 'none';
+                    });
+                    img.addEventListener('error', () => {
+                        img.style.display = 'none';
+                        placeholder.style.display = 'flex';
+                    });
+                }
+
+                // Set favorite button
+                const favoriteBtn = card.querySelector('.favorite-btn');
+                favoriteBtn.dataset.productId = product.id;
+
+                // Set remove button
+                const removeBtn = card.querySelector('.remove-btn');
+                removeBtn.dataset.productId = product.id;
+
+                // Set discount badge - берем скидку из региона товара
+                const discountBadge = card.querySelector('.discount-badge');
+
+                // Берем скидку конкретного региона товара
+                let discountPercent = 0;
+                if (product.regional_prices && product.regional_prices.length > 0 && product.region) {
+                    const currentRegion = product.regional_prices.find(rp => rp.region === product.region);
+                    if (currentRegion && currentRegion.discount_percent) {
+                        discountPercent = currentRegion.discount_percent;
+                    }
+                }
+
+                if (discountPercent > 0) {
+                    discountBadge.textContent = `-${discountPercent}%`;
+                    discountBadge.style.display = 'block';
+                } else {
+                    discountBadge.style.display = 'none';
+                }
+
+                // Set product info
+                const categoryText = product.category || product.product_type || 'Игры';
+                card.querySelector('.product-category').textContent = categoryText;
+                card.querySelector('.product-title').textContent = product.name || 'Без названия';
+
+                // Set prices
+                // Set prices styling like main page
+                const regionalPricesContainer = card.querySelector('.regional-prices');
+                if (regionalPricesContainer) {
+                    this.renderProductPrices(regionalPricesContainer, product);
+                }
+
+                return card;
+            }
+
+            renderProductPrices(container, product) {
+                container.innerHTML = '';
+
+                // Маппинг флагов на изображения
+                const flagMapping = {
+                    '🇺🇦': '/static/images/flags/ukraine.png',
+                    '🇹🇷': '/static/images/flags/turkey.png',
+                    '🇮🇳': '/static/images/flags/India.png'
+                };
+
+                // Отображаем все региональные цены с флагами
+                // Порядок: Турция, Индия, Украина
+                const regionOrder = { 'TR': 1, 'IN': 2, 'UA': 3 };
+                if (product.regional_prices && product.regional_prices.length > 0) {
+                    const sortedPrices = [...product.regional_prices].sort((a, b) => {
+                        const orderA = regionOrder[a.region] || 999;
+                        const orderB = regionOrder[b.region] || 999;
+                        return orderA - orderB;
+                    });
+                    sortedPrices.forEach(regionPrice => {
+                        const priceRow = document.createElement('div');
+                        priceRow.className = 'price-row-regional';
+
+                        // Флаг региона
+                        const flagImg = document.createElement('img');
+                        flagImg.className = 'region-flag-img';
+                        flagImg.src = flagMapping[regionPrice.flag] || regionPrice.flag;
+                        flagImg.alt = regionPrice.name;
+                        flagImg.onerror = function () { this.style.display = 'none'; };
+                        priceRow.appendChild(flagImg);
+
+                        // Блок с ценами
+                        const pricesDiv = document.createElement('div');
+                        pricesDiv.className = 'price-values';
+
+                        if (regionPrice.price_rub && regionPrice.price_rub > 0) {
+                            const priceWrapper = document.createElement('div');
+                            priceWrapper.className = 'price-main-wrapper';
+
+                            const currentPrice = document.createElement('span');
+                            currentPrice.className = 'price-current';
+                            currentPrice.textContent = `${Math.round(regionPrice.price_rub)}₽`;
+                            priceWrapper.appendChild(currentPrice);
+
+                            // Показываем старую цену если есть скидка
+                            if (regionPrice.old_price_rub && regionPrice.old_price_rub > regionPrice.price_rub) {
+                                const oldPriceElement = document.createElement('span');
+                                oldPriceElement.className = 'price-old';
+                                oldPriceElement.textContent = `${Math.round(regionPrice.old_price_rub)}₽`;
+                                priceWrapper.appendChild(oldPriceElement);
+                            }
+
+                            pricesDiv.appendChild(priceWrapper);
+                        } else {
+                            const noPrice = document.createElement('span');
+                            noPrice.className = 'price-na';
+                            noPrice.textContent = 'Н/Д';
+                            pricesDiv.appendChild(noPrice);
+                        }
+
+                        priceRow.appendChild(pricesDiv);
+                        container.appendChild(priceRow);
+                    });
+                } else {
+                    // Fallback если нет региональных цен (старый формат API)
+                    const priceRow = document.createElement('div');
+                    priceRow.className = 'price-row';
+
+                    const pricesDiv = document.createElement('div');
+                    pricesDiv.className = 'price-values';
+
+                    if (product.price_rub) {
+                        const priceWrapper = document.createElement('div');
+                        priceWrapper.className = 'price-main-wrapper';
+
+                        const currentPrice = document.createElement('span');
+                        currentPrice.className = 'price-current';
+                        currentPrice.textContent = `${Math.round(product.price_rub)}₽`;
+                        priceWrapper.appendChild(currentPrice);
+
+                        pricesDiv.appendChild(priceWrapper);
+                    } else {
+                        const noPrice = document.createElement('span');
+                        noPrice.className = 'price-na';
+                        noPrice.textContent = 'Цена не указана';
+                        pricesDiv.appendChild(noPrice);
+                    }
+
+                    priceRow.appendChild(pricesDiv);
+                    container.appendChild(priceRow);
+                }
+            }
+
+            showRemoveConfirmation(productId) {
+                this.tgApp.hapticFeedback('impact', 'medium');
+                this.productToRemove = productId;
+                const modal = document.getElementById('confirmModal');
+                modal.style.display = 'flex';
+
+                // Add click outside to close
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) {
+                        this.closeConfirmModal();
+                    }
+                });
+            }
+
+            closeConfirmModal() {
+                const modal = document.getElementById('confirmModal');
+                modal.style.display = 'none';
+                this.productToRemove = null;
+            }
+
+            async removeFromFavorites(productId) {
+                const userId = this.tgApp.getUserId();
+                if (!userId) return;
+
+                try {
+                    // Add removing animation
+                    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+                    if (productCard) {
+                        productCard.classList.add('removing');
+                    }
+
+                    // API call to remove from favorites
+                    await this.apiClient.delete(`/users/${userId}/favorites/${productId}`);
+
+                    // Update local state
+                    this.favorites.delete(parseInt(productId));
+
+                    // КРИТИЧЕСКИ ВАЖНО: Обновляем глобальный favoritesManager
+                    if (window.favoritesManager) {
+                        window.favoritesManager.favorites.delete(parseInt(productId));
+                        console.log('✅ Global favoritesManager updated after removal');
+                    }
+
+                    // Удаляем сохраненный регион из localStorage
+                    localStorage.removeItem(`favorite_region_${productId}`);
+                    console.log('🗑️ Removed favorite region from localStorage');
+
+                    // Remove from DOM after animation
+                    setTimeout(() => {
+                        if (productCard) {
+                            productCard.remove();
+                        }
+
+                        // Check if there are any favorites left
+                        const remainingCards = document.querySelectorAll('#favoritesContainer .product-card');
+                        if (remainingCards.length === 0) {
+                            this.showEmptyState();
+                        }
+                    }, 300);
+
+                    this.tgApp.hapticFeedback('notification', 'success');
+
+                } catch (error) {
+                    console.error('Error removing from favorites:', error);
+
+                    // Remove animation class on error
+                    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+                    if (productCard) {
+                        productCard.classList.remove('removing');
+                    }
+                }
+            }
+
+            showLoading(show) {
+                const spinner = document.getElementById('loadingSpinner');
+                const container = document.getElementById('favoritesContainer');
+
+                if (show) {
+                    spinner.style.display = 'block';
+                    container.innerHTML = '';
+                    this.hideEmptyState();
+                } else {
+                    spinner.style.display = 'none';
+                }
+            }
+
+            showEmptyState() {
+                const emptyState = document.getElementById('emptyState');
+                const container = document.getElementById('favoritesContainer');
+
+                if (emptyState) {
+                    emptyState.style.display = 'block';
+                }
+                if (container) {
+                    container.innerHTML = '';
+                }
+            }
+
+            hideEmptyState() {
+                const emptyState = document.getElementById('emptyState');
+
+                if (emptyState) {
+                    emptyState.style.display = 'none';
+                }
+            }
+
+            showError(message) {
+                console.error(message);
+            }
+        }
+
+        // Global function for modal control
+        function closeConfirmModal() {
+            const modal = document.getElementById('confirmModal');
+            modal.style.display = 'none';
+        }
+
+        // Initialize favorites manager when DOM is loaded
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Wait for global instances to be available
+            let attempts = 0;
+            const maxAttempts = 100; // 10 seconds
+
+            while ((!window.tgApp || !window.apiClient) && attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
+
+            if (window.tgApp && window.apiClient) {
+                // Дополнительная проверка готовности tgApp
+                let tgReady = false;
+                let tgAttempts = 0;
+                const maxTgAttempts = 30;
+
+                while (!tgReady && tgAttempts < maxTgAttempts) {
+                    if (window.tgApp.isInitialized) {
+                        tgReady = true;
+                    } else {
+                        await new Promise(resolve => setTimeout(resolve, 100));
+                        tgAttempts++;
+                    }
+                }
+
+                try {
+                    window.favoritesManagerInstance = new FavoritesManager();
+                } catch (error) {
+                    console.error('Ошибка создания FavoritesManager:', error);
+                }
+            } else {
+                // Создаем резервные классы
+                createFallbackClasses();
+
+                // Пытаемся создать FavoritesManager с резервными классами
+                try {
+                    window.favoritesManagerInstance = new FavoritesManager();
+                } catch (error) {
+                    console.error('Ошибка создания FavoritesManager с резервными классами:', error);
+                }
+            }
+        });
+
+        // Альтернативная инициализация через window.onload
+        window.addEventListener('load', async () => {
+            // Если объекты уже найдены, не делаем ничего
+            if (window.favoritesManagerInstance) {
+                return;
+            }
+
+            // Ждем еще немного
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            if (window.tgApp && window.apiClient) {
+                try {
+                    window.favoritesManagerInstance = new FavoritesManager();
+                } catch (error) {
+                    console.error('Ошибка создания FavoritesManager через window.load:', error);
+                }
+            } else {
+                // Создаем резервные классы если еще не созданы
+                if (!window.tgApp || !window.apiClient) {
+                    createFallbackClasses();
+
+                    try {
+                        window.favoritesManagerInstance = new FavoritesManager();
+                    } catch (error) {
+                        console.error('Ошибка создания FavoritesManager через window.load:', error);
+                    }
+                }
+            }
+        });
+    </script>
+</div>
+
+<!-- Favorites Grid -->
+<div class="product-grid" id="favoritesContainer" style="padding-bottom: 120px;">
+    <!-- Favorites will be loaded here -->
+</div>
+
+<!-- Loading Spinner -->
+<div class="text-center mt-4" id="loadingSpinner" style="display: none;">
+    <div class="spinner"></div>
+    <p class="mt-2">Загрузка избранного...</p>
+</div>
+
+<!-- Empty State -->
+<div class="empty-state" id="emptyState" style="display: none;">
+    <i class="fas fa-heart-broken"></i>
+    <h3>Пока нет избранных игр</h3>
+    <p>Добавьте игры в избранное, чтобы они появились здесь</p>
+    <button class="btn btn-primary" onclick="window.location.href='/webapp'">
+        <i class="fas fa-gamepad"></i>
+        Найти игры
+    </button>
+</div>
+
+<!-- Product Template -->
+<template id="favoriteProductTemplate">
+    <div class="product-card fade-in" data-product-id="">
+        <div class="product-image-container">
+            <img class="product-image" src="" alt="" style="display: none;">
+            <div class="product-placeholder">
+                <i class="fab fa-playstation"></i>
+            </div>
+            <button class="favorite-btn active" data-product-id="">
+                <i class="fas fa-heart"></i>
+            </button>
+            <div class="discount-badge" style="display: none;"></div>
+        </div>
+        <div class="product-info">
+            <div class="product-category"></div>
+            <h3 class="product-title"></h3>
+            <div class="price-container">
+                <div class="regional-prices">
+                    <!-- Regional prices will be populated by JavaScript -->
+                </div>
+            </div>
+            <div class="product-actions">
+                <button class="btn btn-outline remove-btn" data-product-id="">
+                    <i class="fas fa-trash"></i>
+                    Удалить
+                </button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Confirmation Modal -->
+<div class="modal-overlay" id="confirmModal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Подтверждение</h3>
+        </div>
+        <div class="modal-body">
+            <p>Вы уверены, что хотите удалить эту игру из избранного?</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeConfirmModal()">Отмена</button>
+                <button class="btn btn-danger" id="confirmRemoveBtn">Удалить</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Глобальный обработчик фильтров для страниц, отличных от главной
+    document.addEventListener('DOMContentLoaded', function () {
+        const filterToggleBtn = document.getElementById('filterToggleBtn');
+        const filtersDropdown = document.getElementById('filtersDropdown');
+        const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+        const applyFiltersBtn = document.getElementById('applyFiltersBtn');
+
+        if (filterToggleBtn && filtersDropdown) {
+            // Переключение фильтров
+            filterToggleBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                e.preventDefault();
+                filtersDropdown.classList.toggle('show');
+                filterToggleBtn.classList.toggle('active');
+                filterToggleBtn.blur();
+            });
+
+            // Закрытие фильтров при клике вне
+            document.addEventListener('click', function (e) {
+                if (!filtersDropdown.contains(e.target) && !filterToggleBtn.contains(e.target)) {
+                    filtersDropdown.classList.remove('show');
+                    filterToggleBtn.classList.remove('active');
+                }
+            });
+        }
+
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', function () {
+                // Очищаем все фильтры
+                document.getElementById('categoryFilter').value = '';
+                document.getElementById('regionSelect').value = '';
+                document.getElementById('platformFilter').value = '';
+                document.getElementById('playersFilter').value = '';
+                document.getElementById('minPrice').value = '';
+                document.getElementById('maxPrice').value = '';
+                document.getElementById('discountOnly').checked = false;
+                document.getElementById('psPlusOnly').checked = false;
+                document.getElementById('eaAccessOnly').checked = false;
+
+                // Закрываем фильтры
+                filtersDropdown.classList.remove('show');
+                filterToggleBtn.classList.remove('active');
+            });
+        }
+
+        if (applyFiltersBtn) {
+            applyFiltersBtn.addEventListener('click', function () {
+                // Собираем фильтры
+                const filters = {
+                    category: document.getElementById('categoryFilter').value,
+                    region: document.getElementById('regionSelect').value,
+                    platform: document.getElementById('platformFilter').value,
+                    players: document.getElementById('playersFilter').value,
+                    minPrice: document.getElementById('minPrice').value,
+                    maxPrice: document.getElementById('maxPrice').value,
+                    discountOnly: document.getElementById('discountOnly').checked,
+                    psPlusOnly: document.getElementById('psPlusOnly').checked,
+                    eaAccessOnly: document.getElementById('eaAccessOnly').checked
+                };
+
+                // Сохраняем в sessionStorage
+                sessionStorage.setItem('globalFilters', JSON.stringify(filters));
+
+                // Получаем поисковый запрос
+                const searchInput = document.getElementById('globalSearchInput');
+                const searchQuery = searchInput ? searchInput.value.trim() : '';
+
+                if (searchQuery) {
+                    sessionStorage.setItem('globalSearchQuery', searchQuery);
+                }
+
+                // Переходим на главную
+                window.location.href = '/webapp';
+            });
+        }
+
+        // Загружаем категории
+        loadCategories();
+
+        async function loadCategories() {
+            try {
+                const response = await fetch('/api/products/categories/list');
+                if (response.ok) {
+                    const categories = await response.json();
+                    const categorySelect = document.getElementById('categoryFilter');
+                    if (categorySelect) {
+                        categories.forEach(category => {
+                            const option = document.createElement('option');
+                            option.value = category;
+                            option.textContent = category;
+                            categorySelect.appendChild(option);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading categories:', error);
+            }
+        }
+    });
+</script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Favorites Header */
+    .favorites-header {
+        text-align: center;
+        margin-bottom: var(--spacing-xl);
+        padding: var(--spacing-lg);
+        background: var(--tg-theme-bg-color);
+        border-radius: var(--border-radius-lg);
+        box-shadow: var(--shadow-sm);
+        border: 1px solid rgba(0, 0, 0, 0.05);
+    }
+
+    .favorites-header h2 {
+        color: var(--tg-theme-text-color);
+        margin-bottom: var(--spacing-sm);
+        font-size: 1.75rem;
+        font-weight: 700;
+    }
+
+    .favorites-header p {
+        color: var(--tg-theme-hint-color);
+        margin: 0;
+        font-size: 1rem;
+    }
+
+    /* Product Actions */
+    .product-actions {
+        margin-top: var(--spacing-md);
+        display: flex;
+        gap: var(--spacing-sm);
+    }
+
+    .remove-btn {
+        font-size: 0.875rem;
+        padding: var(--spacing-xs) var(--spacing-sm);
+        border-color: var(--danger-color);
+        color: var(--danger-color);
+        transition: all 0.2s ease;
+    }
+
+    .remove-btn:hover {
+        background: var(--danger-color);
+        color: white;
+        transform: translateY(-1px);
+    }
+
+    /* Modal Overlay */
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.6);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--spacing-lg);
+        padding-bottom: 100px;
+        /* Отступ снизу для нижнего меню */
+    }
+
+    /* Modal Content */
+    .modal-content {
+        background: var(--tg-theme-bg-color);
+        border-radius: var(--border-radius-lg);
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        max-width: 400px;
+        width: 100%;
+        max-height: calc(100vh - 200px);
+        /* Ограничение высоты с учетом отступов */
+        overflow-y: auto;
+        animation: modalSlideIn 0.3s ease-out;
+    }
+
+    .modal-header {
+        padding: var(--spacing-lg);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        color: var(--tg-theme-text-color);
+        font-size: 1.25rem;
+        font-weight: 600;
+    }
+
+    .modal-body {
+        padding: var(--spacing-lg);
+    }
+
+    .modal-body p {
+        color: var(--tg-theme-text-color);
+        margin: 0 0 var(--spacing-md) 0;
+        font-size: 1rem;
+        line-height: 1.5;
+    }
+
+    /* Modal Actions */
+    .modal-actions {
+        display: flex;
+        gap: var(--spacing-md);
+        justify-content: flex-end;
+        margin-top: var(--spacing-lg);
+    }
+
+    .modal-actions .btn {
+        min-width: 100px;
+    }
+
+    /* Modal Animation */
+    @keyframes modalSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px) scale(0.95);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+    }
+
+    /* Empty State Enhancement */
+    .empty-state {
+        padding: var(--spacing-xl) var(--spacing-lg);
+        text-align: center;
+    }
+
+    .empty-state i {
+        font-size: 4rem;
+        color: var(--tg-theme-hint-color);
+        margin-bottom: var(--spacing-lg);
+        opacity: 0.5;
+    }
+
+    .empty-state h3 {
+        color: var(--tg-theme-text-color);
+        margin-bottom: var(--spacing-md);
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+
+    .empty-state p {
+        color: var(--tg-theme-hint-color);
+        margin-bottom: var(--spacing-xl);
+        font-size: 1.1rem;
+        line-height: 1.5;
+    }
+
+    .empty-state .btn {
+        padding: var(--spacing-md) var(--spacing-xl);
+        font-size: 1.1rem;
+        font-weight: 600;
+    }
+
+    /* Responsive adjustments */
+    @media (max-width: 480px) {
+        .favorites-header {
+            padding: var(--spacing-md);
+        }
+
+        .favorites-header h2 {
+            font-size: 1.5rem;
+        }
+
+        .product-actions {
+            flex-direction: column;
+        }
+
+        /* Модальное окно на мобильных */
+        .modal-overlay {
+            padding: var(--spacing-md);
+            padding-bottom: 120px;
+            /* Увеличенный отступ снизу для мобильных */
+            align-items: flex-start;
+            /* Выравниваем по верху для лучшей видимости */
+            padding-top: 80px;
+            /* Отступ сверху */
+        }
+
+        .modal-content {
+            max-height: calc(100vh - 220px);
+            /* Ограничение высоты для мобильных */
+        }
+
+        .modal-actions {
+            flex-direction: column;
+            gap: var(--spacing-sm);
+        }
+
+        .modal-actions .btn {
+            min-width: auto;
+            width: 100%;
+        }
+    }
+
+    /* Animation for removed items */
+    .product-card.removing {
+        animation: fadeOutScale 0.3s ease-out forwards;
+    }
+
+    @keyframes fadeOutScale {
+        from {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        to {
+            opacity: 0;
+            transform: scale(0.8);
+        }
+    }
+</style>
+{% endblock %}

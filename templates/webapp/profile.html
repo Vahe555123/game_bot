@@ -1,0 +1,2004 @@
+{% extends "base.html" %}
+
+{% block title %}PlayStation Store - Профиль{% endblock %}
+
+{% block header_actions %}
+<div class="header-search">
+    <input type="text" class="header-search-input" id="globalSearchInput" placeholder="Поиск игр...">
+    <button class="header-filter-btn" id="filterToggleBtn">
+        <i class="fas fa-filter"></i>
+    </button>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filters Section -->
+<div class="search-section fade-in"
+    style="padding: 0; background: transparent; box-shadow: none; border: none; margin-bottom: 0;">
+    <div style="display: none;"></div>
+
+    <!-- Filters Dropdown -->
+    <div class="filters-dropdown" id="filtersDropdown">
+        <div class="filter-row">
+            <select class="filter-select" id="categoryFilter">
+                <option value="">Все категории</option>
+            </select>
+            <select class="filter-select" id="regionSelect">
+                <option value="">Все регионы</option>
+                <option value="en-ua">🇺🇦 Украина</option>
+                <option value="en-tr">🇹🇷 Турция</option>
+                <option value="en-in">🇮🇳 Индия</option>
+            </select>
+        </div>
+
+        <div class="filter-row">
+            <select class="filter-select" id="platformFilter">
+                <option value="">Все платформы</option>
+                <option value="PS4">🎮 Только PS4</option>
+                <option value="PS5">🎮 Только PS5</option>
+                <option value="BOTH">🎮 PS4 и PS5</option>
+            </select>
+            <select class="filter-select" id="playersFilter">
+                <option value="">Количество игроков</option>
+                <option value="singleplayer">👤 Одиночная игра</option>
+                <option value="coop">🤝 Кооператив</option>
+            </select>
+        </div>
+
+        <div class="price-range-row">
+            <input type="number" class="form-control" id="minPrice" placeholder="Мин. цена">
+            <input type="number" class="form-control" id="maxPrice" placeholder="Макс. цена">
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="discountOnly">
+            <label for="discountOnly" class="checkbox-label">Только со скидкой</label>
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="psPlusOnly">
+            <label for="psPlusOnly" class="checkbox-label">Доступно в PS Plus</label>
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="eaAccessOnly">
+            <label for="eaAccessOnly" class="checkbox-label">Доступно в EA Access</label>
+        </div>
+
+        <div class="filter-actions">
+            <button class="btn btn-secondary" id="clearFiltersBtn">
+                <i class="fas fa-times"></i>
+                Очистить
+            </button>
+            <button class="btn btn-primary" id="applyFiltersBtn">
+                <i class="fas fa-check"></i>
+                Применить
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Profile Header -->
+<div class="profile-section fade-in">
+    <div class="profile-avatar" id="profileAvatar">
+        <i class="fas fa-user"></i>
+    </div>
+    <h2 class="profile-name" id="profileName">Загрузка...</h2>
+    <p class="profile-username" id="profileUsername">@username</p>
+
+    <div class="stats-grid">
+        <div class="stat-item">
+            <span class="stat-number" id="favoritesCount">0</span>
+            <span class="stat-label">Избранное</span>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Section -->
+<div class="settings-section fade-in">
+
+    <div class="settings-item" onclick="window.location.href='/webapp/favorites'">
+        <div class="settings-item-left">
+            <i class="fas fa-heart settings-icon"></i>
+            <span class="settings-label">Мои избранные</span>
+        </div>
+        <i class="fas fa-chevron-right"></i>
+    </div>
+
+    <div class="settings-item" id="regionSettings">
+        <div class="settings-item-left">
+            <i class="fas fa-globe-americas settings-icon"></i>
+            <span class="settings-label">Регионы цен</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="enabledRegionsCount">Турция</span>
+            <i class="fas fa-chevron-right"></i>
+        </div>
+    </div>
+
+    <div class="settings-item" id="psnSettings">
+        <div class="settings-item-left">
+            <i class="fab fa-playstation settings-icon"></i>
+            <span class="settings-label">PSN Аккаунт</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="psnStatus">Не настроен</span>
+            <i class="fas fa-chevron-right"></i>
+        </div>
+    </div>
+
+    <div class="settings-item" id="paymentEmailSettings">
+        <div class="settings-item-left">
+            <i class="fas fa-envelope settings-icon"></i>
+            <span class="settings-label">Email для покупки</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="paymentEmailStatus">Не указан</span>
+            <i class="fas fa-chevron-right"></i>
+        </div>
+    </div>
+
+    <div class="settings-item" id="themeSettings">
+        <div class="settings-item-left">
+            <i class="fas fa-palette settings-icon"></i>
+            <span class="settings-label">Тема</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="currentTheme">Авто</span>
+            <i class="fas fa-chevron-right"></i>
+        </div>
+    </div>
+
+    <div class="settings-item" id="languageSettings">
+        <div class="settings-item-left">
+            <i class="fas fa-language settings-icon"></i>
+            <span class="settings-label">Язык</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span id="currentLanguage">Русский</span>
+            <i class="fas fa-chevron-right"></i>
+        </div>
+    </div>
+
+    <div class="settings-item" onclick="showAbout()">
+        <div class="settings-item-left">
+            <i class="fas fa-info-circle settings-icon"></i>
+            <span class="settings-label">О приложении</span>
+        </div>
+        <i class="fas fa-chevron-right"></i>
+    </div>
+
+    <!-- Admin access (only visible for admins) -->
+    <div class="settings-item" id="adminAccess" style="display: none;" onclick="openAdminPanel()">
+        <div class="settings-item-left">
+            <i class="fas fa-tools settings-icon"></i>
+            <span class="settings-label">Админ-панель</span>
+        </div>
+        <i class="fas fa-chevron-right"></i>
+    </div>
+</div>
+
+<!-- Actions Section -->
+<div class="settings-section fade-in">
+    <div class="settings-item" id="shareApp">
+        <div class="settings-item-left">
+            <i class="fas fa-share-alt settings-icon"></i>
+            <span class="settings-label">Поделиться приложением</span>
+        </div>
+        <i class="fas fa-external-link-alt"></i>
+    </div>
+
+    <div class="settings-item" id="contactSupport">
+        <div class="settings-item-left">
+            <i class="fas fa-headset settings-icon"></i>
+            <span class="settings-label">Поддержка</span>
+        </div>
+        <i class="fas fa-external-link-alt"></i>
+    </div>
+</div>
+
+<!-- Region Settings Modal -->
+<div class="modal-overlay region-settings-modal" id="regionModal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Настройки регионов</h3>
+            <button class="modal-close" onclick="closeRegionModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="region-option" data-region="ukraine">
+                <div class="region-info">
+                    <span class="region-flag-large">🇺🇦</span>
+                    <div class="region-details">
+                        <span class="region-name-large">Украина</span>
+                        <span class="region-currency">Гривна (₴)</span>
+                    </div>
+                </div>
+                <div class="region-toggle" data-region="ukraine"></div>
+            </div>
+            <div class="region-option" data-region="turkey">
+                <div class="region-info">
+                    <span class="region-flag-large">🇹🇷</span>
+                    <div class="region-details">
+                        <span class="region-name-large">Турция</span>
+                        <span class="region-currency">Лира (₺)</span>
+                    </div>
+                </div>
+                <div class="region-toggle active" data-region="turkey"></div>
+            </div>
+            <div class="region-option" data-region="india">
+                <div class="region-info">
+                    <span class="region-flag-large">🇮🇳</span>
+                    <div class="region-details">
+                        <span class="region-name-large">Индия</span>
+                        <span class="region-currency">Рупия (₹)</span>
+                    </div>
+                </div>
+                <div class="region-toggle" data-region="india"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- PSN Settings Modal -->
+<div class="modal-overlay" id="psnModal" style="display: none;">
+    <div class="modal-content psn-modal-wide">
+        <div class="modal-header">
+            <h3>Настройки PSN Аккаунта</h3>
+            <button class="modal-close" onclick="closePsnModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <!-- Region Tabs -->
+            <div class="psn-region-tabs">
+                <button class="psn-region-tab active" data-region="UA" onclick="selectPsnRegion('UA')">
+                    <span class="region-flag">🇺🇦</span>
+                    <span class="region-name">Украина</span>
+                    <span class="region-status" id="psnStatusUA"></span>
+                </button>
+                <button class="psn-region-tab" data-region="TR" onclick="selectPsnRegion('TR')">
+                    <span class="region-flag">🇹🇷</span>
+                    <span class="region-name">Турция</span>
+                    <span class="region-status" id="psnStatusTR"></span>
+                </button>
+            </div>
+
+            <div class="psn-region-info">
+                <i class="fas fa-info-circle"></i>
+                <span id="psnRegionHint">Введите данные PSN аккаунта для Украины</span>
+            </div>
+
+            <form id="psnForm" class="psn-form">
+                <input type="hidden" id="psnRegion" name="region" value="UA">
+
+                <div class="form-group">
+                    <label for="platform">Платформа</label>
+                    <select id="platform" name="platform" class="form-control">
+                        <option value="">Выберите платформу</option>
+                        <option value="PS4">PlayStation 4</option>
+                        <option value="PS5">PlayStation 5</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="psnEmail">PSN Email</label>
+                    <input type="email" id="psnEmail" name="psnEmail" class="form-control"
+                        placeholder="Введите email для PSN аккаунта">
+                </div>
+
+                <div class="form-group">
+                    <label for="psnPassword">PSN Пароль</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="psnPassword" name="psnPassword" class="form-control"
+                            placeholder="Введите пароль PSN аккаунта">
+                        <button type="button" class="password-toggle" onclick="togglePasswordVisibility('psnPassword')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <small class="form-help">Пароль будет зашифрован и сохранен безопасно</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="psn2faCode">Резервный код 2FA <span class="optional-label">(опционально)</span></label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="psn2faCode" name="psn2faCode" class="form-control"
+                            placeholder="Введите резервный код двухфакторной аутентификации">
+                        <button type="button" class="password-toggle" onclick="togglePasswordVisibility('psn2faCode')">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <small class="form-help">Код будет зашифрован и сохранен безопасно</small>
+                    <a href="https://play-station.by/news/gde-najti-rezervnye-kody-playstation-5" target="_blank"
+                        class="twofa-help-link">
+                        <i class="fas fa-question-circle"></i> Где посмотреть резервные коды
+                    </a>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closePsnModal()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Payment Email Modal -->
+<div class="modal-overlay" id="paymentEmailModal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Email для покупки</h3>
+            <button class="modal-close" onclick="closePaymentEmailModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="payment-email-info">
+                <i class="fas fa-info-circle"></i>
+                <span>Этот email будет автоматически заполняться на странице оплаты для всех регионов (Турция, Индия,
+                    Украина)</span>
+            </div>
+
+            <form id="paymentEmailForm" class="psn-form">
+                <div class="form-group">
+                    <label for="paymentEmailInput">Email для привязки покупки</label>
+                    <input type="email" id="paymentEmailInput" name="paymentEmail" class="form-control"
+                        placeholder="Введите email для оплаты">
+                    <small class="form-help">К этому email будет привязана покупка на oplata.info</small>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closePaymentEmailModal()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- About Modal -->
+<div class="modal-overlay" id="aboutModal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>О приложении</h3>
+            <button class="modal-close" onclick="closeAboutModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="about-info">
+                <div class="about-logo">
+                    <i class="fab fa-playstation" style="font-size: 3rem; color: var(--primary-color);"></i>
+                </div>
+                <h4>PlayStation Store</h4>
+                <p>Версия 1.0.0</p>
+                <p class="about-description">
+                    Удобное приложение для просмотра игр PlayStation Store с возможностью поиска,
+                    фильтрации и добавления в избранное.
+                </p>
+                <div class="about-features">
+                    <h5>Возможности:</h5>
+                    <ul>
+                        <li>Поиск по названию игр</li>
+                        <li>Фильтрация по категориям и цене</li>
+                        <li>Добавление в избранное</li>
+                        <li>Поддержка трех валют (UAH/TRL/INR)</li>
+                        <li>Настройки региональных цен</li>
+                        <li>Адаптивный дизайн</li>
+                    </ul>
+                </div>
+            </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Modal Styles */
+    /* Hide global back button on this top-level page */
+    #backButton {
+        display: none !important;
+    }
+
+    .settings-section:last-of-type {
+        margin-bottom: 220px !important;
+    }
+
+    #contactSupport {
+        scroll-margin-bottom: 220px;
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr;
+        justify-items: center;
+    }
+
+    .stats-grid .stat-item {
+        width: 100%;
+        max-width: 220px;
+    }
+
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        backdrop-filter: blur(5px);
+    }
+
+    .modal-content {
+        background: var(--tg-theme-bg-color);
+        border-radius: var(--border-radius-lg);
+        max-width: 400px;
+        width: 90%;
+        max-height: 80vh;
+        overflow: hidden;
+        box-shadow: var(--shadow-lg);
+        animation: modalSlideIn 0.3s ease-out;
+    }
+
+    .modal-content.psn-modal-wide {
+        max-width: 600px;
+        width: 95%;
+    }
+
+    .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-lg);
+        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .modal-header h3 {
+        margin: 0;
+        color: var(--tg-theme-text-color);
+        font-size: 1.25rem;
+        font-weight: 600;
+    }
+
+    .modal-close {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: var(--tg-theme-secondary-bg-color);
+        border: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--tg-theme-text-color);
+        cursor: pointer;
+        transition: all 0.2s ease;
+    }
+
+    .modal-close:hover {
+        background: var(--tg-theme-hint-color);
+        transform: scale(1.1);
+    }
+
+    .modal-body {
+        padding: var(--spacing-lg);
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+
+    /* Currency Selection */
+    .currency-option {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--spacing-lg);
+        border-radius: var(--border-radius-md);
+        cursor: pointer;
+        transition: all 0.2s ease;
+        margin-bottom: var(--spacing-sm);
+    }
+
+    .currency-option:hover {
+        background: var(--tg-theme-secondary-bg-color);
+    }
+
+    .currency-option.selected {
+        background: rgba(36, 129, 204, 0.1);
+        border: 2px solid var(--tg-theme-button-color);
+    }
+
+    .currency-info {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-md);
+    }
+
+    .currency-symbol {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: var(--tg-theme-button-color);
+        width: 40px;
+        text-align: center;
+    }
+
+    .currency-name {
+        font-weight: 500;
+        color: var(--tg-theme-text-color);
+    }
+
+    .currency-check {
+        color: var(--success-color);
+        font-size: 1.25rem;
+    }
+
+    /* About Section */
+    .about-info {
+        text-align: center;
+    }
+
+    .about-logo {
+        margin-bottom: var(--spacing-lg);
+    }
+
+    .about-info h4 {
+        margin: var(--spacing-md) 0;
+        color: var(--tg-theme-text-color);
+        font-size: 1.5rem;
+    }
+
+    .about-info p {
+        margin: var(--spacing-sm) 0;
+        color: var(--tg-theme-hint-color);
+    }
+
+    .about-description {
+        line-height: 1.6;
+        margin: var(--spacing-lg) 0;
+    }
+
+    .about-features {
+        text-align: left;
+        margin-top: var(--spacing-xl);
+    }
+
+    .about-features h5 {
+        color: var(--tg-theme-text-color);
+        margin-bottom: var(--spacing-md);
+        font-size: 1.1rem;
+    }
+
+    .about-features ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    .about-features li {
+        padding: var(--spacing-sm) 0;
+        color: var(--tg-theme-text-color);
+        position: relative;
+        padding-left: var(--spacing-lg);
+    }
+
+    .about-features li::before {
+        content: '✓';
+        position: absolute;
+        left: 0;
+        color: var(--success-color);
+        font-weight: bold;
+    }
+
+    /* Animations */
+    @keyframes modalSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-50px) scale(0.9);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+    }
+
+    /* PSN Region Tabs */
+    .psn-region-tabs {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: var(--spacing-md);
+    }
+
+    .psn-region-tab {
+        flex: 1;
+        background: var(--tg-theme-secondary-bg-color);
+        border-radius: var(--border-radius-md);
+        padding: var(--spacing-sm) var(--spacing-md);
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        border: 2px solid transparent;
+        transition: all 0.2s ease;
+        font-weight: 600;
+        color: var(--tg-theme-text-color);
+        justify-content: center;
+        position: relative;
+    }
+
+    .psn-region-tab:hover:not(.active) {
+        background: var(--tg-theme-hint-color);
+        opacity: 0.8;
+    }
+
+    .psn-region-tab.active {
+        border-color: var(--tg-theme-button-color);
+        background: var(--tg-theme-button-color);
+        color: var(--tg-theme-button-text-color);
+    }
+
+    .psn-region-tab .region-flag {
+        font-size: 1.5rem;
+    }
+
+    .psn-region-tab .region-status {
+        position: absolute;
+        top: 4px;
+        right: 8px;
+        font-size: 0.85rem;
+        font-weight: 700;
+    }
+
+    /* PSN Region Info */
+    .psn-region-info {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: var(--spacing-md);
+        color: var(--tg-theme-hint-color);
+        font-size: 0.9rem;
+    }
+
+    /* Payment Email Info */
+    .payment-email-info {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        margin-bottom: var(--spacing-lg);
+        padding: var(--spacing-md);
+        background: rgba(36, 129, 204, 0.1);
+        border-radius: var(--border-radius-md);
+        color: var(--tg-theme-text-color);
+        font-size: 0.9rem;
+        line-height: 1.4;
+    }
+
+    .payment-email-info i {
+        color: var(--tg-theme-button-color);
+        margin-top: 2px;
+        flex-shrink: 0;
+    }
+
+    /* PSN Form Styles */
+    .psn-form {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-lg);
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+
+    .form-group label {
+        font-weight: 600;
+        color: var(--tg-theme-text-color);
+        font-size: 0.95rem;
+    }
+
+    .form-control {
+        padding: var(--spacing-md);
+        border: 1px solid rgba(0, 0, 0, 0.1);
+        border-radius: var(--border-radius-md);
+        background: var(--tg-theme-secondary-bg-color);
+        color: var(--tg-theme-text-color);
+        font-size: 1rem;
+        transition: border-color 0.2s ease;
+    }
+
+    .form-control:focus {
+        outline: none;
+        border-color: var(--tg-theme-button-color);
+        box-shadow: 0 0 0 2px rgba(36, 129, 204, 0.1);
+    }
+
+    .password-input-wrapper {
+        position: relative;
+    }
+
+    .password-toggle {
+        position: absolute;
+        right: var(--spacing-md);
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        color: var(--tg-theme-hint-color);
+        cursor: pointer;
+        padding: var(--spacing-sm);
+        border-radius: 50%;
+        transition: all 0.2s ease;
+    }
+
+    .password-toggle:hover {
+        background: rgba(0, 0, 0, 0.1);
+        color: var(--tg-theme-text-color);
+    }
+
+    .form-help {
+        color: var(--tg-theme-hint-color);
+        font-size: 0.85rem;
+        margin-top: var(--spacing-xs);
+    }
+
+    .optional-label {
+        color: var(--tg-theme-hint-color);
+        font-weight: 400;
+        font-size: 0.85rem;
+    }
+
+    .twofa-help-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        color: var(--tg-theme-button-color);
+        text-decoration: none;
+        font-size: 0.85rem;
+        margin-top: var(--spacing-xs);
+        transition: opacity 0.2s ease;
+    }
+
+    .twofa-help-link:hover {
+        opacity: 0.8;
+        text-decoration: underline;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: var(--spacing-md);
+        justify-content: flex-end;
+        padding-top: var(--spacing-lg);
+        border-top: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .btn {
+        padding: var(--spacing-md) var(--spacing-lg);
+        border: none;
+        border-radius: var(--border-radius-md);
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        min-width: 100px;
+    }
+
+    .btn-primary {
+        background: var(--tg-theme-button-color);
+        color: var(--tg-theme-button-text-color);
+    }
+
+    .btn-primary:hover {
+        background: var(--primary-hover-color);
+        transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+        background: var(--tg-theme-secondary-bg-color);
+        color: var(--tg-theme-text-color);
+        border: 1px solid rgba(0, 0, 0, 0.1);
+    }
+
+    .btn-secondary:hover {
+        background: var(--tg-theme-hint-color);
+        color: var(--tg-theme-bg-color);
+    }
+
+    /* Responsive */
+    @media (max-width: 480px) {
+        .modal-content {
+            width: 95%;
+            margin: var(--spacing-md);
+        }
+
+        .psn-modal-wide {
+            max-width: 100%;
+            width: 100%;
+        }
+
+        .stats-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .form-actions {
+            flex-direction: column;
+        }
+
+        .btn {
+            width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Глобальный обработчик фильтров для страниц, отличных от главной
+    document.addEventListener('DOMContentLoaded', function () {
+        const filterToggleBtn = document.getElementById('filterToggleBtn');
+        const filtersDropdown = document.getElementById('filtersDropdown');
+        const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+        const applyFiltersBtn = document.getElementById('applyFiltersBtn');
+
+        if (filterToggleBtn && filtersDropdown) {
+            // Переключение фильтров
+            filterToggleBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                e.preventDefault();
+                filtersDropdown.classList.toggle('show');
+                filterToggleBtn.classList.toggle('active');
+                filterToggleBtn.blur();
+            });
+
+            // Закрытие фильтров при клике вне
+            document.addEventListener('click', function (e) {
+                if (!filtersDropdown.contains(e.target) && !filterToggleBtn.contains(e.target)) {
+                    filtersDropdown.classList.remove('show');
+                    filterToggleBtn.classList.remove('active');
+                }
+            });
+        }
+
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', function () {
+                // Очищаем все фильтры
+                document.getElementById('categoryFilter').value = '';
+                document.getElementById('regionSelect').value = '';
+                document.getElementById('platformFilter').value = '';
+                document.getElementById('playersFilter').value = '';
+                document.getElementById('minPrice').value = '';
+                document.getElementById('maxPrice').value = '';
+                document.getElementById('discountOnly').checked = false;
+                document.getElementById('psPlusOnly').checked = false;
+                document.getElementById('eaAccessOnly').checked = false;
+
+                // Закрываем фильтры
+                filtersDropdown.classList.remove('show');
+                filterToggleBtn.classList.remove('active');
+            });
+        }
+
+        if (applyFiltersBtn) {
+            applyFiltersBtn.addEventListener('click', function () {
+                // Собираем фильтры
+                const filters = {
+                    category: document.getElementById('categoryFilter').value,
+                    region: document.getElementById('regionSelect').value,
+                    platform: document.getElementById('platformFilter').value,
+                    players: document.getElementById('playersFilter').value,
+                    minPrice: document.getElementById('minPrice').value,
+                    maxPrice: document.getElementById('maxPrice').value,
+                    discountOnly: document.getElementById('discountOnly').checked,
+                    psPlusOnly: document.getElementById('psPlusOnly').checked,
+                    eaAccessOnly: document.getElementById('eaAccessOnly').checked
+                };
+
+                // Сохраняем в sessionStorage
+                sessionStorage.setItem('globalFilters', JSON.stringify(filters));
+
+                // Получаем поисковый запрос
+                const searchInput = document.getElementById('globalSearchInput');
+                const searchQuery = searchInput ? searchInput.value.trim() : '';
+
+                if (searchQuery) {
+                    sessionStorage.setItem('globalSearchQuery', searchQuery);
+                }
+
+                // Переходим на главную
+                window.location.href = '/webapp';
+            });
+        }
+
+        // Загружаем категории
+        loadCategoriesForFilter();
+
+        async function loadCategoriesForFilter() {
+            try {
+                const response = await fetch('/api/products/categories/list');
+                if (response.ok) {
+                    const categories = await response.json();
+                    const categorySelect = document.getElementById('categoryFilter');
+                    if (categorySelect) {
+                        categories.forEach(category => {
+                            const option = document.createElement('option');
+                            option.value = category;
+                            option.textContent = category;
+                            categorySelect.appendChild(option);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading categories:', error);
+            }
+        }
+    });
+</script>
+
+<script>
+    class ProfileManager {
+        constructor() {
+            this.tgApp = window.tgApp; // Use global instance
+            this.api = window.apiClient; // Use global instance
+            this.currentCurrency = localStorage.getItem('currency') || 'UAH';
+            this.regionSettings = null;
+            this.psnSettings = null;
+            this.currentPsnRegion = 'UA'; // Default PSN region for modal
+            this.init();
+        }
+
+        async init() {
+            // Wait for Telegram WebApp to be ready
+            await this.waitForTelegramReady();
+
+            // Load user profile with retry
+            await this.loadUserProfileWithRetry();
+
+            // Принудительно обновляем профиль еще раз через 500мс
+            setTimeout(() => {
+                this.forceUpdateProfile();
+            }, 500);
+
+            this.loadUserStats();
+            this.setupEventListeners();
+            this.updateCurrencyDisplay();
+
+            // Принудительно загружаем настройки региона с задержкой
+            setTimeout(() => {
+                this.loadRegionSettings();
+                this.loadPsnSettings();
+                this.loadPaymentEmail();
+                this.checkAdminAccess();
+            }, 1000);
+
+            // Enable back button
+            this.tgApp.showBackButton(() => {
+                window.location.href = '/webapp';
+            });
+        }
+
+        async loadUserProfileWithRetry() {
+            // Try multiple times to load user profile
+            for (let attempt = 1; attempt <= 5; attempt++) {
+                if (this.tgApp.user && this.tgApp.getUserId()) {
+                    this.loadUserProfile();
+                    return;
+                }
+                await new Promise(resolve => setTimeout(resolve, 200));
+            }
+
+            // Show error state
+            document.getElementById('profileName').textContent = 'Ошибка загрузки';
+            document.getElementById('profileUsername').textContent = 'Нет данных Telegram';
+        }
+
+        async waitForTelegramReady() {
+            // Wait up to 3 seconds for Telegram WebApp to initialize
+            const maxWait = 3000;
+            const checkInterval = 100;
+            let waited = 0;
+
+            while (waited < maxWait) {
+                if (this.tgApp && this.tgApp.isInitialized) {
+                    return;
+                }
+                await new Promise(resolve => setTimeout(resolve, checkInterval));
+                waited += checkInterval;
+            }
+        }
+
+        forceUpdateProfile() {
+            const user = this.tgApp?.user;
+
+            if (user && user.id) {
+                // Update profile avatar with first letter of name
+                const profileAvatar = document.getElementById('profileAvatar');
+                const firstName = user.first_name || user.username || 'U';
+                profileAvatar.innerHTML = firstName.charAt(0).toUpperCase();
+
+                // Update profile name
+                const profileName = document.getElementById('profileName');
+                const fullName = this.tgApp.getUserFullName();
+                profileName.textContent = fullName;
+
+                // Update username
+                const profileUsername = document.getElementById('profileUsername');
+                const username = user.username ? `@${user.username}` : 'Пользователь Telegram';
+                profileUsername.textContent = username;
+            } else {
+                // Показываем ошибку
+                document.getElementById('profileName').textContent = 'Ошибка загрузки';
+                document.getElementById('profileUsername').textContent = 'Нет данных Telegram';
+            }
+        }
+
+        setupEventListeners() {
+            console.log('Setting up event listeners...');
+
+            // Currency settings
+            const currencySettings = document.getElementById('currencySettings');
+            if (currencySettings) {
+                currencySettings.addEventListener('click', () => {
+                    this.tgApp.hapticFeedback('impact', 'light');
+                    this.showCurrencyModal();
+                });
+                console.log('Currency settings listener added');
+            }
+
+            // Region settings
+            const regionSettings = document.getElementById('regionSettings');
+            if (regionSettings) {
+                regionSettings.addEventListener('click', () => {
+                    this.tgApp.hapticFeedback('impact', 'light');
+                    this.showRegionModal();
+                });
+                console.log('Region settings listener added');
+            }
+
+            // PSN settings
+            const psnSettings = document.getElementById('psnSettings');
+            if (psnSettings) {
+                psnSettings.addEventListener('click', () => {
+                    this.tgApp.hapticFeedback('impact', 'light');
+                    this.showPsnModal();
+                });
+                console.log('PSN settings listener added');
+            }
+
+            // Payment Email settings
+            const paymentEmailSettings = document.getElementById('paymentEmailSettings');
+            if (paymentEmailSettings) {
+                paymentEmailSettings.addEventListener('click', () => {
+                    this.tgApp.hapticFeedback('impact', 'light');
+                    this.showPaymentEmailModal();
+                });
+                console.log('Payment email settings listener added');
+            }
+
+            // Share app
+            document.getElementById('shareApp').addEventListener('click', () => {
+                this.tgApp.hapticFeedback('impact', 'light');
+                this.shareApp();
+            });
+
+            // Contact support
+            document.getElementById('contactSupport').addEventListener('click', () => {
+                this.tgApp.hapticFeedback('impact', 'light');
+                this.contactSupport();
+            });
+
+            // Currency options
+            document.querySelectorAll('.currency-option').forEach(option => {
+                option.addEventListener('click', () => {
+                    const currency = option.dataset.currency;
+                    this.selectCurrency(currency);
+                });
+            });
+
+            // Region toggles
+            const regionToggles = document.querySelectorAll('.region-toggle');
+            console.log('Found region toggles:', regionToggles.length);
+
+            regionToggles.forEach((toggle, index) => {
+                console.log(`Toggle ${index}:`, toggle.dataset.region);
+                toggle.addEventListener('click', (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const region = toggle.dataset.region;
+                    console.log('Region toggle clicked:', region);
+                    this.toggleRegion(region);
+                });
+            });
+
+            console.log('All event listeners set up');
+        }
+
+        loadUserProfile() {
+            const user = this.tgApp?.user;
+
+            if (user && user.id) {
+                // Update profile avatar with first letter of name
+                const profileAvatar = document.getElementById('profileAvatar');
+                const firstName = user.first_name || user.username || 'U';
+                profileAvatar.innerHTML = firstName.charAt(0).toUpperCase();
+
+                // Update profile name
+                const profileName = document.getElementById('profileName');
+                const fullName = this.tgApp.getUserFullName();
+                profileName.textContent = fullName;
+
+                // Update username
+                const profileUsername = document.getElementById('profileUsername');
+                const username = user.username ? `@${user.username}` : 'Пользователь Telegram';
+                profileUsername.textContent = username;
+            } else {
+                // Показываем ошибку
+                document.getElementById('profileName').textContent = 'Ошибка загрузки';
+                document.getElementById('profileUsername').textContent = 'Нет данных Telegram';
+            }
+        }
+
+        async loadUserStats() {
+            try {
+                // Load favorites count
+                const userId = this.tgApp.getUserId();
+                if (userId) {
+                    const favorites = await this.api.get(`/users/${userId}/favorites/`);
+                    document.getElementById('favoritesCount').textContent = favorites.length;
+                }
+            } catch (error) {
+                console.error('Error loading user stats:', error);
+            }
+        }
+
+        async loadRegionSettings() {
+            try {
+                const userId = this.tgApp.getUserId();
+                console.log('Loading region settings for user:', userId);
+
+                if (!userId) {
+                    console.warn('No user ID available, using default settings');
+                    this.setDefaultRegionSettings();
+                    return;
+                }
+
+                const settings = await this.api.get(`/users/${userId}/region-settings`);
+                console.log('Loaded region settings:', settings);
+                this.regionSettings = settings;
+
+                // Проверяем, что выбран хотя бы один регион (должен быть только один, но проверяем на всякий случай)
+                const enabledCount = Object.values(this.regionSettings).filter(Boolean).length;
+                if (enabledCount === 0) {
+                    // Если все регионы отключены, включаем дефолт Турцию
+                    console.log('No regions enabled, setting default Turkey');
+                    this.regionSettings.show_turkey_prices = true;
+                    // Сохраняем дефолт обратно в базу
+                    await this.saveRegionSettings();
+                } else if (enabledCount > 1) {
+                    // Если включено несколько регионов (старые данные), оставляем только первый найденный
+                    console.log('Multiple regions enabled, keeping only the first one');
+                    if (this.regionSettings.show_ukraine_prices) {
+                        this.regionSettings.show_turkey_prices = false;
+                        this.regionSettings.show_india_prices = false;
+                    } else if (this.regionSettings.show_turkey_prices) {
+                        this.regionSettings.show_ukraine_prices = false;
+                        this.regionSettings.show_india_prices = false;
+                    } else if (this.regionSettings.show_india_prices) {
+                        this.regionSettings.show_ukraine_prices = false;
+                        this.regionSettings.show_turkey_prices = false;
+                    }
+                    // Сохраняем исправленные настройки
+                    await this.saveRegionSettings();
+                }
+
+                this.updateRegionDisplay();
+
+            } catch (error) {
+                console.error('Error loading region settings:', error);
+                this.setDefaultRegionSettings();
+            }
+        }
+
+        async saveRegionSettings() {
+            try {
+                const userId = this.tgApp.getUserId();
+                if (userId) {
+                    console.log('Saving region settings to API:', this.regionSettings);
+                    await this.api.put(`/users/${userId}/region-settings`, this.regionSettings);
+                    console.log('Region settings saved successfully');
+                } else {
+                    console.warn('No user ID available, saving to localStorage');
+                    localStorage.setItem('regionSettings', JSON.stringify(this.regionSettings));
+                }
+            } catch (error) {
+                console.error('Error saving region settings:', error);
+                throw error;
+            }
+        }
+
+        setDefaultRegionSettings() {
+            // Default settings - по умолчанию включена только Турция
+            this.regionSettings = {
+                show_ukraine_prices: false,
+                show_turkey_prices: true,
+                show_india_prices: false
+            };
+            console.log('Set default region settings:', this.regionSettings);
+            this.updateRegionDisplay();
+        }
+
+        updateRegionDisplay() {
+            console.log('Updating region display with settings:', this.regionSettings);
+
+            // Показываем выбранный регион (можно выбрать только один)
+            const countElement = document.getElementById('enabledRegionsCount');
+            if (countElement) {
+                let regionLabel = 'Турция';
+                if (this.regionSettings?.show_ukraine_prices) {
+                    regionLabel = 'Украина';
+                } else if (this.regionSettings?.show_india_prices) {
+                    regionLabel = 'Индия';
+                } else if (this.regionSettings?.show_turkey_prices) {
+                    regionLabel = 'Турция';
+                }
+                countElement.textContent = regionLabel;
+                console.log('Updated enabled region label:', regionLabel);
+            }
+
+            // Update toggle states
+            const ukraineToggle = document.querySelector('.region-toggle[data-region="ukraine"]');
+            const turkeyToggle = document.querySelector('.region-toggle[data-region="turkey"]');
+            const indiaToggle = document.querySelector('.region-toggle[data-region="india"]');
+
+            console.log('Found toggles:', { ukraine: !!ukraineToggle, turkey: !!turkeyToggle, india: !!indiaToggle });
+
+            if (ukraineToggle) {
+                ukraineToggle.classList.toggle('active', this.regionSettings.show_ukraine_prices);
+                console.log('Ukraine toggle active:', this.regionSettings.show_ukraine_prices);
+            }
+            if (turkeyToggle) {
+                turkeyToggle.classList.toggle('active', this.regionSettings.show_turkey_prices);
+                console.log('Turkey toggle active:', this.regionSettings.show_turkey_prices);
+            }
+            if (indiaToggle) {
+                indiaToggle.classList.toggle('active', this.regionSettings.show_india_prices);
+                console.log('India toggle active:', this.regionSettings.show_india_prices);
+            }
+
+            console.log('Region display updated successfully');
+        }
+
+        showCurrencyModal() {
+            const modal = document.getElementById('currencyModal');
+            if (!modal) return;
+            modal.style.display = 'flex';
+
+            // Update selected currency
+            this.updateCurrencySelection();
+
+            // Add click outside to close
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.closeCurrencyModal();
+                }
+            });
+        }
+
+        closeCurrencyModal() {
+            const modal = document.getElementById('currencyModal');
+            if (!modal) return;
+            modal.style.display = 'none';
+        }
+
+        updateCurrencySelection() {
+            document.querySelectorAll('.currency-option').forEach(option => {
+                const currency = option.dataset.currency;
+                const checkIcon = option.querySelector('.currency-check');
+
+                if (currency === this.currentCurrency) {
+                    option.classList.add('selected');
+                    checkIcon.style.display = 'block';
+                } else {
+                    option.classList.remove('selected');
+                    checkIcon.style.display = 'none';
+                }
+            });
+        }
+
+        selectCurrency(currency) {
+            this.tgApp.hapticFeedback('selection');
+            this.currentCurrency = currency;
+            localStorage.setItem('currency', currency);
+            this.updateCurrencyDisplay();
+            this.updateCurrencySelection();
+
+            // Show success message
+            Utils.showToast(`Валюта изменена на ${currency}`, 'success');
+
+            // Close modal after a short delay
+            setTimeout(() => {
+                this.closeCurrencyModal();
+            }, 1000);
+        }
+
+        updateCurrencyDisplay() {
+            const el = document.getElementById('currentCurrency');
+            if (!el) return;
+            el.textContent = this.currentCurrency;
+        }
+
+        showRegionModal() {
+            console.log('Opening region modal...');
+            const modal = document.getElementById('regionModal');
+            if (!modal) {
+                console.error('Region modal not found!');
+                return;
+            }
+
+            console.log('Region modal found, displaying...');
+            modal.style.display = 'flex';
+
+            // Update region display before showing modal
+            this.updateRegionDisplay();
+
+            // Add click outside to close
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.closeRegionModal();
+                }
+            });
+
+            console.log('Region modal opened successfully');
+        }
+
+        closeRegionModal() {
+            const modal = document.getElementById('regionModal');
+            modal.style.display = 'none';
+        }
+
+        async toggleRegion(region) {
+            console.log('Toggling region:', region);
+            this.tgApp.hapticFeedback('selection');
+
+            const settingKey = `show_${region}_prices`;
+            const isCurrentlyActive = this.regionSettings[settingKey];
+
+            // Если кликаем на уже активный регион - отключаем его
+            // Если кликаем на неактивный - включаем его и отключаем все остальные
+            if (isCurrentlyActive) {
+                // Отключаем выбранный регион, включаем дефолт Турцию
+                this.regionSettings.show_ukraine_prices = false;
+                this.regionSettings.show_turkey_prices = true;
+                this.regionSettings.show_india_prices = false;
+            } else {
+                // Включаем выбранный регион, отключаем все остальные
+                this.regionSettings.show_ukraine_prices = false;
+                this.regionSettings.show_turkey_prices = false;
+                this.regionSettings.show_india_prices = false;
+
+                // Включаем выбранный регион
+                this.regionSettings[settingKey] = true;
+            }
+
+            console.log('Updated region settings:', this.regionSettings);
+
+            // Immediately update the display
+            this.updateRegionDisplay();
+
+            try {
+                await this.saveRegionSettings();
+
+                // Устанавливаем флаг, что регион был изменен, чтобы на главной странице очистить состояние поиска
+                sessionStorage.setItem('regionSettingsChanged', 'true');
+
+                Utils.showToast(`Настройки сохранены`, 'success');
+            } catch (error) {
+                console.error('Error saving region settings:', error);
+                Utils.showToast('Ошибка сохранения настроек', 'error');
+                // Перезагружаем настройки из API для восстановления состояния
+                await this.loadRegionSettings();
+            }
+        }
+
+        shareApp() {
+            const shareData = {
+                title: 'PlayStation Store WebApp',
+                text: 'Удобное приложение для просмотра игр PlayStation Store!',
+                url: window.location.origin + '/webapp'
+            };
+
+            if (navigator.share) {
+                navigator.share(shareData).catch(err => {
+                    console.log('Error sharing:', err);
+                    this.fallbackShare();
+                });
+            } else {
+                this.fallbackShare();
+            }
+        }
+
+        fallbackShare() {
+            const url = window.location.origin + '/webapp';
+            Utils.copyToClipboard(url).then(() => {
+                Utils.showToast('Ссылка скопирована в буфер обмена!', 'success');
+            }).catch(() => {
+                Utils.showToast('Ошибка при копировании ссылки', 'error');
+            });
+        }
+
+        contactSupport() {
+            const telegramSupport = {{ manager_telegram_url|tojson }};
+
+            if (!telegramSupport) {
+                Utils.showToast('Ссылка на менеджера не настроена. Заполните MANAGER_TELEGRAM_URL в .env.', 'error');
+                return;
+            }
+
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+                window.Telegram.WebApp.openTelegramLink(telegramSupport);
+                return;
+            }
+
+            window.open(telegramSupport, '_blank', 'noopener');
+        }
+
+        async loadPsnSettings() {
+            try {
+                const userId = this.tgApp.getUserId();
+                console.log('Loading PSN settings for user:', userId);
+
+                if (!userId) {
+                    console.warn('No user ID available for PSN settings');
+                    this.psnSettings = {};
+                    this.updatePsnDisplay(null);
+                    return;
+                }
+
+                // Загружаем региональные PSN аккаунты через новый API
+                const response = await this.api.get(`/users/${userId}/psn-accounts`);
+                console.log('Loaded PSN accounts:', response);
+
+                // Преобразуем массив аккаунтов в объект по регионам {UA: {...}, TR: {...}}
+                this.psnSettings = {};
+                if (response && response.accounts) {
+                    for (const account of response.accounts) {
+                        this.psnSettings[account.region] = {
+                            platform: account.platform,
+                            psn_email: account.psn_email,
+                            has_password: account.has_password,
+                            has_twofa: account.has_twofa
+                        };
+                    }
+                }
+                console.log('Processed PSN settings:', this.psnSettings);
+                this.updatePsnDisplay();
+
+            } catch (error) {
+                console.error('Error loading PSN settings:', error);
+                this.psnSettings = {};
+                this.updatePsnDisplay(null);
+            }
+        }
+
+        updatePsnDisplay(settings = null) {
+            const statusElement = document.getElementById('psnStatus');
+            if (!statusElement) return;
+
+            const data = settings || this.psnSettings || {};
+
+            // Подсчитываем количество настроенных регионов
+            const uaData = data['UA'] || {};
+            const trData = data['TR'] || {};
+            const configuredCount = [uaData, trData].filter(d => d.psn_email || d.has_password).length;
+
+            // Determine overall PSN status text
+            if (configuredCount > 0) {
+                statusElement.textContent = `${configuredCount}/2 регионов`;
+                statusElement.style.color = 'var(--success-color)';
+            } else {
+                statusElement.textContent = 'Не настроен';
+                statusElement.style.color = 'var(--tg-theme-hint-color)';
+            }
+
+            // Update per-region status indicators in modal if present
+            const statusUA = document.getElementById('psnStatusUA');
+            const statusTR = document.getElementById('psnStatusTR');
+            if (statusUA) {
+                if (uaData && (uaData.psn_email || uaData.has_password)) {
+                    statusUA.textContent = '✓';
+                    statusUA.style.color = 'var(--success-color)';
+                } else {
+                    statusUA.textContent = '';
+                }
+            }
+            if (statusTR) {
+                if (trData && (trData.psn_email || trData.has_password)) {
+                    statusTR.textContent = '✓';
+                    statusTR.style.color = 'var(--success-color)';
+                } else {
+                    statusTR.textContent = '';
+                }
+            }
+        }
+
+        showPsnModal() {
+            console.log('Opening PSN modal...');
+            const modal = document.getElementById('psnModal');
+            if (!modal) {
+                console.error('PSN modal not found!');
+                return;
+            }
+
+            // Загружаем текущие данные в форму для выбранного региона
+            this.currentPsnRegion = 'UA'; // default region tab
+            this.updatePsnRegionTabs();
+            this.loadPsnFormData();
+
+            modal.style.display = 'flex';
+
+            // Настраиваем обработчик формы
+            const form = document.getElementById('psnForm');
+            if (form) {
+                form.onsubmit = (e) => this.handlePsnFormSubmit(e);
+            }
+
+            // Add click outside to close
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.closePsnModal();
+                }
+            });
+
+            console.log('PSN modal opened successfully');
+        }
+
+        updatePsnRegionTabs() {
+            const tabs = document.querySelectorAll('.psn-region-tab');
+            tabs.forEach(tab => {
+                if (tab.dataset.region === this.currentPsnRegion) {
+                    tab.classList.add('active');
+                } else {
+                    tab.classList.remove('active');
+                }
+            });
+            const hint = document.getElementById('psnRegionHint');
+            if (hint) {
+                if (this.currentPsnRegion === 'UA') {
+                    hint.textContent = 'Введите данные PSN аккаунта для Украины';
+                } else if (this.currentPsnRegion === 'TR') {
+                    hint.textContent = 'Введите данные PSN аккаунта для Турции';
+                } else {
+                    hint.textContent = 'Введите данные PSN аккаунта';
+                }
+            }
+            // Update hidden input value
+            const regionInput = document.getElementById('psnRegion');
+            if (regionInput) {
+                regionInput.value = this.currentPsnRegion;
+            }
+        }
+
+        loadPsnFormData() {
+            if (!this.psnSettings) return;
+
+            const regionData = this.psnSettings[this.currentPsnRegion] || {};
+
+            const platformSelect = document.getElementById('platform');
+            const emailInput = document.getElementById('psnEmail');
+            const passwordInput = document.getElementById('psnPassword');
+            const twofaInput = document.getElementById('psn2faCode');
+
+            if (platformSelect) {
+                platformSelect.value = regionData.platform || '';
+            }
+
+            if (emailInput) {
+                emailInput.value = regionData.psn_email || '';
+            }
+
+            // Пароль не загружаем из соображений безопасности
+            if (passwordInput) {
+                passwordInput.value = '';
+            }
+
+            // 2FA код тоже не загружаем из соображений безопасности
+            if (twofaInput) {
+                twofaInput.value = '';
+                // Показываем подсказку если 2FA уже настроен
+                const helpText = twofaInput.parentElement?.nextElementSibling;
+                if (helpText && helpText.classList.contains('form-help')) {
+                    if (regionData.has_twofa) {
+                        helpText.innerHTML = '<i class="fas fa-check-circle" style="color: var(--success-color);"></i> 2FA код уже сохранен. Оставьте поле пустым чтобы не менять.';
+                    } else {
+                        helpText.textContent = 'Код будет зашифрован и сохранен безопасно';
+                    }
+                }
+            }
+        }
+
+        async handlePsnFormSubmit(event) {
+            event.preventDefault();
+
+            const formData = new FormData(event.target);
+            const region = formData.get('region') || 'UA';
+            const psnData = {
+                platform: formData.get('platform') || null,
+                psn_email: formData.get('psnEmail') || null,
+                psn_password: formData.get('psnPassword') || null,
+                twofa_code: formData.get('psn2faCode') || null
+            };
+
+            console.log('Submitting PSN data for region', region, ':', {
+                ...psnData,
+                psn_password: psnData.psn_password ? '[HIDDEN]' : null,
+                twofa_code: psnData.twofa_code ? '[HIDDEN]' : null
+            });
+
+            // Валидация: email и пароль обязательны
+            if (!psnData.psn_email) {
+                Utils.showToast('Введите PSN Email', 'error');
+                return;
+            }
+            if (!psnData.psn_password && !this.psnSettings[region]?.has_password) {
+                Utils.showToast('Введите PSN пароль', 'error');
+                return;
+            }
+
+            try {
+                const userId = this.tgApp.getUserId();
+                if (!userId) {
+                    throw new Error('Пользователь не авторизован');
+                }
+
+                // Используем региональный API endpoint для сохранения
+                await this.api.put(`/users/${userId}/psn-accounts/${region}`, psnData);
+
+                const regionName = region === 'UA' ? 'Украины' : 'Турции';
+                Utils.showToast(`PSN данные для ${regionName} сохранены`, 'success');
+
+                // Обновляем локальные данные
+                await this.loadPsnSettings();
+
+                // Обновляем табы статуса
+                this.updatePsnRegionTabs();
+
+            } catch (error) {
+                console.error('Error saving PSN settings:', error);
+                const errorMessage = error.message || 'Ошибка сохранения PSN данных';
+                Utils.showToast(errorMessage, 'error');
+            }
+        }
+
+        closePsnModal() {
+            const modal = document.getElementById('psnModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+
+            // Очищаем форму
+            const form = document.getElementById('psnForm');
+            if (form) {
+                form.reset();
+            }
+        }
+
+        // ========================================
+        // Payment Email Methods
+        // ========================================
+
+        async loadPaymentEmail() {
+            try {
+                const userId = this.tgApp.getUserId();
+                console.log('Loading payment email for user:', userId);
+
+                if (!userId) {
+                    console.warn('No user ID available for payment email');
+                    this.paymentEmail = null;
+                    this.updatePaymentEmailDisplay();
+                    return;
+                }
+
+                const response = await this.api.get(`/users/${userId}/payment-email`);
+                console.log('Loaded payment email:', response);
+
+                this.paymentEmail = response.payment_email;
+                this.updatePaymentEmailDisplay();
+
+            } catch (error) {
+                console.error('Error loading payment email:', error);
+                this.paymentEmail = null;
+                this.updatePaymentEmailDisplay();
+            }
+        }
+
+        updatePaymentEmailDisplay() {
+            const statusElement = document.getElementById('paymentEmailStatus');
+            if (!statusElement) return;
+
+            if (this.paymentEmail) {
+                // Показываем сокращенный email
+                const email = this.paymentEmail;
+                if (email.length > 20) {
+                    const parts = email.split('@');
+                    statusElement.textContent = parts[0].substring(0, 8) + '...@' + parts[1];
+                } else {
+                    statusElement.textContent = email;
+                }
+                statusElement.style.color = 'var(--success-color)';
+            } else {
+                statusElement.textContent = 'Не указан';
+                statusElement.style.color = 'var(--tg-theme-hint-color)';
+            }
+        }
+
+        showPaymentEmailModal() {
+            console.log('Opening payment email modal...');
+            const modal = document.getElementById('paymentEmailModal');
+            if (!modal) {
+                console.error('Payment email modal not found!');
+                return;
+            }
+
+            // Заполняем текущее значение
+            const emailInput = document.getElementById('paymentEmailInput');
+            if (emailInput && this.paymentEmail) {
+                emailInput.value = this.paymentEmail;
+            }
+
+            modal.style.display = 'flex';
+
+            // Настраиваем обработчик формы
+            const form = document.getElementById('paymentEmailForm');
+            if (form) {
+                form.onsubmit = (e) => this.handlePaymentEmailFormSubmit(e);
+            }
+
+            // Add click outside to close
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    this.closePaymentEmailModal();
+                }
+            });
+
+            console.log('Payment email modal opened successfully');
+        }
+
+        closePaymentEmailModal() {
+            const modal = document.getElementById('paymentEmailModal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        async handlePaymentEmailFormSubmit(event) {
+            event.preventDefault();
+
+            const formData = new FormData(event.target);
+            const paymentEmail = formData.get('paymentEmail');
+
+            if (!paymentEmail) {
+                Utils.showToast('Введите email', 'error');
+                return;
+            }
+
+            // Простая валидация email
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!emailRegex.test(paymentEmail)) {
+                Utils.showToast('Введите корректный email', 'error');
+                return;
+            }
+
+            try {
+                const userId = this.tgApp.getUserId();
+                if (!userId) {
+                    throw new Error('Пользователь не авторизован');
+                }
+
+                await this.api.put(`/users/${userId}/payment-email`, {
+                    payment_email: paymentEmail
+                });
+
+                Utils.showToast('Email для покупки сохранен', 'success');
+
+                // Обновляем локальные данные
+                this.paymentEmail = paymentEmail;
+                this.updatePaymentEmailDisplay();
+
+                // Закрываем модал
+                setTimeout(() => {
+                    this.closePaymentEmailModal();
+                }, 500);
+
+            } catch (error) {
+                console.error('Error saving payment email:', error);
+                const errorMessage = error.message || 'Ошибка сохранения email';
+                Utils.showToast(errorMessage, 'error');
+            }
+        }
+
+        async checkAdminAccess() {
+            try {
+                const userId = this.tgApp.getUserId();
+
+                // DEBUG: Покажем отладочную информацию прямо в UI
+                const debugInfo = document.createElement('div');
+                debugInfo.style.cssText = 'background: black; color: white; border: 3px solid red; padding: 15px; margin: 10px 0; border-radius: 8px; font-size: 14px; position: relative; z-index: 999;';
+
+                // Собираем всю возможную информацию о Telegram WebApp
+                const webAppInfo = window.Telegram?.WebApp;
+                const initData = webAppInfo?.initData;
+                const user = webAppInfo?.initDataUnsafe?.user;
+
+                debugInfo.innerHTML = `
+                <strong style="color: red;">🔍 ОТЛАДКА АДМИНКИ:</strong><br><br>
+                <strong style="color: yellow;">Telegram ID из getUserId():</strong> ${userId || 'НЕ НАЙДЕН'}<br>
+                <strong style="color: yellow;">WebApp объект:</strong> ${webAppInfo ? 'ЕСТЬ' : 'НЕТ'}<br>
+                <strong style="color: yellow;">initData:</strong> ${initData || 'НЕТ'}<br>
+                <strong style="color: yellow;">Пользователь:</strong> ${user ? JSON.stringify(user) : 'НЕТ'}<br>
+                <strong style="color: yellow;">User ID из initData:</strong> ${user?.id || 'НЕТ'}<br>
+                <strong style="color: yellow;">Username:</strong> ${user?.username || 'НЕТ'}<br>
+                <strong style="color: yellow;">Время:</strong> ${new Date().toLocaleTimeString()}<br>
+            `;
+
+                // Добавляем отладку в начало страницы
+                const container = document.querySelector('.settings-section');
+                if (container) {
+                    container.insertBefore(debugInfo, container.firstChild);
+                }
+
+                // Показываем кнопку админки временно для тестирования
+
+                // Используем реальный Telegram ID если есть
+                const realUserId = user?.id || userId;
+
+                if (!realUserId) {
+                    debugInfo.innerHTML += '<br><strong style="color: red;">❌ НЕТ TELEGRAM ID - АДМИНКА НЕДОСТУПНА</strong>';
+                    return;
+                }
+
+                debugInfo.innerHTML += `<br><strong style="color: lime;">📋 ИСПОЛЬЗУЕМ ID: ${realUserId}</strong>`;
+
+                // Проверяем админские права через API с передачей Telegram ID
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'X-Telegram-User-Id': realUserId.toString()
+                };
+
+                debugInfo.innerHTML += `<br><strong style="color: cyan;">🔄 ПРОВЕРЯЕМ ПРАВА ДЛЯ ID: ${realUserId}...</strong>`;
+
+                try {
+                    // Определяем базовый URL для API
+                    const currentUrl = window.location.origin;
+                    const response = await fetch(`${currentUrl}/api/admin/stats`, { headers });
+
+                    if (response.ok) {
+                        debugInfo.innerHTML += '<br><strong style="color: lime;">✅ АДМИНСКИЕ ПРАВА ПОДТВЕРЖДЕНЫ!</strong>';
+                        document.getElementById('adminAccess').style.display = 'block';
+                    } else {
+                        debugInfo.innerHTML += `<br><strong style="color: red;">❌ ДОСТУП ЗАПРЕЩЕН (статус: ${response.status})</strong>`;
+                    }
+                } catch (error) {
+                    debugInfo.innerHTML += `<br><strong style="color: red;">❌ ОШИБКА: ${error.message}</strong>`;
+                }
+            } catch (error) {
+                // В случае ошибки создаем базовый отладочный блок
+                const errorDiv = document.createElement('div');
+                errorDiv.style.cssText = 'background: red; color: white; padding: 15px; margin: 10px 0; border-radius: 8px; font-size: 14px;';
+                errorDiv.innerHTML = `<strong>❌ ОШИБКА ОТЛАДКИ: ${error.message}</strong>`;
+                const container = document.querySelector('.settings-section');
+                if (container) {
+                    container.insertBefore(errorDiv, container.firstChild);
+                }
+            }
+        }
+
+    }
+
+    // Global functions for modal controls
+    function showAbout() {
+        tgApp.hapticFeedback('impact', 'light');
+        const modal = document.getElementById('aboutModal');
+        modal.style.display = 'flex';
+
+        // Add click outside to close
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                closeAboutModal();
+            }
+        });
+    }
+
+    function closeAboutModal() {
+        const modal = document.getElementById('aboutModal');
+        modal.style.display = 'none';
+    }
+
+    function closeCurrencyModal() {
+        const modal = document.getElementById('currencyModal');
+        if (!modal) return;
+        modal.style.display = 'none';
+    }
+
+    function closeRegionModal() {
+        const modal = document.getElementById('regionModal');
+        modal.style.display = 'none';
+    }
+
+    function closePsnModal() {
+        const modal = document.getElementById('psnModal');
+        modal.style.display = 'none';
+
+        // Очищаем форму
+        const form = document.getElementById('psnForm');
+        if (form) {
+            form.reset();
+        }
+    }
+
+    function closePaymentEmailModal() {
+        const modal = document.getElementById('paymentEmailModal');
+        if (modal) {
+            modal.style.display = 'none';
+        }
+    }
+
+    function togglePasswordVisibility(inputId) {
+        const input = document.getElementById(inputId);
+        const toggle = input.parentElement.querySelector('.password-toggle i');
+
+        if (input.type === 'password') {
+            input.type = 'text';
+            toggle.className = 'fas fa-eye-slash';
+        } else {
+            input.type = 'password';
+            toggle.className = 'fas fa-eye';
+        }
+    }
+
+    function openAdminPanel() {
+        // Получаем Telegram ID из того же источника что и в checkAdminAccess
+        const webAppInfo = window.Telegram?.WebApp;
+        const user = webAppInfo?.initDataUnsafe?.user;
+        const userId = user?.id;
+
+        console.log('Opening admin panel with user ID:', userId);
+
+        if (userId) {
+            // Передаем ID через URL параметр
+            const adminUrl = `/webapp/admin?tg_user_id=${userId}`;
+            console.log('Redirecting to:', adminUrl);
+            window.location.href = adminUrl;
+        } else {
+            // Fallback - переходим без ID (будет показана страница отказа)
+            console.log('No user ID found, redirecting without parameter');
+            window.location.href = '/webapp/admin';
+        }
+    }
+
+    // PSN Region selection handler
+    function selectPsnRegion(regionCode) {
+        if (!window.profileManager) return;
+        window.profileManager.currentPsnRegion = regionCode;
+        window.profileManager.updatePsnRegionTabs();
+        window.profileManager.loadPsnFormData();
+    }
+
+    // Initialize profile manager when DOM is loaded
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Wait for global instances to be available
+        let attempts = 0;
+        const maxAttempts = 30; // 3 seconds
+
+        while ((!window.tgApp || !window.apiClient) && attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
+        }
+
+        if (window.tgApp && window.apiClient) {
+            window.profileManager = new ProfileManager();
+        }
+    });
+</script>
+{% endblock %}

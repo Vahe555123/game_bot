@@ -1,0 +1,296 @@
+{% extends "admin/base.html" %}
+
+{% block breadcrumb %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/admin/dashboard">Главная</a></li>
+        <li class="breadcrumb-item"><a href="/admin/users">Пользователи</a></li>
+        <li class="breadcrumb-item active">{{ user.full_name }}</li>
+    </ol>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1>
+        <i class="bi bi-person-circle"></i>
+        {{ user.full_name }}
+    </h1>
+    <div>
+        <a href="/admin/users" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Назад к списку
+        </a>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Основная информация -->
+    <div class="col-lg-4">
+        <div class="card shadow">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">
+                    <i class="bi bi-info-circle"></i>
+                    Основная информация
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>ID:</strong></div>
+                    <div class="col-sm-8">{{ user.id }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>Telegram ID:</strong></div>
+                    <div class="col-sm-8"><code>{{ user.telegram_id }}</code></div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>Username:</strong></div>
+                    <div class="col-sm-8">@{{ user.username or 'Не указан' }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>Имя:</strong></div>
+                    <div class="col-sm-8">{{ user.first_name or 'Не указано' }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>Фамилия:</strong></div>
+                    <div class="col-sm-8">{{ user.last_name or 'Не указана' }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>Статус:</strong></div>
+                    <div class="col-sm-8">
+                        <span class="badge {{ 'bg-success' if user.is_active else 'bg-secondary' }}">
+                            {{ 'Активен' if user.is_active else 'Неактивен' }}
+                        </span>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>Регистрация:</strong></div>
+                    <div class="col-sm-8">{{ user.created_at.strftime('%d.%m.%Y %H:%M') }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4"><strong>Обновление:</strong></div>
+                    <div class="col-sm-8">{{ user.updated_at.strftime('%d.%m.%Y %H:%M') }}</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Настройки региона -->
+        <div class="card shadow mt-4">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">
+                    <i class="bi bi-geo-alt"></i>
+                    Региональные настройки
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-sm-6"><strong>Предпочитаемая страна:</strong></div>
+                    <div class="col-sm-6">
+                        <span class="badge bg-info">{{ user.preferred_country }}</span>
+                    </div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-6"><strong>Валюта:</strong></div>
+                    <div class="col-sm-6">
+                        <span class="badge bg-success">{{ user.preferred_currency }}</span>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <div class="mb-2">
+                    <strong>Отображаемые регионы:</strong>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" {{ 'checked' if user.show_ukraine_prices }} disabled>
+                    <label class="form-check-label">
+                        🇺🇦 Украина (UAH)
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" {{ 'checked' if user.show_turkey_prices }} disabled>
+                    <label class="form-check-label">
+                        🇹🇷 Турция (TRL)
+                    </label>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" {{ 'checked' if user.show_india_prices }} disabled>
+                    <label class="form-check-label">
+                        🇮🇳 Индия (INR)
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Избранные товары -->
+    <div class="col-lg-8">
+        <div class="card shadow">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-heart-fill"></i>
+                    Избранные товары
+                </h5>
+                <span class="badge bg-primary" id="favoritesCount">0</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Товар</th>
+                                <th>Категория</th>
+                                <th>Цена (UAH)</th>
+                                <th>Добавлен</th>
+                                <th>Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody id="favoritesTable">
+                            <tr>
+                                <td colspan="5" class="text-center py-4">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Загрузка...</span>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Статистика активности -->
+        <div class="card shadow mt-4">
+            <div class="card-header bg-light">
+                <h5 class="mb-0">
+                    <i class="bi bi-bar-chart"></i>
+                    Статистика активности
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-md-4">
+                        <div class="border rounded p-3">
+                            <h4 class="text-primary mb-0" id="totalFavorites">0</h4>
+                            <small class="text-muted">Всего избранных</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-3">
+                            <h4 class="text-success mb-0" id="activeFavorites">0</h4>
+                            <small class="text-muted">Активных товаров</small>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="border rounded p-3">
+                            <h4 class="text-warning mb-0" id="discountedFavorites">0</h4>
+                            <small class="text-muted">Товаров со скидкой</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const userId = {{ user.id }};
+const telegramId = {{ user.telegram_id }};
+
+async function loadUserFavorites() {
+    try {
+        const response = await fetch(`/api/users/${telegramId}/favorites/`, {
+            headers: {
+                'Authorization': 'Bearer ' + getCookie('admin_token')
+            }
+        });
+        
+        if (response.ok) {
+            const favorites = await response.json();
+            renderFavoritesTable(favorites);
+            updateFavoritesStats(favorites);
+        } else {
+            document.getElementById('favoritesTable').innerHTML = 
+                '<tr><td colspan="5" class="text-center py-4 text-muted">Ошибка загрузки избранных товаров</td></tr>';
+        }
+    } catch (error) {
+        console.error('Ошибка:', error);
+        document.getElementById('favoritesTable').innerHTML = 
+            '<tr><td colspan="5" class="text-center py-4 text-muted">Ошибка сети</td></tr>';
+    }
+}
+
+function renderFavoritesTable(favorites) {
+    const tbody = document.getElementById('favoritesTable');
+    
+    if (favorites.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">У пользователя нет избранных товаров</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = favorites.map(favorite => `
+        <tr>
+            <td>
+                <div class="d-flex align-items-center">
+                    ${favorite.product.image ? `<img src="${favorite.product.image}" class="me-3" style="width: 40px; height: 40px; object-fit: cover; border-radius: 5px;">` : ''}
+                    <div>
+                        <div class="fw-bold text-truncate" style="max-width: 300px;" title="${favorite.product.name}">
+                            ${favorite.product.name}
+                        </div>
+                        <small class="text-muted">${favorite.product.publisher || 'Без издателя'}</small>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <span class="badge bg-secondary">${favorite.product.category || 'Без категории'}</span>
+            </td>
+            <td>
+                <div>
+                    ${favorite.product.uah_price ? `
+                        <div class="fw-bold">${favorite.product.uah_price} UAH</div>
+                        ${favorite.product.uah_price_old && favorite.product.uah_price_old > favorite.product.uah_price ? 
+                            `<small class="text-muted text-decoration-line-through">${favorite.product.uah_price_old} UAH</small>` : ''
+                        }
+                    ` : '<span class="text-muted">Не указана</span>'}
+                </div>
+            </td>
+            <td>
+                <small>${formatDate(favorite.created_at)}</small>
+            </td>
+            <td>
+                <a href="/admin/products/${favorite.product.id}" class="btn btn-outline-primary btn-sm" title="Просмотр товара">
+                    <i class="bi bi-eye"></i>
+                </a>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function updateFavoritesStats(favorites) {
+    document.getElementById('favoritesCount').textContent = favorites.length;
+    document.getElementById('totalFavorites').textContent = favorites.length;
+    
+    const activeFavorites = favorites.filter(f => f.product.is_active).length;
+    document.getElementById('activeFavorites').textContent = activeFavorites;
+    
+    const discountedFavorites = favorites.filter(f => f.product.discount_percent && f.product.discount_percent > 0).length;
+    document.getElementById('discountedFavorites').textContent = discountedFavorites;
+}
+
+function formatDate(dateString) {
+    return new Date(dateString).toLocaleDateString('ru-RU', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+// Загружаем данные при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    loadUserFavorites();
+});
+</script>
+{% endblock %} 

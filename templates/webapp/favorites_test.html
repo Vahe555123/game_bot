@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}PlayStation Store - Избранное (Тест){% endblock %}
+
+{% block content %}
+<div class="favorites-header fade-in">
+    <h2>Тест избранного</h2>
+    <p>Проверяем работу JavaScript</p>
+</div>
+
+<div id="testContainer">
+    <p>Загрузка...</p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Простой тест JavaScript
+alert('🚀 JavaScript работает!');
+
+document.addEventListener('DOMContentLoaded', function() {
+    alert('📄 DOM загружен!');
+    
+    // Проверяем глобальные объекты
+    const tgAppExists = !!window.tgApp;
+    const apiClientExists = !!window.apiClient;
+    
+    alert(`🔍 Глобальные объекты:\ntgApp: ${tgAppExists}\napiClient: ${apiClientExists}`);
+    
+    if (window.tgApp && window.apiClient) {
+        let userId = window.tgApp.getUserId();
+        
+        // Для тестирования в браузере используем фиктивный ID
+        if (!userId) {
+            userId = 628176879; // Ваш Telegram ID для тестирования
+            alert(`🧪 Используем тестовый User ID: ${userId}`);
+        } else {
+            alert(`👤 Реальный User ID: ${userId}`);
+        }
+        
+        // Тестовый запрос к API
+        window.apiClient.get(`/users/${userId}/favorites/`)
+            .then(response => {
+                alert(`✅ API работает! Получено ${response.length} избранных товаров`);
+                
+                const container = document.getElementById('testContainer');
+                container.innerHTML = `
+                    <h3>✅ Тест успешен!</h3>
+                    <p>Найдено избранных товаров: ${response.length}</p>
+                    <pre style="background: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto; font-size: 12px;">${JSON.stringify(response, null, 2)}</pre>
+                `;
+            })
+            .catch(error => {
+                alert(`❌ Ошибка API: ${error.message}`);
+                
+                const container = document.getElementById('testContainer');
+                container.innerHTML = `
+                    <h3>❌ Ошибка API</h3>
+                    <p>${error.message}</p>
+                `;
+            });
+    } else {
+        const container = document.getElementById('testContainer');
+        container.innerHTML = `
+            <h3>❌ Глобальные объекты не найдены</h3>
+            <p>tgApp: ${tgAppExists}</p>
+            <p>apiClient: ${apiClientExists}</p>
+        `;
+    }
+});
+</script>
+{% endblock %} 

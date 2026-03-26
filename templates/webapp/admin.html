@@ -1,0 +1,1387 @@
+{% extends "base.html" %}
+
+{% block title %}Админ-панель - PlayStation Store{% endblock %}
+
+{% block content %}
+<!-- Admin Header -->
+<div class="admin-header fade-in">
+    <div id="adminMeta" data-admin-telegram-id="{{ admin_telegram_id }}" style="display: none;"></div>
+    <div class="admin-header-content">
+        <h1><i class="fas fa-tools"></i> Админ-панель</h1>
+        <p>ID: {{ admin_telegram_id }}</p>
+    </div>
+    <div class="admin-actions">
+        <button class="btn btn-outline" onclick="window.location.href='/webapp'">
+            <i class="fas fa-arrow-left"></i> Назад
+        </button>
+        <button class="btn btn-primary" id="updatePricesBtn" onclick="updateAllPrices()">
+            <i class="fas fa-sync-alt"></i> Обновить цены
+        </button>
+    </div>
+</div>
+
+<!-- Statistics Cards -->
+<div class="stats-grid fade-in" id="statsGrid">
+    <!-- Статистика загружается динамически -->
+</div>
+
+<!-- Admin Tabs -->
+<div class="admin-tabs fade-in">
+    <div class="tab-buttons">
+        <button class="tab-button active" data-tab="currency-rates">
+            <i class="fas fa-exchange-alt"></i> Курсы валют
+        </button>
+        <button class="tab-button" data-tab="users">
+            <i class="fas fa-users"></i> Пользователи
+        </button>
+        <button class="tab-button" data-tab="products">
+            <i class="fas fa-gamepad"></i> Товары
+        </button>
+    </div>
+
+    <div class="tab-content">
+        <!-- Currency Rates Tab -->
+        <div class="tab-panel active" id="currency-rates">
+            <div class="panel-header">
+                <h2>Плавающие курсы валют</h2>
+                <button class="btn btn-primary" onclick="showAddRateModal()">
+                    <i class="fas fa-plus"></i> Добавить диапазон
+                </button>
+            </div>
+
+            <div class="info-banner">
+                <i class="fas fa-info-circle"></i>
+                <div>
+                    <strong>Как это работает:</strong> Для каждого региона можно задать несколько диапазонов цен с разными курсами.
+                    Например, игры от 0₺ до 99₺ конвертируются по курсу 3.5, а от 100₺ до 499₺ — по курсу 3.2.
+                    Система автоматически применит нужный курс в зависимости от цены игры.
+                </div>
+            </div>
+
+            <div class="currency-filters">
+                <select id="currencyFilter" onchange="filterCurrencyRates()">
+                    <option value="">Все валюты</option>
+                    <option value="UAH">🇺🇦 UAH - Украинская гривна</option>
+                    <option value="TRY">🇹🇷 TRY - Турецкая лира</option>
+                    <option value="INR">🇮🇳 INR - Индийская рупия</option>
+                </select>
+            </div>
+
+            <div class="rates-container" id="ratesContainer">
+                <!-- Курсы загружаются динамически -->
+            </div>
+        </div>
+
+        <!-- Users Tab -->
+        <div class="tab-panel" id="users">
+            <div class="panel-header">
+                <h2>Пользователи</h2>
+                <div class="users-info" id="usersInfo">
+                    Загрузка...
+                </div>
+            </div>
+            <div class="users-container" id="usersContainer">
+                <!-- Пользователи загружаются динамически -->
+            </div>
+        </div>
+
+        <!-- Products Tab -->
+        <div class="tab-panel" id="products">
+            <div class="panel-header">
+                <h2>Товары</h2>
+                <p>Управление товарами и их ценами</p>
+            </div>
+            <div class="products-info">
+                <p>Информация о товарах отображается в статистике выше.</p>
+                <p>Для обновления рублевых цен используйте кнопку "Обновить цены".</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Rate Modal -->
+<div class="modal-overlay" id="addRateModal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Добавить курс валют</h3>
+            <button class="modal-close" onclick="closeAddRateModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="addRateForm" class="rate-form">
+                <div class="form-group">
+                    <label for="rateCurrency">Валюта</label>
+                    <select id="rateCurrency" name="currency_from" class="form-control" required>
+                        <option value="">Выберите валюту</option>
+                        <option value="UAH">UAH - Украинская гривна</option>
+                        <option value="TRY">TRY - Турецкая лира</option>
+                        <option value="INR">INR - Индийская рупия</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="rateMinPrice">Мин. цена</label>
+                        <input type="number" id="rateMinPrice" name="price_min" class="form-control"
+                               min="0" step="0.01" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="rateMaxPrice">Макс. цена</label>
+                        <input type="number" id="rateMaxPrice" name="price_max" class="form-control"
+                               min="0" step="0.01" placeholder="Не ограничено">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="rateValue">Курс</label>
+                    <input type="number" id="rateValue" name="rate" class="form-control"
+                           min="0.01" step="0.01" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="rateDescription">Описание</label>
+                    <input type="text" id="rateDescription" name="description" class="form-control"
+                           placeholder="Например: Бюджетные игры">
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeAddRateModal()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Добавить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Rate Modal -->
+<div class="modal-overlay" id="editRateModal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Редактировать курс</h3>
+            <button class="modal-close" onclick="closeEditRateModal()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="modal-body">
+            <form id="editRateForm" class="rate-form">
+                <input type="hidden" id="editRateId" name="rate_id">
+
+                <div class="form-group">
+                    <label for="editRateValue">Курс</label>
+                    <input type="number" id="editRateValue" name="rate" class="form-control"
+                           min="0.01" step="0.01" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="editRateDescription">Описание</label>
+                    <input type="text" id="editRateDescription" name="description" class="form-control">
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="editRateActive" name="is_active">
+                        Активен
+                    </label>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-danger" onclick="deleteRate()">Удалить</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeEditRateModal()">Отмена</button>
+                    <button type="submit" class="btn btn-primary">Сохранить</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Telegram WebApp адаптация */
+html, body {
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+*, *::before, *::after {
+    box-sizing: border-box;
+}
+
+/* Основной контейнер */
+.main-content {
+    padding: var(--spacing-sm);
+    max-width: 100vw;
+    overflow-x: hidden;
+    min-height: 100vh;
+    min-height: calc(var(--vh, 1vh) * 100);
+    padding-bottom: 90px !important;
+}
+
+/* Адаптивная сетка для мобильных */
+@media (max-width: 768px) {
+    .main-content {
+        padding: var(--spacing-xs);
+    }
+
+    .admin-header {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-md) !important;
+    }
+
+    .admin-actions {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: var(--spacing-sm);
+    }
+
+    .tab-buttons {
+        flex-wrap: wrap;
+        gap: var(--spacing-xs);
+    }
+
+    .tab-button {
+        flex: 1;
+        min-width: 100px;
+        font-size: 12px;
+        padding: var(--spacing-sm);
+    }
+}
+
+@media (max-width: 480px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-header-content h1 {
+        font-size: 1.2rem;
+    }
+
+    .btn {
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 12px;
+    }
+
+    /* Формы на мобильных */
+    .form-group {
+        margin-bottom: var(--spacing-sm);
+    }
+
+    .form-control {
+        font-size: 14px;
+        padding: var(--spacing-sm);
+    }
+
+    /* Модальные окна на мобильных */
+    .modal-content {
+        width: 95vw;
+        max-width: 400px;
+        margin: 5vh auto;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+}
+
+/* Дополнительные адаптивные стили */
+.container, .content {
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+/* Скроллируемые контейнеры */
+.scrollable {
+    max-height: 60vh;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Адаптивный текст */
+@media (max-width: 768px) {
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.3rem; }
+    h3 { font-size: 1.1rem; }
+
+    /* Увеличиваем область касания для кнопок */
+    .btn, .tab-button {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+/* Admin Styles */
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-lg);
+    background: var(--tg-theme-secondary-bg-color);
+    border-radius: var(--border-radius-lg);
+    margin-bottom: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
+}
+
+.admin-header-content h1 {
+    color: var(--tg-theme-text-color);
+    margin: 0;
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.admin-header-content p {
+    color: var(--tg-theme-hint-color);
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.admin-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+}
+
+/* Stats Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-lg);
+}
+
+.stat-card {
+    background: var(--tg-theme-secondary-bg-color);
+    padding: var(--spacing-lg);
+    border-radius: var(--border-radius-md);
+    box-shadow: var(--shadow-sm);
+    text-align: center;
+}
+
+.stat-card .stat-icon {
+    font-size: 2rem;
+    margin-bottom: var(--spacing-sm);
+}
+
+.stat-card .stat-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: var(--tg-theme-text-color);
+    margin-bottom: var(--spacing-xs);
+}
+
+.stat-card .stat-label {
+    color: var(--tg-theme-hint-color);
+    font-size: 0.9rem;
+}
+
+/* Tabs */
+.admin-tabs {
+    background: var(--tg-theme-secondary-bg-color);
+    border-radius: var(--border-radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-sm);
+}
+
+.tab-buttons {
+    display: flex;
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.tab-button {
+    flex: 1;
+    padding: var(--spacing-md);
+    border: none;
+    background: transparent;
+    color: var(--tg-theme-hint-color);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+}
+
+.tab-button.active {
+    background: var(--tg-theme-button-color);
+    color: var(--tg-theme-button-text-color);
+}
+
+.tab-button:hover:not(.active) {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.tab-content {
+    padding: var(--spacing-lg);
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-lg);
+}
+
+.panel-header h2 {
+    color: var(--tg-theme-text-color);
+    margin: 0;
+}
+
+/* Info Banner */
+.info-banner {
+    display: flex;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: rgba(33, 150, 243, 0.1);
+    border-left: 4px solid #2196F3;
+    border-radius: var(--border-radius-md);
+    margin-bottom: var(--spacing-lg);
+    color: var(--tg-theme-text-color);
+}
+
+.info-banner i {
+    font-size: 1.5rem;
+    color: #2196F3;
+    flex-shrink: 0;
+}
+
+.info-banner strong {
+    color: #2196F3;
+}
+
+/* Currency Filters */
+.currency-filters {
+    margin-bottom: var(--spacing-lg);
+}
+
+.currency-filters select {
+    width: 100%;
+    padding: var(--spacing-md);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--border-radius-md);
+    background: var(--tg-theme-bg-color);
+    color: var(--tg-theme-text-color);
+    font-size: 1rem;
+}
+
+/* Currency Groups */
+.currency-group {
+    margin-bottom: var(--spacing-xl);
+    background: var(--tg-theme-bg-color);
+    border-radius: var(--border-radius-lg);
+    padding: var(--spacing-lg);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.currency-group-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-md);
+    border-bottom: 2px solid rgba(0, 0, 0, 0.1);
+}
+
+.currency-group-header h3 {
+    margin: 0;
+    color: var(--tg-theme-text-color);
+    font-size: 1.2rem;
+}
+
+.btn-sm {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    font-size: 0.9rem;
+}
+
+/* Rates Table */
+.rates-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.rates-table-header {
+    display: grid;
+    grid-template-columns: 2fr 1fr 2fr 1fr 1.5fr;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: var(--border-radius-md);
+    font-weight: bold;
+    font-size: 0.85rem;
+    color: var(--tg-theme-hint-color);
+    margin-bottom: var(--spacing-xs);
+}
+
+.rates-table-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr 2fr 1fr 1.5fr;
+    gap: var(--spacing-sm);
+    padding: var(--spacing-md);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--border-radius-md);
+    margin-bottom: var(--spacing-xs);
+    background: var(--tg-theme-secondary-bg-color);
+    transition: all 0.2s ease;
+    align-items: center;
+}
+
+.rates-table-row:hover {
+    box-shadow: var(--shadow-sm);
+    border-color: var(--tg-theme-button-color);
+}
+
+.rates-table-row.inactive {
+    opacity: 0.5;
+}
+
+.col-range strong {
+    color: var(--tg-theme-text-color);
+    display: block;
+}
+
+.rate-note {
+    font-size: 0.8rem;
+    color: var(--tg-theme-hint-color);
+    margin-top: 2px;
+}
+
+.col-rate strong {
+    color: var(--tg-theme-button-color);
+    font-size: 1.1rem;
+}
+
+.col-result {
+    color: var(--tg-theme-hint-color);
+}
+
+.col-result strong {
+    color: #4CAF50;
+}
+
+.col-actions {
+    display: flex;
+    gap: var(--spacing-xs);
+    justify-content: flex-end;
+}
+
+.btn-icon {
+    padding: var(--spacing-xs);
+    border: none;
+    background: transparent;
+    color: var(--tg-theme-button-color);
+    cursor: pointer;
+    border-radius: var(--border-radius-sm);
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+}
+
+.btn-icon:hover {
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.btn-icon.btn-danger {
+    color: var(--error-color);
+}
+
+.btn-icon.btn-danger:hover {
+    background: rgba(244, 67, 54, 0.1);
+}
+
+/* Badges */
+.badge {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: inline-block;
+}
+
+.badge-success {
+    background: #4CAF50;
+    color: white;
+}
+
+.badge-inactive {
+    background: #9E9E9E;
+    color: white;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: var(--spacing-xl);
+    color: var(--tg-theme-hint-color);
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: var(--spacing-md);
+    opacity: 0.5;
+}
+
+.empty-state p {
+    margin-bottom: var(--spacing-lg);
+}
+
+/* Responsive Table */
+@media (max-width: 768px) {
+    .rates-table-header {
+        display: none;
+    }
+
+    .rates-table-row {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-xs);
+    }
+
+    .rates-table-row > div::before {
+        content: attr(data-label);
+        font-weight: bold;
+        display: block;
+        margin-bottom: 2px;
+        color: var(--tg-theme-hint-color);
+        font-size: 0.8rem;
+    }
+
+    .col-actions {
+        justify-content: flex-start;
+    }
+}
+
+/* Forms */
+.rate-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-md);
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-xs);
+}
+
+.form-group label {
+    font-weight: 600;
+    color: var(--tg-theme-text-color);
+}
+
+.form-control {
+    padding: var(--spacing-sm);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: var(--border-radius-md);
+    background: var(--tg-theme-bg-color);
+    color: var(--tg-theme-text-color);
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: var(--tg-theme-button-color);
+}
+
+.form-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    justify-content: flex-end;
+    margin-top: var(--spacing-md);
+}
+
+/* Buttons */
+.btn {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: none;
+    border-radius: var(--border-radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.btn-primary {
+    background: var(--tg-theme-button-color);
+    color: var(--tg-theme-button-text-color);
+}
+
+.btn-secondary {
+    background: var(--tg-theme-hint-color);
+    color: var(--tg-theme-bg-color);
+}
+
+.btn-outline {
+    background: transparent;
+    color: var(--tg-theme-text-color);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.btn-danger {
+    background: var(--error-color);
+    color: white;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sm);
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Users */
+.user-card {
+    background: var(--tg-theme-bg-color);
+    padding: var(--spacing-md);
+    border-radius: var(--border-radius-md);
+    margin-bottom: var(--spacing-sm);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.user-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-xs);
+}
+
+.user-name {
+    font-weight: bold;
+    color: var(--tg-theme-text-color);
+}
+
+.user-date {
+    color: var(--tg-theme-hint-color);
+    font-size: 0.85rem;
+}
+
+.user-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--spacing-sm);
+}
+
+.user-stat {
+    text-align: center;
+    padding: var(--spacing-xs);
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: var(--border-radius-sm);
+}
+
+.user-stat-value {
+    font-weight: bold;
+    color: var(--tg-theme-text-color);
+}
+
+.user-stat-label {
+    font-size: 0.8rem;
+    color: var(--tg-theme-hint-color);
+}
+
+/* Loading */
+.loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-xl);
+    color: var(--tg-theme-hint-color);
+}
+
+.loading i {
+    animation: spin 1s linear infinite;
+    margin-right: var(--spacing-sm);
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .admin-header {
+        flex-direction: column;
+        gap: var(--spacing-md);
+        text-align: center;
+    }
+
+    .admin-actions {
+        justify-content: center;
+    }
+
+    .tab-buttons {
+        flex-direction: column;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+
+    .form-actions {
+        flex-direction: column;
+    }
+
+    .stats-grid {
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Глобальные переменные
+let currentEditingRateId = null;
+const apiBaseUrl = '{{ api_base_url }}'.replace(/\/$/, ''); // Remove trailing slash
+const adminTelegramId = Number(document.getElementById('adminMeta')?.dataset?.adminTelegramId || 0);
+
+// Инициализация админки
+document.addEventListener('DOMContentLoaded', async () => {
+    // Настройка Telegram WebApp
+    if (window.Telegram?.WebApp) {
+        const tgApp = window.Telegram.WebApp;
+        tgApp.ready();
+        tgApp.expand();
+
+        // Устанавливаем цвета из темы Telegram
+        document.documentElement.style.setProperty('--tg-theme-bg-color', tgApp.themeParams.bg_color || '#ffffff');
+        document.documentElement.style.setProperty('--tg-theme-text-color', tgApp.themeParams.text_color || '#000000');
+        document.documentElement.style.setProperty('--tg-theme-secondary-bg-color', tgApp.themeParams.secondary_bg_color || '#f1f1f1');
+
+        // Настраиваем высоту под viewport
+        const adjustHeight = () => {
+            const vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+
+            // Применяем высоту к контейнерам
+            const containers = document.querySelectorAll('.scrollable');
+            containers.forEach(container => {
+                container.style.maxHeight = `${window.innerHeight * 0.6}px`;
+            });
+        };
+
+        adjustHeight();
+        window.addEventListener('resize', adjustHeight);
+        window.addEventListener('orientationchange', adjustHeight);
+    }
+
+    await loadAdminData();
+    setupEventListeners();
+});
+
+function setupEventListeners() {
+    // Переключение табов
+    document.querySelectorAll('.tab-button').forEach(button => {
+        button.addEventListener('click', () => {
+            const tabId = button.dataset.tab;
+            switchTab(tabId);
+        });
+    });
+
+    // Форма добавления курса
+    document.getElementById('addRateForm').addEventListener('submit', handleAddRate);
+
+    // Форма редактирования курса
+    document.getElementById('editRateForm').addEventListener('submit', handleEditRate);
+}
+
+function switchTab(tabId) {
+    // Переключение кнопок
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
+
+    // Переключение панелей
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    document.getElementById(tabId).classList.add('active');
+
+    // Загрузка данных для таба
+    if (tabId === 'users') {
+        loadUsers();
+    }
+}
+
+async function loadAdminData() {
+    try {
+        await Promise.all([
+            loadStats(),
+            loadCurrencyRates()
+        ]);
+    } catch (error) {
+        console.error('Error loading admin data:', error);
+        showError('Ошибка загрузки данных админки');
+    }
+}
+
+async function loadStats() {
+    try {
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/stats`, { headers });
+        if (!response.ok) throw new Error('Failed to load stats');
+
+        const stats = await response.json();
+        renderStats(stats);
+    } catch (error) {
+        console.error('Error loading stats:', error);
+        document.getElementById('statsGrid').innerHTML = '<div class="loading">Ошибка загрузки статистики</div>';
+    }
+}
+
+function renderStats(stats) {
+    const statsGrid = document.getElementById('statsGrid');
+
+    const statsCards = [
+        { icon: 'fas fa-gamepad', label: 'Всего товаров', value: stats.total_products, color: '#4CAF50' },
+        { icon: 'fas fa-check-circle', label: 'Активных товаров', value: stats.active_products, color: '#2196F3' },
+        { icon: 'fas fa-users', label: 'Пользователей', value: stats.total_users, color: '#FF9800' },
+        { icon: 'fas fa-heart', label: 'Избранного', value: stats.total_favorites, color: '#E91E63' },
+        { icon: 'fas fa-exchange-alt', label: 'Курсов валют', value: stats.currency_rates_count, color: '#9C27B0' },
+        { icon: 'fas fa-ruble-sign', label: 'С рублевыми ценами', value: stats.products_with_rub_prices, color: '#607D8B' }
+    ];
+
+    statsGrid.innerHTML = statsCards.map(stat => `
+        <div class="stat-card">
+            <div class="stat-icon" style="color: ${stat.color}">
+                <i class="${stat.icon}"></i>
+            </div>
+            <div class="stat-value">${stat.value}</div>
+            <div class="stat-label">${stat.label}</div>
+        </div>
+    `).join('');
+}
+
+async function loadCurrencyRates() {
+    try {
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, { headers });
+        if (!response.ok) throw new Error('Failed to load currency rates');
+
+        const rates = await response.json();
+        renderCurrencyRates(rates);
+    } catch (error) {
+        console.error('Error loading currency rates:', error);
+        document.getElementById('ratesContainer').innerHTML = '<div class="loading">Ошибка загрузки курсов</div>';
+    }
+}
+
+function renderCurrencyRates(rates) {
+    const container = document.getElementById('ratesContainer');
+
+    if (rates.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-exchange-alt"></i>
+                <p>Курсы валют не найдены</p>
+                <button class="btn btn-primary" onclick="showAddRateModal()">
+                    <i class="fas fa-plus"></i> Добавить первый курс
+                </button>
+            </div>
+        `;
+        return;
+    }
+
+    const groupedRates = rates.reduce((acc, rate) => {
+        if (!acc[rate.currency_from]) acc[rate.currency_from] = [];
+        acc[rate.currency_from].push(rate);
+        return acc;
+    }, {});
+
+    const currencyNames = {
+        'UAH': '🇺🇦 Украинская гривна',
+        'TRL': '🇹🇷 Турецкая лира',
+        'INR': '🇮🇳 Индийская рупия'
+    };
+
+    container.innerHTML = Object.entries(groupedRates).map(([currency, currencyRates]) => {
+        const sortedRates = currencyRates.sort((a, b) => a.price_min - b.price_min);
+
+        return `
+        <div class="currency-group">
+            <div class="currency-group-header">
+                <h3>${currencyNames[currency] || currency}</h3>
+                <button class="btn btn-sm btn-primary" onclick="showAddRateModal('${currency}')">
+                    <i class="fas fa-plus"></i> Добавить диапазон
+                </button>
+            </div>
+
+            <div class="rates-table">
+                <div class="rates-table-header">
+                    <div class="col-range">Диапазон цен</div>
+                    <div class="col-rate">Курс</div>
+                    <div class="col-result">Пример расчета</div>
+                    <div class="col-status">Статус</div>
+                    <div class="col-actions">Действия</div>
+                </div>
+
+                ${sortedRates.map((rate) => {
+                    const example = rate.price_min + 50;
+                    const rubResult = (example * rate.rate).toFixed(2);
+
+                    return `
+                    <div class="rates-table-row ${rate.is_active ? '' : 'inactive'}" data-rate-id="${rate.id}">
+                        <div class="col-range">
+                            <strong>${rate.price_range_display}</strong> ${currency}
+                            ${rate.description ? `<div class="rate-note">${rate.description}</div>` : ''}
+                        </div>
+                        <div class="col-rate">
+                            <strong>×${rate.rate}</strong>
+                        </div>
+                        <div class="col-result">
+                            ${example} ${currency} = <strong>${rubResult} ₽</strong>
+                        </div>
+                        <div class="col-status">
+                            <span class="badge ${rate.is_active ? 'badge-success' : 'badge-inactive'}">
+                                ${rate.is_active ? '✓ Активен' : '✗ Неактивен'}
+                            </span>
+                        </div>
+                        <div class="col-actions">
+                            <button class="btn-icon" onclick="editRate(${rate.id}); event.stopPropagation();" title="Редактировать">
+                                <i class="fas fa-edit"></i>
+                            </button>
+                            <button class="btn-icon btn-danger" onclick="confirmDeleteRate(${rate.id}); event.stopPropagation();" title="Удалить">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+                }).join('')}
+            </div>
+        </div>
+    `;
+    }).join('');
+}
+
+function filterCurrencyRates() {
+    const filter = document.getElementById('currencyFilter').value;
+    loadCurrencyRates(); // Временно перезагружаем все, можно оптимизировать
+}
+
+async function loadUsers() {
+    const container = document.getElementById('usersContainer');
+    container.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Загрузка пользователей...</div>';
+
+    try {
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/users?limit=50`, { headers });
+        if (!response.ok) throw new Error('Failed to load users');
+
+        const users = await response.json();
+        renderUsers(users);
+    } catch (error) {
+        console.error('Error loading users:', error);
+        container.innerHTML = '<div class="loading">Ошибка загрузки пользователей</div>';
+    }
+}
+
+function renderUsers(users) {
+    const container = document.getElementById('usersContainer');
+    const info = document.getElementById('usersInfo');
+
+    info.textContent = `Показано ${users.length} пользователей`;
+
+    if (users.length === 0) {
+        container.innerHTML = '<p>Пользователи не найдены</p>';
+        return;
+    }
+
+    container.innerHTML = users.map(user => `
+        <div class="user-card">
+            <div class="user-header">
+                <span class="user-name">${user.full_name}</span>
+                <span class="user-date">${new Date(user.created_at).toLocaleDateString()}</span>
+            </div>
+            <div class="user-info">
+                <div class="user-stat">
+                    <div class="user-stat-value">${user.telegram_id}</div>
+                    <div class="user-stat-label">Telegram ID</div>
+                </div>
+                <div class="user-stat">
+                    <div class="user-stat-value">${user.favorites_count}</div>
+                    <div class="user-stat-label">Избранное</div>
+                </div>
+                <div class="user-stat">
+                    <div class="user-stat-value">${user.has_psn_credentials ? 'Да' : 'Нет'}</div>
+                    <div class="user-stat-label">PSN данные</div>
+                </div>
+                <div class="user-stat">
+                    <div class="user-stat-value">${user.is_active ? 'Активен' : 'Неактивен'}</div>
+                    <div class="user-stat-label">Статус</div>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Модалы
+function showAddRateModal(currency = '') {
+    const modal = document.getElementById('addRateModal');
+    modal.style.display = 'flex';
+
+    if (currency) {
+        document.getElementById('rateCurrency').value = currency;
+    }
+}
+
+function closeAddRateModal() {
+    document.getElementById('addRateModal').style.display = 'none';
+    document.getElementById('addRateForm').reset();
+}
+
+function confirmDeleteRate(rateId) {
+    if (confirm('Вы уверены, что хотите удалить этот диапазон курса?')) {
+        deleteRateDirectly(rateId);
+    }
+}
+
+async function editRate(rateId) {
+    currentEditingRateId = rateId;
+
+    try {
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, { headers });
+        if (!response.ok) throw new Error('Failed to load currency rates');
+
+        const rates = await response.json();
+        const rate = rates.find(r => r.id === rateId);
+
+        if (rate) {
+            document.getElementById('editRateId').value = rate.id;
+            document.getElementById('editRateValue').value = rate.rate;
+            document.getElementById('editRateDescription').value = rate.description || '';
+            document.getElementById('editRateActive').checked = rate.is_active;
+
+            showEditRateModal();
+        } else {
+            showError('Курс не найден');
+        }
+    } catch (error) {
+        console.error('Error loading rate:', error);
+        showError('Ошибка загрузки данных курса');
+    }
+}
+
+function showEditRateModal() {
+    document.getElementById('editRateModal').style.display = 'flex';
+}
+
+function closeEditRateModal() {
+    document.getElementById('editRateModal').style.display = 'none';
+    document.getElementById('editRateForm').reset();
+    currentEditingRateId = null;
+}
+
+// Обработчики форм
+async function handleAddRate(event) {
+    event.preventDefault();
+
+    const formData = new FormData(event.target);
+    const data = {
+        currency_from: formData.get('currency_from'),
+        price_min: parseFloat(formData.get('price_min')),
+        price_max: formData.get('price_max') ? parseFloat(formData.get('price_max')) : null,
+        rate: parseFloat(formData.get('rate')),
+        description: formData.get('description') || null
+    };
+
+    try {
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            },
+            body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка создания курса');
+        }
+
+        showSuccess('Курс валют добавлен успешно');
+        closeAddRateModal();
+        await loadCurrencyRates();
+        await loadStats();
+    } catch (error) {
+        console.error('Error adding rate:', error);
+        showError(error.message);
+    }
+}
+
+async function handleEditRate(event) {
+    event.preventDefault();
+
+    if (!currentEditingRateId) return;
+
+    const formData = new FormData(event.target);
+    const data = {
+        rate: parseFloat(formData.get('rate')),
+        description: formData.get('description') || null,
+        is_active: formData.get('is_active') === 'on'
+    };
+
+    try {
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates/${currentEditingRateId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            },
+            body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка обновления курса');
+        }
+
+        showSuccess('Курс валют обновлен успешно');
+        closeEditRateModal();
+        await loadCurrencyRates();
+    } catch (error) {
+        console.error('Error updating rate:', error);
+        showError(error.message);
+    }
+}
+
+async function deleteRate() {
+    if (!currentEditingRateId) return;
+
+    if (!confirm('Вы уверены, что хотите удалить этот курс?')) return;
+
+    try {
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates/${currentEditingRateId}`, {
+            method: 'DELETE',
+            headers: {
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка удаления курса');
+        }
+
+        showSuccess('Курс валют удален успешно');
+        closeEditRateModal();
+        await loadCurrencyRates();
+        await loadStats();
+    } catch (error) {
+        console.error('Error deleting rate:', error);
+        showError(error.message);
+    }
+}
+
+async function deleteRateDirectly(rateId) {
+    try {
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates/${rateId}`, {
+            method: 'DELETE',
+            headers: {
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка удаления курса');
+        }
+
+        showSuccess('Диапазон курса удален успешно');
+        await loadCurrencyRates();
+        await loadStats();
+    } catch (error) {
+        console.error('Error deleting rate:', error);
+        showError(error.message);
+    }
+}
+
+async function updateAllPrices() {
+    const button = document.getElementById('updatePricesBtn');
+    const originalText = button.innerHTML;
+
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Обновление...';
+
+    try {
+        const response = await fetch(`${apiBaseUrl}/api/admin/update-prices`, {
+            method: 'POST',
+            headers: {
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка обновления цен');
+        }
+
+        const result = await response.json();
+        showSuccess(`Обновлено ${result.updated_products} товаров`);
+        await loadStats();
+    } catch (error) {
+        console.error('Error updating prices:', error);
+        showError(error.message);
+    } finally {
+        button.disabled = false;
+        button.innerHTML = originalText;
+    }
+}
+
+// Уведомления
+function showSuccess(message) {
+    // Можно использовать toast библиотеку или собственную реализацию
+    alert('✅ ' + message);
+}
+
+function showError(message) {
+    // Можно использовать toast библиотеку или собственную реализацию
+    alert('❌ ' + message);
+}
+</script>
+{% endblock %}

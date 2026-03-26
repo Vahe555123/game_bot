@@ -1,0 +1,881 @@
+{% extends "base.html" %}
+
+{% block title %}FAQ - Часто задаваемые вопросы{% endblock %}
+
+{% block header_actions %}
+<div class="header-search">
+    <input type="text" class="header-search-input" id="globalSearchInput" placeholder="Поиск игр...">
+    <button class="header-filter-btn" id="filterToggleBtn">
+        <i class="fas fa-filter"></i>
+    </button>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filters Section -->
+<div class="search-section fade-in"
+    style="padding: 0; background: transparent; box-shadow: none; border: none; margin-bottom: 0;">
+    <div style="display: none;"></div>
+    <!-- Filters Dropdown -->
+    <div class="filters-dropdown" id="filtersDropdown">
+        <div class="filter-row">
+            <select class="filter-select" id="categoryFilter">
+                <option value="">Все категории</option>
+            </select>
+            <select class="filter-select" id="regionSelect">
+                <option value="">Все регионы</option>
+                <option value="en-ua">🇺🇦 Украина</option>
+                <option value="en-tr">🇹🇷 Турция</option>
+                <option value="en-in">🇮🇳 Индия</option>
+            </select>
+        </div>
+        <div class="filter-row">
+            <select class="filter-select" id="platformFilter">
+                <option value="">Все платформы</option>
+                <option value="PS4">🎮 Только PS4</option>
+                <option value="PS5">🎮 Только PS5</option>
+                <option value="BOTH">🎮 PS4 и PS5</option>
+            </select>
+            <select class="filter-select" id="playersFilter">
+                <option value="">Количество игроков</option>
+                <option value="singleplayer">👤 Одиночная игра</option>
+                <option value="coop">🤝 Кооператив</option>
+            </select>
+        </div>
+        <div class="price-range-row">
+            <input type="number" class="form-control" id="minPrice" placeholder="Мин. цена">
+            <input type="number" class="form-control" id="maxPrice" placeholder="Макс. цена">
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="discountOnly">
+            <label for="discountOnly" class="checkbox-label">Только со скидкой</label>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="psPlusOnly">
+            <label for="psPlusOnly" class="checkbox-label">Доступно в PS Plus</label>
+        </div>
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="eaAccessOnly">
+            <label for="eaAccessOnly" class="checkbox-label">Доступно в EA Access</label>
+        </div>
+        <div class="filter-actions">
+            <button class="btn btn-secondary" id="clearFiltersBtn"><i class="fas fa-times"></i> Очистить</button>
+            <button class="btn btn-primary" id="applyFiltersBtn"><i class="fas fa-check"></i> Применить</button>
+        </div>
+    </div>
+</div>
+
+<!-- Contact Manager Section -->
+<div class="contact-manager-section fade-in">
+    <button class="contact-manager-btn" onclick="openManagerTelegram()">
+        <div class="contact-manager-btn-content">
+            <i class="fas fa-headset"></i>
+            <span>Написать менеджеру</span>
+            <small>Получите персональную помощь</small>
+        </div>
+        <i class="fas fa-chevron-right" style="font-size: 1.2rem; opacity: 0.5;"></i>
+    </button>
+</div>
+
+<!-- FAQ Content -->
+<div class="faq-section fade-in">
+    <h2 class="section-title">
+        <i class="fas fa-question-circle"></i>
+        Помощь и инструкции
+    </h2>
+
+    <div class="faq-grid">
+        <!-- Аккаунты и Подписки -->
+        <div class="faq-category">
+            <h3 class="category-title"><i class="fas fa-user-circle"></i> Аккаунты и Подписки</h3>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК КУПИТЬ НОВЫЙ АККАУНТ?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Аккаунт можно приобрести здесь</p>
+                    <div class="faq-action-list">
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=3594835&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">
+                            <i class="fas fa-shopping-cart"></i> Купить Аккаунт
+                        </a>
+                    </div>
+                    <p>После оплаты Вы попадете на страницу, где сверху будет указан уникальный код. Скопируйте его,
+                        прокрутите страницу вниз и отправьте уникальный код в Чат переписки с продавцом.</p>
+                    <p>В течение 15-60 минут менеджер выполнит заказ и отправит в чат доступы к аккаунту, а Вам на почту
+                        придет уведомление.</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК КУПИТЬ ПОДПИСКУ</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-action-list">
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=3380679&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">ТУРЦИЯ</a>
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=3593045&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">УКРАИНА</a>
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=4966910&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">ИНДИЯ</a>
+                    </div>
+                    <p style="margin-top:10px">Если требуется аккаунт вместе с подпиской, тогда выберите пункт
+                        "Зарегистрируйте мне аккаунт и купите на него подписку" а вместо PSN Email и пароль нужно
+                        поставить прочерк -</p>
+                    <p>Потом заполнить остальные поля и оплатить покупку.</p>
+                    <p>После оплаты необходимо отправить уникальный код в чат переписки с продавцом, который находится
+                        на странице, что появляется после оплаты. Ссылка на страницу с чатом, а также уникальным кодом,
+                        есть в письме, что приходит после оплаты на email во входящие или спам.</p>
+                    <p>Подробное видео о том как покупать, можно посмотреть здесь</p>
+                    <div class="faq-action-list">
+                        <a href="https://youtu.be/-ApyE29u69I" class="faq-action-btn" target="_blank"><i
+                                class="fab fa-youtube"></i> Видео-инструкция</a>
+                    </div>
+                    <p>Там есть ответы на все вопросы.</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК КУПИТЬ ПОДПИСКУ СРАЗУ С АККАУНТОМ?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-action-list">
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=3380679&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">ТУРЦИЯ</a>
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=3593045&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">УКРАИНА</a>
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=4966910&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">ИНДИЯ</a>
+                    </div>
+                    <p style="margin-top:10px">Выберите пункт "Зарегистрируйте мне аккаунт и купите на него подписку". а
+                        вместо PSN Email и пароль нужно поставить прочерк -</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>ЧЕМ ОТЛИЧАЮТСЯ ТАРИФЫ PS PLUS</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Про разницу тарифов подробно здесь</p>
+                    <div class="faq-action-list">
+                        <a href="https://youtu.be/jQgYQ0cwIq8" class="faq-action-btn" target="_blank"><i
+                                class="fab fa-youtube"></i> Видео 1</a>
+                    </div>
+                    <p>или здесь</p>
+                    <div class="faq-action-list">
+                        <a href="https://vkvideo.ru/video-85844500_456240597" class="faq-action-btn" target="_blank"><i
+                                class="fas fa-video"></i> Видео 2</a>
+                    </div>
+                    <p>А коротко здесь</p>
+                    <div class="faq-action-list">
+                        <a href="https://avatars.mds.yandex.net/get-mpic/1926093/img_id2599562789081770968.jpeg/orig"
+                            class="faq-action-btn" target="_blank"><i class="fas fa-image"></i> Картинка</a>
+                    </div>
+                    <p style="margin-top:10px">Большинству хватает Extra. В Deluxe чуть-чуть больше игр + есть игры с
+                        PS1, PS2 и PSP. А также доступ к расширенным демоверсиям игр.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Покупка Игр -->
+        <div class="faq-category">
+            <h3 class="category-title"><i class="fas fa-gamepad"></i> Покупка Игр</h3>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК ПОКУПАТЬ ИГРЫ НА ТУРЕЦКИЙ АККАУНТ?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Зайдите в <i class="fas fa-user"></i> ПРОФИЛЬ. Нажмите на "EMAIL ДЛЯ ПОКУПКИ". Введите email к
+                        которому будут привязаны все покупки в магазине. Он обязательно должен быть рабочим. Сохраните.
+                    </p>
+                    <p>Выберите игру. Нажмите кнопку Купить. Выберите регион Турция. Оплатите.</p>
+                    <p>После оплаты Вы получите карту для пополнения кошелька на аккаунте Playstation. Эту карту нужно
+                        погасить на своем аккаунте и затем купить желаемую игру.</p>
+                    <p>Чтобы погасить карту:</p>
+                    <p>На PS4 нужно зайти в Настройки -> Управление учетной записью -> Данные учетной записи -> Бумажник
+                        -> Пополнение средств -> выбери Погашение кодов и подарочных карт и вводи 12-значный код
+                        ваучера.</p>
+                    <p>На PS5 нужно зайди в Настройки -> Пользователи и учетные записи -> Учетная запись -> Оплата и
+                        подписки -> Redeem Codes и вводи 12-значный код ваучера.</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК ПОКУПАТЬ ИГРЫ НА ИНДИЙСКИЙ АККАУНТ?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Зайдите в <i class="fas fa-user"></i> ПРОФИЛЬ. Нажмите на "EMAIL ДЛЯ ПОКУПКИ". Введите email к
+                        которому будут привязаны все покупки в магазине. Он обязательно должен быть рабочим. Сохраните.
+                    </p>
+                    <p>Выберите игру. Нажмите кнопку Купить. Выберите регион Индия. Оплатите.</p>
+                    <p>После оплаты Вы получите карту для пополнения кошелька на аккаунте Playstation. Эту карту нужно
+                        погасить на своем аккаунте и затем купить желаемую игру.</p>
+                    <p>Чтобы погасить карту:</p>
+                    <p>На PS4 нужно зайти в Настройки -> Управление учетной записью -> Данные учетной записи -> Бумажник
+                        -> Пополнение средств -> выбери Погашение кодов и подарочных карт и вводи 12-значный код
+                        ваучера.</p>
+                    <p>На PS5 нужно зайди в Настройки -> Пользователи и учетные записи -> Учетная запись -> Оплата и
+                        подписки -> Redeem Codes и вводи 12-значный код ваучера.</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК ПОКУПАТЬ ИГРЫ НА УКРАИНСКИЙ АККАУНТ?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Зайдите в <i class="fas fa-user"></i> ПРОФИЛЬ. Нажмите на "EMAIL ДЛЯ ПОКУПКИ". Введите email к
+                        которому будут привязаны все покупки в магазине. Он обязательно должен быть рабочим.</p>
+                    <p>Теперь в профиле зайдите в "PSN АККАУНТ". Выберите аккаунт УКРАИНА и введите там email и пароль
+                        от своего украинского аккаунта. Также в поле КОДЫ 2FA необходимо ввести несколько резервных
+                        кодов, можно все десять. Взять их можно здесь</p>
+                    <div class="faq-action-list">
+                        <a href="https://play-station.by/news/gde-najti-rezervnye-kody-playstation-5"
+                            class="faq-action-btn" target="_blank"><i class="fas fa-info-circle"></i> Где найти коды</a>
+                    </div>
+                    <p>Сохраните.</p>
+                    <p>Выберите игру. Нажмите кнопку Купить. Выберите регион Украина. Оплатите.</p>
+                    <p>После оплаты Вы попадете на страницу, где сверху будет указан уникальный код. Скопируйте его,
+                        прокрутите страницу вниз и отправьте уникальный код в Чат переписки с продавцом.</p>
+                    <p>В течение 15-60 минут менеджер выполнит заказ и отправит в чат доступы к аккаунту, а Вам на почту
+                        придет уведомление.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Оплата и Кошелек -->
+        <div class="faq-category">
+            <h3 class="category-title"><i class="fas fa-wallet"></i> Оплата и Кошелек</h3>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК ПОПОЛНИТЬ БУМАЖНИК АККАУНТА?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <div class="faq-action-list">
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=4500532&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">ТУРЦИЯ</a>
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=4457989&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">ИНДИЯ</a>
+                        <a href="https://www.oplata.info/asp2/pay_wm.asp?id_d=3401037&ai=605064&_ow=0"
+                            class="faq-action-btn" target="_blank">УКРАИНА</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>ГДЕ ПОГАСИТЬ КАРТУ ПОПОЛНЕНИЯ БУМАЖНИКА?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>На PS5 нужно зайди в Настройки -> Пользователи и учетные записи -> Учетная запись -> Оплата и
+                        подписки -> Redeem Codes и вводи 12-значный код ваучера.</p>
+                    <p>На PS4 нужно зайти в Настройки -> Управление учетной записью -> Данные учетной записи -> Бумажник
+                        -> Пополнение средств -> выбери Погашение кодов и подарочных карт и вводи 12-значный код
+                        ваучера.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Безопасность -->
+        <div class="faq-category">
+            <h3 class="category-title"><i class="fas fa-shield-alt"></i> Безопасность</h3>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК ВКЛЮЧИТЬ ДВУХЭТАПНУЮ АУТЕНТИФИКАЦИЮ</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>На PS4 зайдите в Настройки > Управление учетной записью > Данные учетной записи > Безопасность >
+                        Двухэтапная аутентификация - Выберите Приложение-аутентификатор</p>
+                    <p>На PS5 заходим в Настройки > Пользователи и учетные записи > Безопасность > Двухэтапная
+                        аутентификация - Приложение-аутентификатор</p>
+                    <p>После подключения Вам будут показаны Резервные коды. Обязательно сохраните их себе.</p>
+                    <p>Также и можно сразу ввести здесь в приложении для дальнейших покупок.</p>
+                    <p>Зайдите в <i class="fas fa-user"></i> ПРОФИЛЬ.</p>
+                    <p>Зайдите в PSN аккаунт. Выберите аккаунт нужного региона и в поле КОДЫ 2FA введите резервные коды.
+                        Сохраните.</p>
+                    <p>Заодно можно ввести email и пароль от аккаунта.</p>
+                    <p>А также email к которому будут привязаны все покупки в магазине. Он обязательно должен быть
+                        рабочим.</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>ГДЕ НАЙТИ РЕЗЕРВНЫЕ КОДЫ?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Войдите на сайт</p>
+                    <div class="faq-action-list">
+                        <a href="https://www.playstation.com/acct/management" class="faq-action-btn" target="_blank"><i
+                                class="fas fa-external-link-alt"></i> PlayStation Account</a>
+                    </div>
+                    <p>Выберите пункт в меню Безопасность (Security)</p>
+                    <p>Выберите Резервные коды. Запишите их и храните в надежном месте для дальнейшего использования.
+                    </p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КАК СБРОСИТЬ РЕЗЕРВНЫЕ КОДЫ</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Отключите и включите заново Двухфакторную аутентификацию.</p>
+                    <p>На PS4 зайдите в Настройки > Управление учетной записью > Данные учетной записи > Безопасность >
+                        Двухэтапная аутентификация</p>
+                    <p>На PS5 заходим в Настройки > Пользователи и учетные записи > Безопасность > Двухэтапная
+                        аутентификация</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Поддержка -->
+        <div class="faq-category">
+            <h3 class="category-title"><i class="fas fa-headset"></i> Поддержка</h3>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>ГДЕ НАЙТИ ЧАТ ПЕРЕПИСКИ С ПРОДАВЦОМ?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Чат переписки с продавцом находится на странице, что появляется после оплаты. Ссылка на эту
+                        страницу и уникальный код также есть в письме, что приходит после оплаты на email во входящие
+                        или спам. Подробнее можно посмотреть в этом видеогайде</p>
+                    <div class="faq-action-list">
+                        <a href="https://youtu.be/-ApyE29u69I" class="faq-action-btn" target="_blank"><i
+                                class="fab fa-youtube"></i> Видео-гайд</a>
+                    </div>
+                    <p>Либо же зайдите на сайт</p>
+                    <div class="faq-action-list">
+                        <a href="https://oplata.info/info/" class="faq-action-btn" target="_blank"><i
+                                class="fas fa-external-link-alt"></i> oplata.info</a>
+                    </div>
+                    <p>Введите данные своей почты для покупок и следуйте инструкциям.</p>
+                    <p>В конце Вы попадете в личный кабинет и там сможете зайти в раздел покупки, после в купленный
+                        товар и потом в чат.</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>КУДА ОТПРАВИТЬ УНИКАЛЬНЫЙ КОД?</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Код нужно сбросить в чат переписки с продавцом, который находится на странице, что появляется
+                        после оплаты. Ссылка на эту страницу и уникальный код также есть в письме, что приходит после
+                        оплаты на email во входящие или спам. Подробнее можно посмотреть в этом видеогайде</p>
+                    <div class="faq-action-list">
+                        <a href="https://youtu.be/-ApyE29u69I?t=364" class="faq-action-btn" target="_blank"><i
+                                class="fab fa-youtube"></i> Видео-гайд (с 6:04)</a>
+                    </div>
+                    <p>Либо же зайдите на сайт</p>
+                    <div class="faq-action-list">
+                        <a href="https://oplata.info/info/" class="faq-action-btn" target="_blank"><i
+                                class="fas fa-external-link-alt"></i> oplata.info</a>
+                    </div>
+                    <p>Введите данные своей почты для покупок и следуйте инструкциям.</p>
+                    <p>В конце Вы попадете в личный кабинет и там сможете зайти в раздел покупки, после в купленный
+                        товар и потом в чат.</p>
+                </div>
+            </div>
+
+            <div class="faq-item">
+                <button class="faq-question" onclick="toggleFaqAnswer(this)">
+                    <h4>ОШИБКА ПОСЛЕ ОПЛАТЫ</h4><i class="fas fa-chevron-down"></i>
+                </button>
+                <div class="faq-answer">
+                    <p>Если после оплаты произошла ошибка и страница не открылась, то уникальный код и ссылка на
+                        странице с чатом есть в письме, что приходит на Ваш email после оплаты. Проверьте папку Входящие
+                        и Спам.</p>
+                    <p>Подробнее можно посмотреть в этом видеогайде</p>
+                    <div class="faq-action-list">
+                        <a href="https://youtu.be/-ApyE29u69I?t=364" class="faq-action-btn" target="_blank"><i
+                                class="fab fa-youtube"></i> Видео-гайд (с 6:04)</a>
+                    </div>
+                    <p>Либо же зайдите на сайт</p>
+                    <div class="faq-action-list">
+                        <a href="https://oplata.info/info/" class="faq-action-btn" target="_blank"><i
+                                class="fas fa-external-link-alt"></i> oplata.info</a>
+                    </div>
+                    <p>Введите данные своей почты для покупок и следуйте инструкциям.</p>
+                    <p>В конце Вы попадете в личный кабинет и там сможете зайти в раздел покупки, после в купленный
+                        товар и потом в чат.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Contact Section (Unchanged) -->
+<div class="contact-section fade-in">
+    <div class="contact-card">
+        <h3><i class="fas fa-headset"></i> Не нашли ответ?</h3>
+        <p>Наши менеджеры готовы помочь вам с любыми вопросами</p>
+        <button class="btn btn-primary" onclick="openManagerTelegram()"><i class="fas fa-comments"></i> Написать
+            менеджеру</button>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Hide global back button on this top-level page */
+    #backButton {
+        display: none !important;
+    }
+
+    /* Global Animations */
+    @keyframes slideInUp {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /* FAQ Section Container */
+    .faq-section {
+        margin-bottom: 120px;
+        padding: 0 var(--spacing-sm);
+    }
+
+    .section-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 1.75rem;
+        font-weight: 700;
+        margin-bottom: 24px;
+        color: var(--tg-theme-text-color);
+        padding-left: 4px;
+    }
+
+    .section-title i {
+        background: -webkit-linear-gradient(135deg, #3390ff, #0056b3);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 2rem;
+    }
+
+    /* Grid Layout */
+    .faq-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+    }
+
+    /* Category Cards - Glassmorphism */
+    .faq-category {
+        background: var(--tg-theme-secondary-bg-color);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 20px;
+        padding: 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        /* Softer shadow */
+        transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        overflow: hidden;
+        position: relative;
+    }
+
+    /* Category Title */
+    .category-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin-bottom: 20px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid rgba(128, 128, 128, 0.1);
+        color: var(--tg-theme-text-color);
+    }
+
+    .category-title i {
+        color: var(--tg-theme-button-color);
+        font-size: 1.3rem;
+        background: rgba(var(--tg-theme-button-color-rgb), 0.1);
+        /* Fallback if var not exists */
+        background: rgba(0, 122, 255, 0.1);
+        padding: 8px;
+        border-radius: 10px;
+    }
+
+    /* FAQ Item (Accordion) */
+    .faq-item {
+        margin-bottom: 12px;
+        border-radius: 12px;
+        overflow: hidden;
+        border: 1px solid transparent;
+        background: rgba(128, 128, 128, 0.05);
+        transition: all 0.2s ease;
+    }
+
+    .faq-item:hover {
+        background: rgba(128, 128, 128, 0.08);
+    }
+
+    /* FAQ Question Header */
+    .faq-question {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px;
+        cursor: pointer;
+        width: 100%;
+        text-align: left;
+        background: transparent;
+        border: none;
+        outline: none;
+    }
+
+    .faq-question h4 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--tg-theme-text-color);
+        line-height: 1.4;
+        padding-right: 16px;
+        flex: 1;
+        letter-spacing: 0.3px;
+        text-transform: uppercase;
+        /* Match user style */
+        font-size: 0.85rem;
+    }
+
+    .faq-question i {
+        color: var(--tg-theme-hint-color);
+        transition: transform 0.3s ease;
+        font-size: 0.9rem;
+    }
+
+    .faq-question.active i {
+        transform: rotate(180deg);
+        color: var(--tg-theme-button-color);
+    }
+
+    .faq-question.active h4 {
+        color: var(--tg-theme-button-color);
+    }
+
+    /* FAQ Answer Body */
+    .faq-answer {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.3s ease-out;
+        background: rgba(0, 0, 0, 0.02);
+    }
+
+    .faq-answer.active {
+        max-height: 2000px;
+        padding: 16px;
+        padding-top: 0;
+        padding-bottom: 24px;
+        border-top: 1px solid rgba(128, 128, 128, 0.05);
+    }
+
+    .faq-answer p {
+        margin: 0 0 12px 0;
+        color: var(--tg-theme-text-color);
+        opacity: 0.9;
+        line-height: 1.5;
+        font-size: 0.9rem;
+    }
+
+    .faq-answer p:last-child {
+        margin-bottom: 0;
+    }
+
+    /* Action Links & Buttons */
+    .faq-action-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+        margin-bottom: 16px;
+    }
+
+    .faq-action-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        background: rgba(var(--tg-theme-button-color-rgb), 0.1);
+        background: var(--tg-theme-secondary-bg-color);
+        border: 1px solid var(--tg-theme-button-color);
+        color: var(--tg-theme-button-color);
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 500;
+        font-size: 0.85rem;
+        transition: all 0.2s ease;
+    }
+
+    .faq-action-btn:hover {
+        background: var(--tg-theme-button-color);
+        color: var(--tg-theme-button-text-color);
+        transform: translateY(-1px);
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .faq-action-btn i {
+        font-size: 1rem;
+    }
+
+    /* Contact Manager Button (Special Design) */
+    .contact-manager-section {
+        margin: 0 var(--spacing-sm) 24px var(--spacing-sm);
+    }
+
+    .contact-manager-btn {
+        width: 100%;
+        background: linear-gradient(135deg, var(--tg-theme-button-color), #0056b3);
+        color: white;
+        border: none;
+        border-radius: 16px;
+        padding: 16px 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .contact-manager-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .contact-manager-btn-content {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .contact-manager-btn i {
+        font-size: 1.5rem;
+        opacity: 0.9;
+    }
+
+    .contact-manager-btn span {
+        font-size: 1.1rem;
+        font-weight: 700;
+    }
+
+    .contact-manager-btn small {
+        font-size: 0.8rem;
+        opacity: 0.9;
+        font-weight: 400;
+    }
+
+    /* Contact Section at Bottom */
+    .contact-section {
+        margin-top: 60px;
+        padding: 0 var(--spacing-sm);
+        margin-bottom: 160px;
+        /* Increased to avoid nav bar overlap */
+        position: relative;
+    }
+
+    .contact-card {
+        text-align: center;
+        padding: 40px 24px;
+        background: var(--tg-theme-secondary-bg-color);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 24px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+        position: relative;
+        overflow: hidden;
+    }
+
+    /* Gradient Border Effect via pseudo-element */
+    .contact-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #007AFF, #5856D6, #FF2D55);
+    }
+
+    .contact-card h3 {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        font-size: 1.5rem;
+        font-weight: 700;
+        margin-bottom: 12px;
+        color: var(--tg-theme-text-color);
+    }
+
+    .contact-card h3 i {
+        background: linear-gradient(135deg, #007AFF, #5856D6);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-size: 1.8rem;
+    }
+
+    .contact-card p {
+        color: var(--tg-theme-hint-color);
+        margin-bottom: 24px;
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+
+    .contact-card button {
+        background: var(--tg-theme-button-color);
+        color: var(--tg-theme-button-text-color);
+        border: none;
+        font-weight: 600;
+        padding: 14px 32px;
+        border-radius: 14px;
+        transition: all 0.3s ease;
+        font-size: 1rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        box-shadow: 0 4px 15px rgba(var(--tg-theme-button-color-rgb), 0.3);
+        cursor: pointer;
+    }
+
+    .contact-card button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(var(--tg-theme-button-color-rgb), 0.5);
+    }
+
+    .contact-card button i {
+        font-size: 1.1rem;
+    }
+
+    /* Responsive */
+    @media (min-width: 768px) {
+        .faq-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            align-items: start;
+        }
+
+        .faq-category:nth-child(odd):last-child {
+            grid-column: 1 / -1;
+        }
+
+        .contact-card {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Filter scripts (standard)
+    document.addEventListener('DOMContentLoaded', function () {
+        const filterToggleBtn = document.getElementById('filterToggleBtn');
+        const filtersDropdown = document.getElementById('filtersDropdown');
+        const clearFiltersBtn = document.getElementById('clearFiltersBtn');
+        const applyFiltersBtn = document.getElementById('applyFiltersBtn');
+        if (filterToggleBtn && filtersDropdown) {
+            filterToggleBtn.addEventListener('click', function (e) {
+                e.stopPropagation(); e.preventDefault(); filtersDropdown.classList.toggle('show'); filterToggleBtn.classList.toggle('active'); filterToggleBtn.blur();
+            });
+            document.addEventListener('click', function (e) {
+                if (!filtersDropdown.contains(e.target) && !filterToggleBtn.contains(e.target)) {
+                    filtersDropdown.classList.remove('show'); filterToggleBtn.classList.remove('active');
+                }
+            });
+        }
+        if (clearFiltersBtn) {
+            clearFiltersBtn.addEventListener('click', function () {
+                document.getElementById('categoryFilter').value = ''; document.getElementById('regionSelect').value = ''; document.getElementById('platformFilter').value = ''; document.getElementById('playersFilter').value = ''; document.getElementById('minPrice').value = ''; document.getElementById('maxPrice').value = ''; document.getElementById('discountOnly').checked = false; document.getElementById('psPlusOnly').checked = false; document.getElementById('eaAccessOnly').checked = false; filtersDropdown.classList.remove('show'); filterToggleBtn.classList.remove('active');
+            });
+        }
+        if (applyFiltersBtn) {
+            applyFiltersBtn.addEventListener('click', function () {
+                const filters = { category: document.getElementById('categoryFilter').value, region: document.getElementById('regionSelect').value, platform: document.getElementById('platformFilter').value, players: document.getElementById('playersFilter').value, minPrice: document.getElementById('minPrice').value, maxPrice: document.getElementById('maxPrice').value, discountOnly: document.getElementById('discountOnly').checked, psPlusOnly: document.getElementById('psPlusOnly').checked, eaAccessOnly: document.getElementById('eaAccessOnly').checked };
+                sessionStorage.setItem('globalFilters', JSON.stringify(filters));
+                const searchInput = document.getElementById('globalSearchInput');
+                const searchQuery = searchInput ? searchInput.value.trim() : '';
+                if (searchQuery) sessionStorage.setItem('globalSearchQuery', searchQuery);
+                window.location.href = '/webapp';
+            });
+        }
+        loadCategories();
+        async function loadCategories() {
+            try {
+                const response = await fetch('/api/products/categories/list');
+                if (response.ok) {
+                    const categories = await response.json();
+                    const categorySelect = document.getElementById('categoryFilter');
+                    if (categorySelect) {
+                        categories.forEach(category => { const option = document.createElement('option'); option.value = category; option.textContent = category; categorySelect.appendChild(option); });
+                    }
+                }
+            } catch (error) { console.error('Error loading categories:', error); }
+        }
+    });
+
+    function toggleFaqAnswer(element) {
+        const answer = element.nextElementSibling;
+        document.querySelectorAll('.faq-question').forEach(question => {
+            if (question !== element) { question.classList.remove('active'); question.nextElementSibling.classList.remove('active'); }
+        });
+        element.classList.toggle('active'); answer.classList.toggle('active');
+    }
+
+    function contactManager() {
+        if (window.Telegram && window.Telegram.WebApp) { window.Telegram.WebApp.showAlert('Функция связи с менеджером будет доступна в ближайшее время. Пока вы можете написать нам в поддержку через настройки бота.'); } else { alert('Функция связи с менеджером будет доступна в ближайшее время. Пока вы можете написать нам в поддержку через настройки бота.'); }
+    }
+
+    function openManagerTelegram() {
+        const managerTelegramUrl = {{ manager_telegram_url|tojson }};
+        const message = 'Ссылка на менеджера не настроена. Заполните MANAGER_TELEGRAM_URL в .env.';
+
+        if (!managerTelegramUrl) {
+            if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.showAlert) {
+                window.Telegram.WebApp.showAlert(message);
+            } else {
+                alert(message);
+            }
+            return;
+        }
+
+        if (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.openTelegramLink) {
+            window.Telegram.WebApp.openTelegramLink(managerTelegramUrl);
+            return;
+        }
+
+        window.open(managerTelegramUrl, '_blank', 'noopener');
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => { if (entry.isIntersecting) { entry.target.style.animationDelay = Math.random() * 0.3 + 's'; entry.target.classList.add('fade-in'); } });
+        });
+        document.querySelectorAll('.faq-category').forEach(category => { observer.observe(category); });
+    });
+</script>
+{% endblock %}

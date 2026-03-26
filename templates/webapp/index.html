@@ -1,0 +1,1877 @@
+{% extends "base.html" %}
+
+{% block title %}PlayStation Store - Каталог игр{% endblock %}
+
+{% block extra_css %}
+<style>
+/* Skeleton карточки с улучшенной анимацией */
+.skeleton-card {
+    background: white;
+    border-radius: 16px;
+    padding: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    animation: fadeIn 0.3s ease-in-out;
+}
+
+.skeleton-image {
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 12px;
+    margin-bottom: 12px;
+}
+
+.skeleton-content {
+    padding: 8px;
+}
+
+.skeleton-text {
+    height: 14px;
+    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    margin-bottom: 8px;
+}
+
+.skeleton-text.short {
+    width: 60%;
+}
+
+.skeleton-text.medium {
+    width: 80%;
+}
+
+@keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+/* ============================================
+   АДАПТИВНЫЕ СТИЛИ ДЛЯ КАРТОЧЕК ТОВАРОВ
+   ============================================ */
+
+/* Базовые стили для бейджей */
+.product-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    word-break: break-word !important;
+    line-height: 1.3;
+    max-width: 100%;
+}
+
+.product-badge i {
+    flex-shrink: 0;
+    align-self: flex-start;
+    margin-top: 2px;
+}
+
+.product-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+/* Бейдж языка - разрешаем перенос на 2 строки */
+.product-badge.language {
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    text-align: left;
+    align-items: flex-start;
+}
+
+/* --- Смартфоны маленькие (320px - 359px) --- */
+@media screen and (max-width: 359px) {
+    .product-card {
+        padding: 8px;
+    }
+
+    .product-info {
+        padding: 6px;
+    }
+
+    .product-title {
+        font-size: 12px;
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .product-badge {
+        font-size: 9px;
+        padding: 3px 5px;
+        gap: 3px;
+    }
+
+    .product-badge i {
+        font-size: 8px;
+    }
+
+    .product-badge.language {
+        max-width: 100%;
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        line-height: 1.25;
+    }
+
+    .price-current {
+        font-size: 14px;
+    }
+
+    .price-old {
+        font-size: 10px;
+    }
+
+    .region-flag-img {
+        width: 16px;
+        height: 12px;
+    }
+
+    .price-row-regional {
+        gap: 6px;
+        padding: 3px 0;
+    }
+}
+
+/* --- Смартфоны средние (360px - 389px) --- */
+@media screen and (min-width: 360px) and (max-width: 389px) {
+    .product-card {
+        padding: 10px;
+    }
+
+    .product-title {
+        font-size: 13px;
+        line-height: 1.3;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .product-badge {
+        font-size: 10px;
+        padding: 3px 6px;
+    }
+
+    .product-badge i {
+        font-size: 9px;
+    }
+
+    .price-current {
+        font-size: 15px;
+    }
+
+    .price-old {
+        font-size: 11px;
+    }
+}
+
+/* --- Смартфоны стандартные (390px - 429px) --- */
+@media screen and (min-width: 390px) and (max-width: 429px) {
+    .product-title {
+        font-size: 13px;
+        line-height: 1.35;
+    }
+
+    .product-badge {
+        font-size: 10px;
+        padding: 4px 6px;
+    }
+
+    .price-current {
+        font-size: 16px;
+    }
+}
+
+/* --- Смартфоны большие (430px - 599px) --- */
+@media screen and (min-width: 430px) and (max-width: 599px) {
+    .product-title {
+        font-size: 14px;
+    }
+
+    .product-badge {
+        font-size: 11px;
+        padding: 4px 7px;
+    }
+
+    .price-current {
+        font-size: 17px;
+    }
+}
+
+/* --- Планшеты портретные (600px - 767px) --- */
+@media screen and (min-width: 600px) and (max-width: 767px) {
+    .product-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+    }
+
+    .product-title {
+        font-size: 14px;
+    }
+
+    .product-badge {
+        font-size: 11px;
+    }
+}
+
+/* --- Планшеты ландшафтные (768px - 1024px) --- */
+@media screen and (min-width: 768px) and (max-width: 1024px) {
+    .product-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+    }
+
+    .product-title {
+        font-size: 15px;
+    }
+
+    .product-badge {
+        font-size: 12px;
+    }
+}
+
+/* --- Десктопы (1025px+) --- */
+@media screen and (min-width: 1025px) {
+    .product-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 24px;
+    }
+
+    .product-title {
+        font-size: 16px;
+    }
+
+    .product-badge {
+        font-size: 12px;
+        padding: 5px 10px;
+    }
+}
+
+/* --- Общие улучшения для мобильных (до 480px) --- */
+@media screen and (max-width: 480px) {
+    /* Сетка товаров - 2 колонки на мобильных */
+    .product-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+        padding: 0 8px;
+    }
+
+    /* Карточка товара */
+    .product-card {
+        border-radius: 12px;
+    }
+
+    /* Контейнер изображения */
+    .product-image-container {
+        border-radius: 10px;
+    }
+
+    /* Информация о товаре */
+    .product-info {
+        padding: 8px 4px 4px;
+    }
+
+    /* Заголовок товара */
+    .product-title {
+        margin-bottom: 6px;
+        word-break: break-word;
+        hyphens: auto;
+    }
+
+    /* Мета-информация (платформа и язык) */
+    .product-meta {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    /* Бейджи адаптивные - перенос текста на 2 строки */
+    .product-badge.platform,
+    .product-badge.language {
+        width: 100%;
+        max-width: 100%;
+        box-sizing: border-box;
+        justify-content: flex-start;
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        word-break: break-word !important;
+        line-height: 1.3;
+        text-align: left;
+    }
+
+    /* Цены */
+    .regional-prices {
+        gap: 4px;
+    }
+
+    .price-row-regional {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .price-values {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+    }
+
+    .price-main-wrapper {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+
+    /* Скидка */
+    .discount-badge {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+
+    /* Кнопка избранного */
+    .favorite-btn {
+        width: 28px;
+        height: 28px;
+    }
+
+    .favorite-btn i {
+        font-size: 12px;
+    }
+}
+
+/* --- Очень маленькие экраны (до 340px) --- */
+@media screen and (max-width: 340px) {
+    .product-grid {
+        gap: 8px;
+        padding: 0 6px;
+    }
+
+    .product-badge {
+        font-size: 8px;
+        padding: 2px 4px;
+        gap: 2px;
+        white-space: normal !important;
+        word-wrap: break-word !important;
+        line-height: 1.3;
+    }
+
+    .product-badge i {
+        font-size: 7px;
+    }
+
+    .product-badge.language {
+        white-space: normal !important;
+        word-break: break-word !important;
+    }
+
+    .product-title {
+        font-size: 11px;
+    }
+
+    .price-current {
+        font-size: 13px;
+    }
+
+    .price-old {
+        font-size: 9px;
+    }
+
+    .region-flag-img {
+        width: 14px;
+        height: 10px;
+    }
+}
+</style>
+{% endblock %}
+
+{% block header_actions %}
+<div class="header-search">
+    <input type="text" class="header-search-input" id="searchInput" placeholder="Поиск игр...">
+    <button class="header-filter-btn" id="filterToggleBtn">
+        <i class="fas fa-filter"></i>
+    </button>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Filters Section -->
+<div class="search-section fade-in" style="padding: 0; background: transparent; box-shadow: none; border: none; margin-bottom: 0;">
+    <div style="display: none;"></div>
+
+    <!-- Filters Dropdown -->
+    <div class="filters-dropdown" id="filtersDropdown">
+        <div class="filter-row">
+            <select class="filter-select" id="categoryFilter">
+                <option value="">Все категории</option>
+            </select>
+            <select class="filter-select" id="regionSelect">
+                <option value="">Все регионы</option>
+                <option value="en-ua">🇺🇦 Украина</option>
+                <option value="en-tr">🇹🇷 Турция</option>
+                <option value="en-in">🇮🇳 Индия</option>
+            </select>
+        </div>
+
+        <div class="filter-row">
+            <select class="filter-select" id="platformFilter">
+                <option value="">Все платформы</option>
+                <option value="PS4">🎮 Только PS4</option>
+                <option value="PS5">🎮 Только PS5</option>
+                <option value="BOTH">🎮 PS4 и PS5</option>
+            </select>
+            <select class="filter-select" id="playersFilter">
+                <option value="">Количество игроков</option>
+                <option value="singleplayer">👤 Одиночная игра</option>
+                <option value="coop">🤝 Кооператив</option>
+            </select>
+        </div>
+
+        <div class="price-range-row">
+            <input type="number" class="form-control" id="minPrice" placeholder="Мин. цена">
+            <input type="number" class="form-control" id="maxPrice" placeholder="Макс. цена">
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="discountOnly">
+            <label for="discountOnly" class="checkbox-label">Только со скидкой</label>
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="psPlusOnly">
+            <label for="psPlusOnly" class="checkbox-label">Доступно в PS Plus</label>
+        </div>
+
+        <div class="checkbox-row">
+            <input type="checkbox" class="checkbox" id="eaAccessOnly">
+            <label for="eaAccessOnly" class="checkbox-label">Доступно в EA Access</label>
+        </div>
+
+        <div class="filter-actions">
+            <button class="btn btn-secondary" id="clearFiltersBtn">
+                <i class="fas fa-times"></i>
+                Очистить
+            </button>
+            <button class="btn btn-primary" id="applyFiltersBtn">
+                <i class="fas fa-check"></i>
+                Применить
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Products Grid -->
+<div class="product-grid" id="productsContainer">
+    <!-- Products will be loaded here -->
+</div>
+
+<!-- Small Loading Spinner (for pagination) -->
+<div class="text-center" id="loadingSpinner" style="display: none; padding: 20px 0;">
+    <div class="spinner"></div>
+    <p style="margin-top: 8px; margin-bottom: 0; font-size: 0.9rem; color: #666;">Загрузка...</p>
+</div>
+
+<!-- Load More Button -->
+<div class="text-center" id="loadMoreContainer" style="display: none;">
+    <button class="btn btn-primary" id="loadMoreBtn">
+        <i class="fas fa-plus"></i>
+        Загрузить ещё
+    </button>
+</div>
+
+<!-- No Results -->
+<div class="empty-state" id="noResults" style="display: none;">
+    <i class="fas fa-search"></i>
+    <h3>Товары не найдены</h3>
+    <p>Попробуйте изменить параметры поиска или фильтры</p>
+</div>
+
+<!-- Product Template -->
+<template id="productTemplate">
+    <div class="product-card fade-in" data-product-id="">
+        <div class="product-image-container">
+            <img class="product-image" src="" alt="" style="display: none;">
+            <div class="product-placeholder">
+                <i class="fab fa-playstation"></i>
+            </div>
+            <button class="favorite-btn" data-product-id="">
+                <i class="fas fa-heart"></i>
+            </button>
+            <div class="discount-badge" style="display: none;"></div>
+            <img class="ps-plus-badge" src="/static/images/psplussub.png" alt="PS Plus" style="display: none;">
+        </div>
+        <div class="product-info">
+            <h3 class="product-title"></h3>
+            <div class="product-categories">
+                <!-- Category badges will be added here -->
+            </div>
+            <div class="product-meta">
+                <!-- Platform and language badges will be added here -->
+            </div>
+            <div class="price-container">
+                <div class="regional-prices">
+                    <!-- Regional prices will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Skeleton Loading Template -->
+<template id="skeletonTemplate">
+    <div class="skeleton-card">
+        <div class="skeleton-image"></div>
+        <div class="skeleton-content">
+            <div class="skeleton-text short"></div>
+            <div class="skeleton-text medium"></div>
+            <div class="skeleton-text short"></div>
+        </div>
+    </div>
+</template>
+{% endblock %}
+
+{% block extra_js %}
+<script id="initialProductsJson" type="application/json">{{ initial_products|safe }}</script>
+
+<script>
+// SSR: Предзагруженные товары от сервера (мгновенная загрузка)
+window.__INITIAL_PRODUCTS__ = JSON.parse(document.getElementById('initialProductsJson')?.textContent || '[]');
+console.log('⚡ SSR данные загружены:', window.__INITIAL_PRODUCTS__.length, 'товаров');
+</script>
+
+<script>
+class ModernProductCatalog {
+    constructor() {
+        console.log('🏗️ Creating ModernProductCatalog...');
+
+        this.currentPage = 1;
+        this.hasNextPage = true;
+        this.isLoading = false;
+        this.currentFilters = {};
+        this.userTelegramId = null;
+        this.favorites = new Set();
+
+        // Use global instances
+        this.tgApp = window.tgApp;
+        this.api = window.apiClient;
+        this.userTelegramId = this.tgApp?.getUserId();
+
+        console.log('📋 Catalog state:', {
+            tgApp: !!this.tgApp,
+            api: !!this.api,
+            userTelegramId: this.userTelegramId,
+            isInitialized: this.tgApp?.isInitialized
+        });
+
+        this.init();
+    }
+
+    async init() {
+        console.log('🚀 FAST INIT START');
+        const initStart = performance.now();
+
+        // Setup event listeners and UI early
+        this.setupEventListeners();
+        this.restoreSelectedRegion();
+        this.updateFilterState();
+        this.setupInfiniteScroll();
+
+        // Проверяем, изменился ли регион пользователя (если был флаг об изменении региона)
+        const regionChanged = sessionStorage.getItem('regionSettingsChanged');
+        if (regionChanged === 'true') {
+            sessionStorage.removeItem('catalogSearchState');
+            sessionStorage.removeItem('catalogProductsHTML');
+            sessionStorage.removeItem('regionSettingsChanged');
+        }
+
+        // Проверяем, есть ли сохраненное состояние поиска
+        const hasSavedSearchState = sessionStorage.getItem('catalogSearchState');
+
+        if (hasSavedSearchState) {
+            // Если есть сохраненное состояние - восстанавливаем его и загружаем товары
+            console.log('🔄 Обнаружено сохраненное состояние поиска, восстанавливаем...');
+            await this.restoreScrollPosition();
+        } else {
+            // 🚀 SSR: Используем предзагруженные данные от сервера (без кеширования)
+            const ssrData = window.__INITIAL_PRODUCTS__;
+
+            if (ssrData && ssrData.length > 0) {
+                console.log(`⚡ SSR: Получено ${ssrData.length} товаров от сервера`);
+
+                // Рендерим товары
+                this.renderProducts(ssrData);
+                this.hasNextPage = true;
+                const renderTime = performance.now() - initStart;
+                console.log(`✅ Товары отображены за ${renderTime.toFixed(0)}мс`);
+
+                this.hideNoResults();
+                this.updateLoadMoreButton();
+
+                // Очищаем SSR данные
+                window.__INITIAL_PRODUCTS__ = null;
+
+                // Восстанавливаем позицию скролла (без поиска)
+                await this.restoreScrollPosition();
+            } else {
+                // Фолбэк: показываем skeleton и загружаем через API
+                console.log('⚠️ Нет SSR данных, показываем skeleton и загружаем через API');
+                this.showSkeletonLoading();
+                this.loadProducts(true);
+            }
+        }
+
+        // Параллельно инициализируем Telegram и загружаем данные (НЕ блокируем отображение)
+        Promise.all([
+            this.waitForTelegramReady().then(() => {
+                this.tgApp?.expand();
+                return this.initUser();
+            }),
+            this.loadCategories(),
+            this.loadFavorites()
+        ]).then(() => {
+            // После загрузки избранного - обновляем UI
+            this.updateFavoritesUI();
+            const totalTime = performance.now() - initStart;
+            console.log(`✅ Полная инициализация за ${totalTime.toFixed(0)}мс`);
+        }).catch(error => {
+            console.error('⚠️ Ошибка инициализации:', error);
+        });
+    }
+
+    async waitForTelegramReady() {
+        // ОПТИМИЗАЦИЯ: Сокращено время ожидания до 200мс
+        const maxWait = 200;
+        const checkInterval = 20;
+        let waited = 0;
+
+        while (waited < maxWait) {
+            if (this.tgApp && this.tgApp.isInitialized) {
+                this.userTelegramId = this.tgApp.getUserId();
+                console.log('✅ Telegram готов за', waited, 'мс');
+                await this.applyUserRegionSettingsToFilter();
+                return;
+            }
+            await new Promise(resolve => setTimeout(resolve, checkInterval));
+            waited += checkInterval;
+        }
+        console.log('⚠️ Telegram не готов после', maxWait, 'мс, продолжаем');
+    }
+
+    async initUser() {
+        if (!this.userTelegramId) {
+            return;
+        }
+
+        try {
+            const user = this.tgApp.user;
+            if (user) {
+                const userData = {
+                    telegram_id: user.id,
+                    username: user.username,
+                    first_name: user.first_name,
+                    last_name: user.last_name,
+                    language_code: user.language_code || 'ru'
+                };
+
+                await this.api.post('/api/users/', userData);
+            }
+        } catch (error) {
+            // User might already exist, that's ok
+            console.log('User initialization:', error.message);
+        }
+    }
+
+    _regionSettingsFromSelectValue(selectedRegion) {
+        const settings = {
+            show_ukraine_prices: false,
+            show_turkey_prices: false,
+            show_india_prices: false
+        };
+
+        if (selectedRegion === 'en-ua') {
+            settings.show_ukraine_prices = true;
+        } else if (selectedRegion === 'en-tr') {
+            settings.show_turkey_prices = true;
+        } else if (selectedRegion === 'en-in') {
+            settings.show_india_prices = true;
+        } else {
+            // Если фильтр сброшен, оставляем дефолт как в профиле: Турция
+            settings.show_turkey_prices = true;
+        }
+
+        return settings;
+    }
+
+    _selectValueFromRegionSettings(regionSettings) {
+        if (!regionSettings) return '';
+
+        if (regionSettings.show_ukraine_prices) return 'en-ua';
+        if (regionSettings.show_turkey_prices) return 'en-tr';
+        if (regionSettings.show_india_prices) return 'en-in';
+
+        return 'en-tr';
+    }
+
+    async syncRegionFilterToUserSettings() {
+        try {
+            const regionSelect = document.getElementById('regionSelect');
+            if (!regionSelect) return;
+
+            const selectedRegion = regionSelect.value;
+
+            // Если Telegram еще не готов, просто сохраняем в localStorage (уже сделали) и выходим
+            if (!this.userTelegramId) return;
+
+            const payload = this._regionSettingsFromSelectValue(selectedRegion);
+            await this.api.put(`/users/${this.userTelegramId}/region-settings`, payload);
+
+            // Сообщаем другим страницам, что настройки региона обновились
+            sessionStorage.setItem('regionSettingsChanged', 'true');
+        } catch (error) {
+            console.error('❌ Failed to sync region filter to user settings:', error);
+        }
+    }
+
+    async applyUserRegionSettingsToFilter() {
+        try {
+            const regionSelect = document.getElementById('regionSelect');
+            if (!regionSelect) return;
+
+            if (!this.userTelegramId) return;
+
+            const settings = await this.api.get(`/users/${this.userTelegramId}/region-settings`);
+            const desiredValue = this._selectValueFromRegionSettings(settings);
+
+            const optionExists = Array.from(regionSelect.options).some(option => option.value === desiredValue);
+            if (!optionExists) return;
+
+            // Обновляем фильтр и localStorage
+            regionSelect.value = desiredValue;
+            this.saveSelectedRegion();
+            this.updateFilterState();
+        } catch (error) {
+            console.error('❌ Failed to apply user region settings to filter:', error);
+        }
+    }
+
+    setupEventListeners() {
+        // Search
+        const searchInput = document.getElementById('searchInput');
+
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') this.search();
+        });
+
+        // Debounced search on input
+        searchInput.addEventListener('input', this.debounce(() => this.search(), 500));
+
+        // Filter toggle
+        const filterToggleBtn = document.getElementById('filterToggleBtn');
+        const filtersDropdown = document.getElementById('filtersDropdown');
+
+
+
+        if (filterToggleBtn) {
+            filterToggleBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                this.toggleFilters();
+                // Убираем фокус с кнопки, чтобы она не горела после клика
+                filterToggleBtn.blur();
+            });
+        }
+
+        // Close filters when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!filtersDropdown.contains(e.target) && !filterToggleBtn.contains(e.target)) {
+                this.hideFilters();
+            }
+        });
+
+        // Filter actions
+        document.getElementById('clearFiltersBtn').addEventListener('click', () => this.clearFilters());
+        document.getElementById('applyFiltersBtn').addEventListener('click', () => this.applyFilters());
+
+        // Filters (removed auto-search, now only on apply)
+        document.getElementById('categoryFilter').addEventListener('change', () => this.updateFilterState());
+        document.getElementById('regionSelect').addEventListener('change', async () => {
+            this.saveSelectedRegion();
+            await this.syncRegionFilterToUserSettings();
+            this.updateFilterState();
+            // Очищаем кеш и перезагружаем избранное при смене региона
+            this.api.clearCache();
+            await this.loadFavorites();
+        });
+        document.getElementById('platformFilter').addEventListener('change', () => this.updateFilterState());
+        document.getElementById('playersFilter').addEventListener('change', () => this.updateFilterState());
+        document.getElementById('minPrice').addEventListener('input', () => this.updateFilterState());
+        document.getElementById('maxPrice').addEventListener('input', () => this.updateFilterState());
+        document.getElementById('discountOnly').addEventListener('change', () => this.updateFilterState());
+        document.getElementById('psPlusOnly').addEventListener('change', () => this.updateFilterState());
+        document.getElementById('eaAccessOnly').addEventListener('change', () => this.updateFilterState());
+
+        // Load more
+        const loadMoreBtn = document.getElementById('loadMoreBtn');
+        if (loadMoreBtn) {
+            loadMoreBtn.addEventListener('click', () => this.loadMore());
+        }
+
+        // КРИТИЧЕСКИ ВАЖНО: Обновление избранного при возврате из кеша браузера (BFCache)
+        let lastFavoritesUpdate = 0;
+        const updateFavoritesWithDebounce = async (source) => {
+            const now = Date.now();
+            // Предотвращаем двойные вызовы (в течение 300мс)
+            if (now - lastFavoritesUpdate < 300) {
+                console.log(`⏭️ Skipping favorites update from ${source} (too soon)`);
+                return;
+            }
+            lastFavoritesUpdate = now;
+            console.log(`🔄 Updating favorites from ${source}...`);
+            await this.loadFavorites();
+            this.updateFavoritesUI();
+        };
+
+        window.addEventListener('pageshow', async (event) => {
+            // event.persisted = true означает, что страница загружена из кеша (BFCache)
+            if (event.persisted) {
+                console.log('📄 Page loaded from BFCache');
+                await updateFavoritesWithDebounce('pageshow');
+            }
+        });
+
+        // Обновление UI избранного при возвращении на страницу
+        document.addEventListener('visibilitychange', async () => {
+            if (!document.hidden) {
+                console.log('👀 Page became visible');
+                await updateFavoritesWithDebounce('visibilitychange');
+            }
+        });
+
+        // Product clicks
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('.product-card') && !e.target.closest('.favorite-btn')) {
+                const productCard = e.target.closest('.product-card');
+                const productId = productCard.dataset.productId;
+                if (productId) {
+                    this.tgApp.hapticFeedback('impact', 'light');
+
+                    // Сохраняем текущее состояние поиска и фильтров перед переходом
+                    this.saveSearchState();
+
+                    sessionStorage.setItem('productDetailReturn', JSON.stringify({ from: 'home' }));
+
+                    // Сохраняем регион ИЗ КАРТОЧКИ товара, а не из фильтра
+                    const productRegion = productCard.dataset.productRegion;
+                    if (productRegion) {
+                        localStorage.setItem('selectedRegion', productRegion);
+                        console.log('🌍 Сохранен регион из карточки:', productRegion);
+                    } else {
+                        // Если регион не указан в карточке, удаляем из localStorage
+                        localStorage.removeItem('selectedRegion');
+                        console.log('🌍 Регион не указан в карточке, удален из localStorage');
+                    }
+                    window.location.href = `/webapp/product/${productId}`;
+                }
+            }
+
+            if (e.target.closest('.favorite-btn')) {
+                e.preventDefault();
+                e.stopPropagation();
+                const favoriteBtn = e.target.closest('.favorite-btn');
+                const productId = favoriteBtn.dataset.productId;
+                this.toggleFavorite(productId, favoriteBtn);
+            }
+        });
+    }
+
+    setupInfiniteScroll() {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && this.hasNextPage && !this.isLoading) {
+                    this.loadMore();
+                }
+            });
+        }, {
+            threshold: 0.1,
+            rootMargin: '100px'
+        });
+
+        // Observe load more button
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        if (loadMoreContainer) {
+            observer.observe(loadMoreContainer);
+        }
+    }
+
+    async loadCategories() {
+        try {
+            const categories = await this.api.get('/products/categories/list');
+
+            const categorySelect = document.getElementById('categoryFilter');
+            categories.forEach(category => {
+                const option = document.createElement('option');
+                option.value = category;
+                option.textContent = category;
+                categorySelect.appendChild(option);
+            });
+        } catch (error) {
+            console.error('Error loading categories:', error);
+        }
+    }
+
+    async loadFavorites() {
+        if (!this.userTelegramId) return;
+
+        try {
+            console.log(' Loading favorites for user:', this.userTelegramId);
+            // Явно отключаем кеш для получения актуальных данных
+            const favorites = await this.api.get(`/users/${this.userTelegramId}/favorites/`, {}, false);
+            this.favorites = new Set(favorites.map(f => f.product_id));
+            console.log(' Favorites loaded:', this.favorites.size, 'items', Array.from(this.favorites));
+        } catch (error) {
+            console.error('Error loading favorites:', error);
+        }
+    }
+
+    search() {
+        this.currentPage = 1;
+        this.hasNextPage = true;
+        // Очищаем SSR данные при поиске
+        window.__INITIAL_PRODUCTS__ = null;
+        this.loadProducts(true);
+    }
+
+    loadMore() {
+        if (this.hasNextPage && !this.isLoading) {
+            this.currentPage++;
+            this.loadProducts(false);
+        }
+    }
+
+    async loadProducts(clearContainer = false) {
+        if (this.isLoading) return;
+
+        this.isLoading = true;
+        this.showLoading(true);
+
+        try {
+            const params = new URLSearchParams({
+                page: this.currentPage,
+                limit: 12
+            });
+
+            // Add telegram_id if available for user-specific region settings
+            if (this.userTelegramId) {
+                params.append('telegram_id', this.userTelegramId);
+            }
+
+            // Add filters
+            const search = document.getElementById('searchInput').value.trim();
+            if (search) params.append('search', search);
+
+            const category = document.getElementById('categoryFilter').value;
+            if (category) params.append('category', category);
+
+            const region = document.getElementById('regionSelect').value;
+            if (region) params.append('region', region);
+
+            const platform = document.getElementById('platformFilter').value;
+            if (platform) params.append('platform', platform);
+
+            const players = document.getElementById('playersFilter').value;
+            if (players) params.append('players', players);
+
+            const minPrice = document.getElementById('minPrice').value;
+            if (minPrice) params.append('min_price', minPrice);
+
+            const maxPrice = document.getElementById('maxPrice').value;
+            if (maxPrice) params.append('max_price', maxPrice);
+
+            const discountOnly = document.getElementById('discountOnly').checked;
+            if (discountOnly) params.append('has_discount', 'true');
+
+            const psPlusOnly = document.getElementById('psPlusOnly').checked;
+            if (psPlusOnly) params.append('has_ps_plus', 'true');
+
+            const eaAccessOnly = document.getElementById('eaAccessOnly').checked;
+            if (eaAccessOnly) params.append('has_ea_access', 'true');
+
+            // БЕЗ КЭША - всегда актуальные данные о ценах и курсах
+            const data = await this.api.get('/products/', Object.fromEntries(params), false);
+
+            if (clearContainer) {
+                this.clearProducts();
+            }
+
+            // Убираем skeleton loading при первой загрузке
+            this.hideSkeletonLoading();
+
+            if (data.products && data.products.length > 0) {
+                this.renderProducts(data.products);
+                this.hasNextPage = data.has_next;
+                this.hideNoResults();
+            } else if (this.currentPage === 1) {
+                this.showNoResults();
+            }
+
+            this.updateLoadMoreButton();
+
+        } catch (error) {
+            console.error('Error loading products:', error);
+            this.showError('Ошибка загрузки товаров');
+        } finally {
+            this.isLoading = false;
+            this.showLoading(false);
+        }
+    }
+
+    renderProducts(products) {
+        const container = document.getElementById('productsContainer');
+        const template = document.getElementById('productTemplate');
+
+        // Сортируем товары по английскому алфавиту (без учета регистра)
+        const sortedProducts = [...products].sort((a, b) => {
+            const nameA = (a.name || '').toLowerCase();
+            const nameB = (b.name || '').toLowerCase();
+            return nameA.localeCompare(nameB, 'en', { sensitivity: 'base' });
+        });
+
+        // ОПТИМИЗАЦИЯ: Используем DocumentFragment для быстрой вставки
+        const fragment = document.createDocumentFragment();
+
+        sortedProducts.forEach(product => {
+            const productCard = this.createProductCard(product, template);
+            fragment.appendChild(productCard);
+        });
+
+        // Одна операция вставки вместо множества
+        container.appendChild(fragment);
+    }
+
+    createProductCard(product, template) {
+        const card = template.content.cloneNode(true);
+        const cardElement = card.querySelector('.product-card');
+
+        // Set product ID and region
+        cardElement.dataset.productId = product.id;
+        // Используем регион ИЗ ТОВАРА (возвращенного API), а не из фильтра
+        cardElement.dataset.productRegion = product.region || '';
+
+        // Set image with lazy loading
+        const img = card.querySelector('.product-image');
+        const placeholder = card.querySelector('.product-placeholder');
+
+        if (product.image) {
+            // ОПТИМИЗАЦИЯ: Ленивая загрузка изображений
+            img.loading = 'lazy';
+            img.src = product.image;
+            img.alt = product.name;
+            img.style.display = 'block';
+            img.onload = () => {
+                placeholder.style.display = 'none';
+            };
+            img.onerror = () => {
+                img.style.display = 'none';
+                placeholder.style.display = 'flex';
+            };
+        }
+
+        // Set favorite button
+        const favoriteBtn = card.querySelector('.favorite-btn');
+        favoriteBtn.dataset.productId = product.id;
+
+        // ВИЗУАЛЬНОЕ РЕШЕНИЕ: Проверяем регион для избранного
+        if (this.favorites.has(product.id)) {
+            const savedRegion = localStorage.getItem(`favorite_region_${product.id}`);
+            const cardRegion = cardElement.dataset.productRegion;
+
+            // Если регион сохранен и совпадает с карточкой - показываем активное сердечко
+            // Если регион не сохранен (старые данные) - показываем на всех (backward compatibility)
+            if (!savedRegion || savedRegion === cardRegion) {
+                favoriteBtn.classList.add('active');
+            }
+        }
+
+        // Set discount badge
+        const discountBadge = card.querySelector('.discount-badge');
+        const discountValue = product.discount_percent || product.discount;
+        if (discountValue && discountValue > 0) {
+            discountBadge.textContent = `-${Math.round(discountValue)}%`;
+            discountBadge.style.display = 'block';
+        }
+
+        // Set PS Plus badge (показываем только для игр, входящих в подписку)
+        const psPlusBadge = card.querySelector('.ps-plus-badge');
+        const isInPsPlusCollection = product.ps_plus_collection &&
+                                     product.ps_plus_collection !== '' &&
+                                     product.ps_plus_collection !== '0' &&
+                                     product.ps_plus_collection !== 'null';
+
+        if (isInPsPlusCollection) {
+            psPlusBadge.style.display = 'block';
+        }
+
+        // Отладка - выводим первые 3 товара с ps_plus_collection
+        if (isInPsPlusCollection) {
+            window.psPlusDebugCount = (window.psPlusDebugCount || 0) + 1;
+            if (window.psPlusDebugCount <= 3) {
+                console.log(`🎮 PS Plus товар: ${product.name}`, {
+                    ps_plus: product.ps_plus,
+                    ps_plus_collection: product.ps_plus_collection
+                });
+            }
+        }
+
+        // Set product info
+        card.querySelector('.product-title').textContent = product.name || 'Без названия';
+
+        // Set product categories (separate block on top)
+        const categoriesContainer = card.querySelector('.product-categories');
+        this.renderProductCategories(categoriesContainer, product);
+
+        // Set product meta (platform and language)
+        const metaContainer = card.querySelector('.product-meta');
+        this.renderProductMeta(metaContainer, product);
+
+        // Set regional prices
+        const regionalPricesContainer = card.querySelector('.regional-prices');
+        this.renderProductPrices(regionalPricesContainer, product);
+
+        return card;
+    }
+
+    renderProductCategories(container, product) {
+        // СКРЫТО: Отображение категорий на карточках отключено
+        // Категории остаются доступны для фильтрации
+        container.innerHTML = '';
+    }
+
+    renderProductMeta(container, product) {
+        container.innerHTML = '';
+
+        // Определяем платформу
+        let platformText = '';
+        if (product.platforms) {
+            // Если platforms это строка
+            if (typeof product.platforms === 'string') {
+                platformText = product.platforms;
+            } else if (Array.isArray(product.platforms)) {
+                platformText = product.platforms.join(', ');
+            }
+        } else if (product.platform) {
+            platformText = product.platform;
+        }
+
+        // Показываем платформу, если есть
+        if (platformText && platformText.trim()) {
+            const platformBadge = document.createElement('div');
+            platformBadge.className = 'product-badge platform';
+            platformBadge.innerHTML = `<i class="fas fa-gamepad"></i> ${platformText}`;
+            container.appendChild(platformBadge);
+        }
+
+        // Определяем локализацию из поля localization_name (как в product_detail.html)
+        let languageText = '';
+        if (product.localization_name) {
+            languageText = product.localization_name;
+        }
+
+        // Показываем локализацию, если есть
+        if (languageText && languageText.trim()) {
+            const languageBadge = document.createElement('div');
+            languageBadge.className = 'product-badge language';
+            languageBadge.innerHTML = `<i class="fas fa-language"></i> ${languageText}`;
+            container.appendChild(languageBadge);
+        }
+    }
+
+    renderProductPrices(container, product) {
+        container.innerHTML = '';
+
+        // Маппинг флагов на изображения
+        const flagMapping = {
+            '🇺🇦': '/static/images/flags/ukraine.png',
+            '🇹🇷': '/static/images/flags/turkey.png',
+            '🇮🇳': '/static/images/flags/India.png'
+        };
+
+        // Отображаем все региональные цены с флагами
+        // Порядок: Турция, Индия, Украина
+        const regionOrder = { 'TR': 1, 'IN': 2, 'UA': 3 };
+        if (product.regional_prices && product.regional_prices.length > 0) {
+            const sortedPrices = [...product.regional_prices].sort((a, b) => {
+                const orderA = regionOrder[a.region] || 999;
+                const orderB = regionOrder[b.region] || 999;
+                return orderA - orderB;
+            });
+            sortedPrices.forEach(regionPrice => {
+                const priceRow = document.createElement('div');
+                priceRow.className = 'price-row-regional';
+
+                // Флаг региона
+                const flagImg = document.createElement('img');
+                flagImg.className = 'region-flag-img';
+                flagImg.src = flagMapping[regionPrice.flag] || regionPrice.flag;
+                flagImg.alt = regionPrice.name;
+                flagImg.onerror = function() { this.style.display = 'none'; };
+                priceRow.appendChild(flagImg);
+
+                // Блок с ценами
+                const pricesDiv = document.createElement('div');
+                pricesDiv.className = 'price-values';
+
+                if (regionPrice.price_rub && regionPrice.price_rub > 0) {
+                    const priceWrapper = document.createElement('div');
+                    priceWrapper.className = 'price-main-wrapper';
+
+                    const currentPrice = document.createElement('span');
+                    currentPrice.className = 'price-current';
+                    currentPrice.textContent = `${Math.round(regionPrice.price_rub)}₽`;
+                    priceWrapper.appendChild(currentPrice);
+
+                    // Показываем старую цену если есть скидка
+                    if (regionPrice.old_price_rub && regionPrice.old_price_rub > regionPrice.price_rub) {
+                        const oldPriceElement = document.createElement('span');
+                        oldPriceElement.className = 'price-old';
+                        oldPriceElement.textContent = `${Math.round(regionPrice.old_price_rub)}₽`;
+                        priceWrapper.appendChild(oldPriceElement);
+                    }
+
+                    pricesDiv.appendChild(priceWrapper);
+                } else {
+                    const noPrice = document.createElement('span');
+                    noPrice.className = 'price-na';
+                    noPrice.textContent = 'Н/Д';
+                    pricesDiv.appendChild(noPrice);
+                }
+
+                priceRow.appendChild(pricesDiv);
+                container.appendChild(priceRow);
+            });
+        } else {
+            // Fallback на старый формат
+            const priceRow = document.createElement('div');
+            priceRow.className = 'price-row';
+
+            const pricesDiv = document.createElement('div');
+            pricesDiv.className = 'price-values';
+
+            const minPrice = product.min_price_rub || product.rub_price;
+            const oldPrice = product.rub_price_old;
+
+            if (minPrice && minPrice > 0) {
+                const priceWrapper = document.createElement('div');
+                priceWrapper.className = 'price-main-wrapper';
+
+                const currentPrice = document.createElement('span');
+                currentPrice.className = 'price-current';
+                currentPrice.textContent = `${Math.round(minPrice)}₽`;
+                priceWrapper.appendChild(currentPrice);
+
+                if (oldPrice && oldPrice > minPrice) {
+                    const oldPriceElement = document.createElement('span');
+                    oldPriceElement.className = 'price-old';
+                    oldPriceElement.textContent = `${Math.round(oldPrice)}₽`;
+                    priceWrapper.appendChild(oldPriceElement);
+                }
+
+                pricesDiv.appendChild(priceWrapper);
+            } else {
+                const noPrice = document.createElement('span');
+                noPrice.className = 'price-na';
+                noPrice.textContent = 'Цена не указана';
+                pricesDiv.appendChild(noPrice);
+            }
+
+            priceRow.appendChild(pricesDiv);
+            container.appendChild(priceRow);
+        }
+    }
+
+    async toggleFavorite(productId, favoriteBtn) {
+        console.log('⭐ Toggle favorite for product:', productId, 'User ID:', this.userTelegramId);
+        console.log('⭐ Product ID type:', typeof productId, 'Value:', productId);
+        console.log('⭐ Product ID parsed:', parseInt(productId));
+
+        if (!this.userTelegramId) {
+            console.error('❌ No user ID available');
+            this.showError('Для работы с избранным нужна авторизация');
+            return;
+        }
+
+        this.tgApp.hapticFeedback('impact', 'light');
+
+        const isCurrentlyFavorite = this.favorites.has(parseInt(productId));
+        // Получаем регион из карточки, на которой нажали кнопку
+        const productCard = favoriteBtn.closest('.product-card');
+        const productRegion = productCard ? productCard.dataset.productRegion : '';
+
+        console.log('⭐ Is currently favorite:', isCurrentlyFavorite);
+        console.log('⭐ Product region:', productRegion);
+        console.log('⭐ Current favorites set:', Array.from(this.favorites));
+
+        try {
+            if (isCurrentlyFavorite) {
+                console.log('🗑️ Removing from favorites...');
+                await this.api.delete(`/users/${this.userTelegramId}/favorites/${productId}`);
+                this.favorites.delete(parseInt(productId));
+
+                // Удаляем сохраненный регион из localStorage
+                localStorage.removeItem(`favorite_region_${productId}`);
+
+                // ВИЗУАЛЬНОЕ РЕШЕНИЕ: Убираем активный класс со ВСЕХ кнопок этого товара
+                document.querySelectorAll(`[data-product-id="${productId}"].favorite-btn`).forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                console.log('✅ Removed from favorites successfully');
+            } else {
+                console.log('➕ Adding to favorites...');
+                console.log('➕ Request payload:', {
+                    product_id: parseInt(productId),
+                    region: productRegion
+                });
+                console.log('➕ Product region to save:', productRegion);
+
+                const payload = {
+                    product_id: productId,
+                    region: productRegion || null
+                };
+                console.log('➕ Sending payload:', payload);
+
+                await this.api.post(`/users/${this.userTelegramId}/favorites/`, payload);
+                this.favorites.add(parseInt(productId));
+
+                // ВИЗУАЛЬНОЕ РЕШЕНИЕ: Сохраняем регион в localStorage
+                if (productRegion) {
+                    localStorage.setItem(`favorite_region_${productId}`, productRegion);
+                    console.log('💾 Saved favorite region:', productRegion);
+                }
+
+                // ВИЗУАЛЬНОЕ РЕШЕНИЕ: Активируем только кнопки с ТАКИМ ЖЕ регионом
+                document.querySelectorAll(`[data-product-id="${productId}"].favorite-btn`).forEach(btn => {
+                    const btnCard = btn.closest('.product-card');
+                    const btnRegion = btnCard ? btnCard.dataset.productRegion : '';
+
+                    // Показываем активное сердечко только на карточках с тем же регионом
+                    if (!productRegion || btnRegion === productRegion) {
+                        btn.classList.add('active');
+                    }
+                });
+                console.log('✅ Added to favorites successfully');
+            }
+
+            this.tgApp.hapticFeedback('notification', 'success');
+        } catch (error) {
+            console.error('❌ Error toggling favorite:', error);
+            console.error('❌ Error details:', {
+                message: error.message,
+                stack: error.stack,
+                productId: productId,
+                userId: this.userTelegramId
+            });
+            this.showError('Ошибка при обновлении избранного');
+        }
+    }
+
+    clearProducts() {
+        const container = document.getElementById('productsContainer');
+        container.innerHTML = '';
+    }
+
+    showLoading(show, isInitialLoad = false) {
+        const smallSpinner = document.getElementById('loadingSpinner');
+
+        if (show) {
+            // Показываем только маленький спиннер
+            smallSpinner.style.display = 'block';
+        } else {
+            // Скрываем спиннер
+            smallSpinner.style.display = 'none';
+        }
+    }
+
+    showSkeletonLoading() {
+        // ОПТИМИЗАЦИЯ: Показываем skeleton только если контейнер пустой
+        const container = document.getElementById('productsContainer');
+        if (this.currentPage === 1 && container.children.length === 0) {
+            const template = document.getElementById('skeletonTemplate');
+
+            // Show skeleton cards
+            for (let i = 0; i < 6; i++) {
+                const skeleton = template.content.cloneNode(true);
+                container.appendChild(skeleton);
+            }
+        }
+    }
+
+    hideSkeletonLoading() {
+        if (this.currentPage === 1) {
+            const skeletons = document.querySelectorAll('.skeleton-card');
+            skeletons.forEach(skeleton => skeleton.remove());
+        }
+    }
+
+    showNoResults() {
+        document.getElementById('noResults').style.display = 'block';
+        document.getElementById('loadMoreContainer').style.display = 'none';
+    }
+
+    hideNoResults() {
+        document.getElementById('noResults').style.display = 'none';
+    }
+
+    updateLoadMoreButton() {
+        const loadMoreContainer = document.getElementById('loadMoreContainer');
+        if (this.hasNextPage) {
+            loadMoreContainer.style.display = 'block';
+        } else {
+            loadMoreContainer.style.display = 'none';
+        }
+    }
+
+    showError(message) {
+        // Simple error handling - you can enhance this
+        alert(message);
+    }
+
+    // НОВЫЙ МЕТОД: Обновление UI избранного для всех карточек на странице С УЧЕТОМ РЕГИОНА
+    updateFavoritesUI() {
+        console.log('🔄 Updating favorites UI...', 'Favorites count:', this.favorites.size);
+
+        document.querySelectorAll('.favorite-btn').forEach(btn => {
+            const productId = btn.dataset.productId;
+            const productCard = btn.closest('.product-card');
+            const cardRegion = productCard ? productCard.dataset.productRegion : '';
+
+            if (this.favorites.has(productId)) {
+                const savedRegion = localStorage.getItem(`favorite_region_${productId}`);
+
+                // Показываем активное сердечко только если регионы совпадают или регион не сохранен
+                if (!savedRegion || savedRegion === cardRegion) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+
+        console.log('✅ Favorites UI updated');
+    }
+
+    toggleFilters() {
+        const filtersDropdown = document.getElementById('filtersDropdown');
+
+        if (!filtersDropdown) {
+            return;
+        }
+
+        const isVisible = filtersDropdown.classList.contains('show');
+
+        if (isVisible) {
+            this.hideFilters();
+        } else {
+            this.showFilters();
+        }
+    }
+
+    showFilters() {
+        const filterToggleBtn = document.getElementById('filterToggleBtn');
+        const filtersDropdown = document.getElementById('filtersDropdown');
+
+        if (filtersDropdown) {
+            filtersDropdown.classList.add('show');
+        }
+
+        if (filterToggleBtn) {
+            // Сначала убираем все классы состояния
+            filterToggleBtn.classList.remove('has-filters');
+            // Затем добавляем active
+            filterToggleBtn.classList.add('active');
+            // Убираем фокус асинхронно
+            setTimeout(() => filterToggleBtn.blur(), 0);
+        }
+
+        // Haptic feedback
+        if (this.tgApp?.hapticFeedback) {
+            this.tgApp.hapticFeedback('impact', 'light');
+        }
+    }
+
+    hideFilters() {
+        const filterToggleBtn = document.getElementById('filterToggleBtn');
+        const filtersDropdown = document.getElementById('filtersDropdown');
+
+        if (filtersDropdown) {
+            filtersDropdown.classList.remove('show');
+        }
+
+        if (filterToggleBtn) {
+            // Сначала убираем active класс
+            filterToggleBtn.classList.remove('active');
+
+            // Затем проверяем, есть ли активные фильтры и добавляем соответствующий класс
+            const hasFilters = this.hasActiveFilters();
+            if (hasFilters) {
+                filterToggleBtn.classList.add('has-filters');
+            } else {
+                filterToggleBtn.classList.remove('has-filters');
+            }
+
+            // Убираем фокус асинхронно после всех изменений классов
+            setTimeout(() => filterToggleBtn.blur(), 0);
+        }
+    }
+
+    updateFilterState() {
+        // Update button appearance based on whether filters are active
+        const filterToggleBtn = document.getElementById('filterToggleBtn');
+        const filtersDropdown = document.getElementById('filtersDropdown');
+
+        if (!filterToggleBtn || !filtersDropdown) return;
+
+        const isDropdownOpen = filtersDropdown.classList.contains('show');
+
+        // НЕ обновляем состояние кнопки если dropdown открыт
+        // (это будет делать showFilters/hideFilters)
+        if (isDropdownOpen) {
+            return;
+        }
+
+        // Только если dropdown закрыт - обновляем классы
+        const hasFilters = this.hasActiveFilters();
+
+        // Убираем active в любом случае (dropdown закрыт)
+        filterToggleBtn.classList.remove('active');
+
+        // Добавляем has-filters только если есть активные фильтры
+        if (hasFilters) {
+            filterToggleBtn.classList.add('has-filters');
+        } else {
+            filterToggleBtn.classList.remove('has-filters');
+        }
+    }
+
+    hasActiveFilters() {
+        const category = document.getElementById('categoryFilter').value;
+        const region = document.getElementById('regionSelect').value;
+        const platform = document.getElementById('platformFilter').value;
+        const players = document.getElementById('playersFilter').value;
+        const minPrice = document.getElementById('minPrice').value;
+        const maxPrice = document.getElementById('maxPrice').value;
+        const discountOnly = document.getElementById('discountOnly').checked;
+        const psPlusOnly = document.getElementById('psPlusOnly').checked;
+        const eaAccessOnly = document.getElementById('eaAccessOnly').checked;
+
+        return !!(category || region || platform || players || minPrice || maxPrice || discountOnly || psPlusOnly || eaAccessOnly);
+    }
+
+    restoreSelectedRegion() {
+        const savedRegion = localStorage.getItem('selectedRegion');
+        if (savedRegion) {
+            const regionSelect = document.getElementById('regionSelect');
+            // Проверяем, что такой регион существует в списке
+            const optionExists = Array.from(regionSelect.options).some(option => option.value === savedRegion);
+            if (optionExists) {
+                regionSelect.value = savedRegion;
+                console.log('🔄 Восстановлен регион из localStorage:', savedRegion);
+            }
+        }
+    }
+
+    saveSelectedRegion() {
+        const regionSelect = document.getElementById('regionSelect');
+        const selectedRegion = regionSelect.value;
+        if (selectedRegion) {
+            localStorage.setItem('selectedRegion', selectedRegion);
+            console.log('💾 Сохранен регион в localStorage:', selectedRegion);
+        } else {
+            localStorage.removeItem('selectedRegion');
+            console.log('🗑️ Регион удален из localStorage');
+        }
+    }
+
+    saveSearchState() {
+        const searchState = {
+            searchText: document.getElementById('searchInput').value,
+            category: document.getElementById('categoryFilter').value,
+            region: document.getElementById('regionSelect').value,
+            platform: document.getElementById('platformFilter').value,
+            players: document.getElementById('playersFilter').value,
+            minPrice: document.getElementById('minPrice').value,
+            maxPrice: document.getElementById('maxPrice').value,
+            discountOnly: document.getElementById('discountOnly').checked,
+            psPlusOnly: document.getElementById('psPlusOnly').checked,
+            eaAccessOnly: document.getElementById('eaAccessOnly').checked,
+            scrollPosition: window.scrollY || window.pageYOffset,
+            currentPage: this.currentPage
+        };
+
+        sessionStorage.setItem('catalogSearchState', JSON.stringify(searchState));
+
+        // Сохраняем HTML контент товаров для мгновенного восстановления
+        const container = document.getElementById('productsContainer');
+        const productsHTML = container.innerHTML;
+        sessionStorage.setItem('catalogProductsHTML', productsHTML);
+
+        console.log('💾 Сохранено состояние поиска:', searchState);
+        console.log('💾 Сохранен HTML контент товаров');
+    }
+
+    restoreSearchState() {
+        const savedState = sessionStorage.getItem('catalogSearchState');
+        if (!savedState) {
+            console.log('ℹ️ Нет сохраненного состояния поиска');
+            return false;
+        }
+
+        try {
+            const state = JSON.parse(savedState);
+            console.log('🔄 Восстановление состояния поиска:', state);
+
+            // Восстанавливаем значения полей
+            document.getElementById('searchInput').value = state.searchText || '';
+            document.getElementById('categoryFilter').value = state.category || '';
+            document.getElementById('regionSelect').value = state.region || '';
+            document.getElementById('platformFilter').value = state.platform || '';
+            document.getElementById('playersFilter').value = state.players || '';
+            document.getElementById('minPrice').value = state.minPrice || '';
+            document.getElementById('maxPrice').value = state.maxPrice || '';
+            document.getElementById('discountOnly').checked = state.discountOnly || false;
+            document.getElementById('psPlusOnly').checked = state.psPlusOnly || false;
+            document.getElementById('eaAccessOnly').checked = state.eaAccessOnly || false;
+
+            this.currentPage = state.currentPage || 1;
+
+            // Обновляем UI фильтров
+            this.updateFilterState();
+
+            // Очищаем сохраненное состояние
+            sessionStorage.removeItem('catalogSearchState');
+
+            return state;
+        } catch (error) {
+            console.error('❌ Ошибка при восстановлении состояния:', error);
+            sessionStorage.removeItem('catalogSearchState');
+            return false;
+        }
+    }
+
+    async restoreScrollPosition() {
+        // Пытаемся восстановить состояние поиска
+        const restoredState = this.restoreSearchState();
+
+        if (restoredState) {
+            // Проверяем, есть ли сохраненный HTML контент
+            const savedHTML = sessionStorage.getItem('catalogProductsHTML');
+
+            if (savedHTML) {
+                // МГНОВЕННОЕ восстановление из сохраненного HTML
+                console.log('⚡ Мгновенное восстановление товаров из кеша');
+                const container = document.getElementById('productsContainer');
+                container.innerHTML = savedHTML;
+
+                // Восстанавливаем состояние приложения
+                this.currentPage = restoredState.currentPage || 1;
+                this.hasNextPage = true;
+
+                // СРАЗУ восстанавливаем позицию скролла
+                window.scrollTo(0, restoredState.scrollPosition);
+                console.log('📜 Восстановлена позиция скролла:', restoredState.scrollPosition);
+
+                // Обновляем кнопку "Загрузить еще"
+                this.updateLoadMoreButton();
+
+                // Очищаем сохраненный HTML
+                sessionStorage.removeItem('catalogProductsHTML');
+            } else {
+                // Фоллбэк: загружаем товары через API (старая логика)
+                console.log('🔄 Загружаем товары с восстановленными фильтрами...');
+                const savedPage = restoredState.currentPage || 1;
+                console.log(`📄 Восстановление до страницы ${savedPage}`);
+
+                // СРАЗУ восстанавливаем позицию скролла ДО загрузки товаров
+                window.scrollTo(0, restoredState.scrollPosition);
+                console.log('📜 Предварительно установлена позиция скролла:', restoredState.scrollPosition);
+
+                // Показываем индикатор загрузки
+                this.showSkeletonLoading();
+
+                // Очищаем контейнер и сбрасываем страницу
+                this.clearProducts();
+                this.currentPage = 1;
+
+                // Загружаем все страницы до сохраненной
+                for (let page = 1; page <= savedPage; page++) {
+                    this.currentPage = page;
+                    console.log(`📥 Загружаем страницу ${page}/${savedPage}...`);
+                    await this.loadProducts(page === 1);
+
+                    // Если больше нет страниц, прерываем загрузку
+                    if (!this.hasNextPage && page < savedPage) {
+                        console.log('⚠️ Достигнута последняя страница');
+                        break;
+                    }
+                }
+
+                // Убираем индикатор загрузки
+                this.hideSkeletonLoading();
+
+                // После загрузки всех страниц УТОЧНЯЕМ позицию скролла
+                setTimeout(() => {
+                    window.scrollTo(0, restoredState.scrollPosition);
+                    console.log('📜 Финально восстановлена позиция скролла:', restoredState.scrollPosition);
+                }, 100);
+            }
+        } else {
+            // Иначе используем старый механизм восстановления скролла из base.html
+            const savedScroll = sessionStorage.getItem('main_page_scroll');
+            if (savedScroll !== null) {
+                setTimeout(() => {
+                    window.scrollTo(0, parseInt(savedScroll));
+                    console.log('📜 Восстановлена позиция скролла из base.html:', savedScroll);
+                }, 100);
+            }
+        }
+    }
+
+    clearFilters() {
+        document.getElementById('categoryFilter').value = '';
+        document.getElementById('regionSelect').value = '';
+        document.getElementById('platformFilter').value = '';
+        document.getElementById('playersFilter').value = '';
+        document.getElementById('minPrice').value = '';
+        document.getElementById('maxPrice').value = '';
+        document.getElementById('discountOnly').checked = false;
+        document.getElementById('psPlusOnly').checked = false;
+        document.getElementById('eaAccessOnly').checked = false;
+        // Очищаем также сохраненный регион
+        localStorage.removeItem('selectedRegion');
+
+        this.hideFilters();
+        this.updateFilterState();
+        this.search();
+
+        // Haptic feedback
+        if (this.tgApp?.hapticFeedback) {
+            this.tgApp.hapticFeedback('impact', 'medium');
+        }
+    }
+
+    async applyFilters() {
+        // Очищаем кеш и перезагружаем избранное при смене региона
+        this.api.clearCache();
+
+        await this.loadFavorites();
+
+        this.search();
+        this.hideFilters();
+
+        // Обновляем состояние кнопки фильтра после применения
+        this.updateFilterState();
+
+        // Haptic feedback
+        if (this.tgApp?.hapticFeedback) {
+            this.tgApp.hapticFeedback('notification', 'success');
+        }
+    }
+
+    debounce(func, wait) {
+        let timeout;
+        return function executedFunction(...args) {
+            const later = () => {
+                clearTimeout(timeout);
+                func(...args);
+            };
+            clearTimeout(timeout);
+            timeout = setTimeout(later, wait);
+        };
+    }
+}
+
+// Initialize when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 DOM loaded, initializing catalog...');
+
+    // Мгновенная инициализация без ожидания
+    if (window.tgApp && window.apiClient) {
+        console.log('✅ Global instances ready instantly');
+        new ModernProductCatalog();
+    } else {
+        console.error('❌ Global instances not available');
+    }
+
+    // ИСПРАВЛЕНИЕ iOS: Скрываем BackButton на главной странице
+    hideBackButtonOnMainPage();
+
+    // Обработка глобального поиска из URL или sessionStorage
+    handleGlobalSearchQuery();
+});
+
+// Обработка поискового запроса из URL или sessionStorage
+function handleGlobalSearchQuery() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlSearchQuery = urlParams.get('search');
+    const storedSearchQuery = sessionStorage.getItem('globalSearchQuery');
+
+    const searchQuery = urlSearchQuery || storedSearchQuery;
+
+    if (searchQuery) {
+        console.log('🔍 Applying global search query:', searchQuery);
+
+        // Устанавливаем значение в поле поиска
+        const searchInput = document.getElementById('searchInput');
+        if (searchInput) {
+            searchInput.value = searchQuery;
+
+            // Триггерим поиск через небольшую задержку (чтобы каталог успел инициализироваться)
+            setTimeout(() => {
+                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            }, 300);
+        }
+
+        // Очищаем sessionStorage после использования
+        sessionStorage.removeItem('globalSearchQuery');
+
+        // Очищаем URL от параметра search (чтобы не дублировался при refresh)
+        if (urlSearchQuery) {
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+        }
+    }
+}
+
+// ИСПРАВЛЕНИЕ iOS BFCache: Скрываем BackButton при загрузке страницы из кеша
+window.addEventListener('pageshow', (event) => {
+    console.log('📄 pageshow event, persisted:', event.persisted);
+    // Скрываем BackButton независимо от того, загружена ли страница из кеша
+    hideBackButtonOnMainPage();
+});
+
+// Функция для скрытия BackButton на главной странице
+function hideBackButtonOnMainPage() {
+    const tg = window.Telegram?.WebApp;
+    if (tg && tg.BackButton) {
+        // На главной странице BackButton должен быть скрыт
+        // Telegram сам покажет кнопку "Закрыть" когда BackButton скрыт
+        tg.BackButton.hide();
+        console.log('✅ BackButton hidden on main page');
+    }
+}
+</script>
+{% endblock %}
