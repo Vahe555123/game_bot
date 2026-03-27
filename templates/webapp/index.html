@@ -430,9 +430,9 @@
         <div class="filter-row">
             <select class="filter-select" id="platformFilter">
                 <option value="">Все платформы</option>
-                <option value="PS4">🎮 PS4</option>
-                <option value="PS5">🎮 PS5</option>
-                <option value="BOTH">🎮 PS4 и PS5</option>
+                <option value="PS4_ALL">🎮 PS4</option>
+                <option value="PS5_ALL">🎮 PS5</option>
+                <option value="BOTH">🎮 PS4 + PS5</option>
             </select>
             <select class="filter-select" id="playersFilter">
                 <option value="">Количество игроков</option>
@@ -723,19 +723,20 @@ class ModernProductCatalog {
         }
 
         const selectedValue = platformFilter.value;
+        const normalizedSelectedValue = selectedValue === 'PS4' ? 'PS4_ALL'
+            : selectedValue === 'PS5' ? 'PS5_ALL'
+            : selectedValue;
         platformFilter.innerHTML = `
             <option value="">Все платформы</option>
-            <option value="PS4_ALL">🎮 PS4 + PS4 и PS5</option>
-            <option value="PS5_ALL">🎮 PS5 + PS4 и PS5</option>
-            <option value="PS4">🎮 Только PS4</option>
-            <option value="PS5">🎮 Только PS5</option>
-            <option value="BOTH">🎮 Только PS4 и PS5</option>
+            <option value="PS4_ALL">🎮 PS4</option>
+            <option value="PS5_ALL">🎮 PS5</option>
+            <option value="BOTH">🎮 PS4 + PS5</option>
         `;
 
-        if (selectedValue) {
-            const optionExists = Array.from(platformFilter.options).some(option => option.value === selectedValue);
+        if (normalizedSelectedValue) {
+            const optionExists = Array.from(platformFilter.options).some(option => option.value === normalizedSelectedValue);
             if (optionExists) {
-                platformFilter.value = selectedValue;
+                platformFilter.value = normalizedSelectedValue;
             }
         }
     }
