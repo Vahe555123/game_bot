@@ -2,6 +2,7 @@ import logging
 import asyncio
 import sys
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 # Добавляем корневую папку проекта в путь
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -24,6 +25,27 @@ logger = logging.getLogger(__name__)
 # Инициализация бота и диспетчера
 bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
+
+
+def build_webapp_url(base_url: str, tg_user: types.User) -> str:
+    """Append Telegram user context so the WebApp can recover auth if the bridge is empty."""
+    parsed_url = urlsplit(base_url)
+    query_params = dict(parse_qsl(parsed_url.query, keep_blank_values=True))
+    query_params.update({
+        "tg_user_id": str(tg_user.id),
+        "tg_username": tg_user.username or "",
+        "tg_first_name": tg_user.first_name or "",
+        "tg_last_name": tg_user.last_name or "",
+        "tg_language_code": tg_user.language_code or "ru",
+    })
+
+    return urlunsplit((
+        parsed_url.scheme,
+        parsed_url.netloc,
+        parsed_url.path,
+        urlencode(query_params),
+        parsed_url.fragment
+    ))
 
 async def create_or_update_user(tg_user: types.User) -> None:
     """Создать или обновить пользователя в базе данных"""
@@ -75,6 +97,9 @@ async def start_command(message: types.Message) -> None:
         logger.warning("Настройте WEBAPP_URL в .env файле для продакшена")
     
     # Создаем кнопку с WebApp
+    webapp_url = build_webapp_url(webapp_url, user)
+    logger.info(f"WebApp URL дополнен Telegram user context: {webapp_url}")
+
     webapp_button = KeyboardButton(
         text="🎮 Открыть магазин PlayStation",
         web_app=WebAppInfo(url=webapp_url)

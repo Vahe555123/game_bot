@@ -501,10 +501,17 @@ class TelegramWebApp {
             return this.user;
         }
 
+        const userFromQueryParams = this.readUserFromQueryParams(log);
+        if (userFromQueryParams?.id) {
+            this.user = userFromQueryParams;
+            this.storeUser(this.user);
+            return this.user;
+        }
+
         const storedUser = this.getStoredUser();
         if (storedUser?.id) {
             if (log) {
-                console.log('=== Trying Method 4: Restoring cached user ===');
+                console.log('=== Trying Method 5: Restoring cached user ===');
                 console.log('✅ User restored from storage:', storedUser);
             }
             this.user = storedUser;
@@ -644,6 +651,54 @@ class TelegramWebApp {
         } catch (error) {
             if (log) {
                 console.log('❌ Error parsing hash:', error);
+            }
+        }
+
+        return null;
+    }
+
+    readUserFromQueryParams(log = false) {
+        if (log) {
+            console.log('=== Trying Method 4: Query params fallback ===');
+        }
+
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const userId = params.get('tg_user_id');
+            if (log) {
+                console.log('Query tg_user_id:', userId);
+            }
+
+            if (!userId) {
+                if (log) {
+                    console.log('❌ No tg_user_id in query params');
+                }
+                return null;
+            }
+
+            const user = {
+                id: Number(userId),
+                username: params.get('tg_username') || null,
+                first_name: params.get('tg_first_name') || null,
+                last_name: params.get('tg_last_name') || null,
+                language_code: params.get('tg_language_code') || 'ru'
+            };
+
+            if (!Number.isFinite(user.id)) {
+                if (log) {
+                    console.log('❌ Invalid tg_user_id in query params');
+                }
+                return null;
+            }
+
+            if (log) {
+                console.log('✅ User found via query params:', user);
+            }
+
+            return user;
+        } catch (error) {
+            if (log) {
+                console.log('❌ Error parsing query params:', error);
             }
         }
 
