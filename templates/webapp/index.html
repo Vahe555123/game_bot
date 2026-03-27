@@ -430,8 +430,8 @@
         <div class="filter-row">
             <select class="filter-select" id="platformFilter">
                 <option value="">Все платформы</option>
-                <option value="PS4">🎮 Только PS4</option>
-                <option value="PS5">🎮 Только PS5</option>
+                <option value="PS4">🎮 PS4</option>
+                <option value="PS5">🎮 PS5</option>
                 <option value="BOTH">🎮 PS4 и PS5</option>
             </select>
             <select class="filter-select" id="playersFilter">
@@ -593,6 +593,7 @@ class ModernProductCatalog {
         const initStart = performance.now();
 
         // Setup event listeners and UI early
+        this.initializePlatformFilterOptions();
         this.setupEventListeners();
         this.restoreSelectedRegion();
         this.updateFilterState();
@@ -713,6 +714,30 @@ class ModernProductCatalog {
         }
 
         return String(productId).trim();
+    }
+
+    initializePlatformFilterOptions() {
+        const platformFilter = document.getElementById('platformFilter');
+        if (!platformFilter) {
+            return;
+        }
+
+        const selectedValue = platformFilter.value;
+        platformFilter.innerHTML = `
+            <option value="">Все платформы</option>
+            <option value="PS4_ALL">🎮 PS4 + PS4 и PS5</option>
+            <option value="PS5_ALL">🎮 PS5 + PS4 и PS5</option>
+            <option value="PS4">🎮 Только PS4</option>
+            <option value="PS5">🎮 Только PS5</option>
+            <option value="BOTH">🎮 Только PS4 и PS5</option>
+        `;
+
+        if (selectedValue) {
+            const optionExists = Array.from(platformFilter.options).some(option => option.value === selectedValue);
+            if (optionExists) {
+                platformFilter.value = selectedValue;
+            }
+        }
     }
 
     _regionSettingsFromSelectValue(selectedRegion) {
@@ -1539,11 +1564,8 @@ class ModernProductCatalog {
         }
 
         if (filterToggleBtn) {
-            // Сначала убираем все классы состояния
             filterToggleBtn.classList.remove('has-filters');
-            // Затем добавляем active
             filterToggleBtn.classList.add('active');
-            // Убираем фокус асинхронно
             setTimeout(() => filterToggleBtn.blur(), 0);
         }
 
@@ -1562,24 +1584,13 @@ class ModernProductCatalog {
         }
 
         if (filterToggleBtn) {
-            // Сначала убираем active класс
             filterToggleBtn.classList.remove('active');
-
-            // Затем проверяем, есть ли активные фильтры и добавляем соответствующий класс
-            const hasFilters = this.hasActiveFilters();
-            if (hasFilters) {
-                filterToggleBtn.classList.add('has-filters');
-            } else {
-                filterToggleBtn.classList.remove('has-filters');
-            }
-
-            // Убираем фокус асинхронно после всех изменений классов
+            filterToggleBtn.classList.remove('has-filters');
             setTimeout(() => filterToggleBtn.blur(), 0);
         }
     }
 
     updateFilterState() {
-        // Update button appearance based on whether filters are active
         const filterToggleBtn = document.getElementById('filterToggleBtn');
         const filtersDropdown = document.getElementById('filtersDropdown');
 
@@ -1587,24 +1598,12 @@ class ModernProductCatalog {
 
         const isDropdownOpen = filtersDropdown.classList.contains('show');
 
-        // НЕ обновляем состояние кнопки если dropdown открыт
-        // (это будет делать showFilters/hideFilters)
         if (isDropdownOpen) {
             return;
         }
 
-        // Только если dropdown закрыт - обновляем классы
-        const hasFilters = this.hasActiveFilters();
-
-        // Убираем active в любом случае (dropdown закрыт)
         filterToggleBtn.classList.remove('active');
-
-        // Добавляем has-filters только если есть активные фильтры
-        if (hasFilters) {
-            filterToggleBtn.classList.add('has-filters');
-        } else {
-            filterToggleBtn.classList.remove('has-filters');
-        }
+        filterToggleBtn.classList.remove('has-filters');
     }
 
     hasActiveFilters() {

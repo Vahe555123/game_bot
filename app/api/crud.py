@@ -733,7 +733,11 @@ class ProductCRUD:
         if filters.platform:
             # Фильтр по платформе: PS4, PS5 или обе
             platform_filter = filters.platform.upper()
-            if platform_filter == 'PS4':
+            if platform_filter == 'PS4_ALL':
+                query = query.filter(Product.platforms.ilike('%PS4%'))
+            elif platform_filter == 'PS5_ALL':
+                query = query.filter(Product.platforms.ilike('%PS5%'))
+            elif platform_filter == 'PS4':
                 # Только игры ЭКСКЛЮЗИВНО для PS4 (без PS5)
                 query = query.filter(
                     and_(
