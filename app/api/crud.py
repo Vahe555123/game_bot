@@ -737,7 +737,7 @@ class ProductCRUD:
                 query = query.filter(Product.platforms.ilike('%PS4%'))
             elif platform_filter == 'PS5_ALL':
                 query = query.filter(Product.platforms.ilike('%PS5%'))
-            elif platform_filter == 'PS4':
+            elif platform_filter in ('PS4_ONLY', 'PS4'):
                 # Только игры ЭКСКЛЮЗИВНО для PS4 (без PS5)
                 query = query.filter(
                     and_(
@@ -745,7 +745,7 @@ class ProductCRUD:
                         ~Product.platforms.ilike('%PS5%')
                     )
                 )
-            elif platform_filter == 'PS5':
+            elif platform_filter in ('PS5_ONLY', 'PS5'):
                 # Только игры ЭКСКЛЮЗИВНО для PS5 (без PS4)
                 query = query.filter(
                     and_(

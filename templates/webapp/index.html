@@ -432,6 +432,8 @@
                 <option value="">Все платформы</option>
                 <option value="PS4_ALL">🎮 PS4</option>
                 <option value="PS5_ALL">🎮 PS5</option>
+                <option value="PS4_ONLY">🎮 Только PS4</option>
+                <option value="PS5_ONLY">🎮 Только PS5</option>
                 <option value="BOTH">🎮 PS4 + PS5</option>
             </select>
             <select class="filter-select" id="playersFilter">
@@ -716,20 +718,31 @@ class ModernProductCatalog {
         return String(productId).trim();
     }
 
+    normalizePlatformFilterValue(platformValue) {
+        if (platformValue === 'PS4') {
+            return 'PS4_ALL';
+        }
+
+        if (platformValue === 'PS5') {
+            return 'PS5_ALL';
+        }
+
+        return platformValue || '';
+    }
+
     initializePlatformFilterOptions() {
         const platformFilter = document.getElementById('platformFilter');
         if (!platformFilter) {
             return;
         }
 
-        const selectedValue = platformFilter.value;
-        const normalizedSelectedValue = selectedValue === 'PS4' ? 'PS4_ALL'
-            : selectedValue === 'PS5' ? 'PS5_ALL'
-            : selectedValue;
+        const normalizedSelectedValue = this.normalizePlatformFilterValue(platformFilter.value);
         platformFilter.innerHTML = `
             <option value="">Все платформы</option>
             <option value="PS4_ALL">🎮 PS4</option>
             <option value="PS5_ALL">🎮 PS5</option>
+            <option value="PS4_ONLY">🎮 Только PS4</option>
+            <option value="PS5_ONLY">🎮 Только PS5</option>
             <option value="BOTH">🎮 PS4 + PS5</option>
         `;
 
@@ -1688,7 +1701,7 @@ class ModernProductCatalog {
             document.getElementById('searchInput').value = state.searchText || '';
             document.getElementById('categoryFilter').value = state.category || '';
             document.getElementById('regionSelect').value = state.region || '';
-            document.getElementById('platformFilter').value = state.platform || '';
+            document.getElementById('platformFilter').value = this.normalizePlatformFilterValue(state.platform);
             document.getElementById('playersFilter').value = state.players || '';
             document.getElementById('minPrice').value = state.minPrice || '';
             document.getElementById('maxPrice').value = state.maxPrice || '';
