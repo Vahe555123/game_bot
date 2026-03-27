@@ -3864,6 +3864,7 @@
             const favoriteBtn = document.createElement('button');
             favoriteBtn.className = 'favorite-btn';
             favoriteBtn.dataset.productId = product.id;
+            favoriteBtn.dataset.productRegion = product.region || '';
             favoriteBtn.innerHTML = '<i class="fas fa-heart"></i>';
 
             // Проверяем, есть ли товар в избранном
@@ -3873,7 +3874,7 @@
 
             favoriteBtn.onclick = (e) => {
                 e.stopPropagation();
-                this.toggleFavoriteFromSimilar(product.id, favoriteBtn);
+                this.toggleFavoriteFromSimilar(product.id, product.region || '', favoriteBtn);
             };
             imageContainer.appendChild(favoriteBtn);
 
@@ -4055,7 +4056,10 @@
 
             // Обработчик клика на карточку
             cardWrapper.onclick = () => {
-                window.location.href = `/webapp/product/${product.id}`;
+                if (product.region) {
+                    localStorage.setItem('selectedRegion', product.region);
+                }
+                window.location.href = this.buildProductUrl(product.id, product.region || '');
             };
 
             return cardWrapper;
