@@ -3051,7 +3051,7 @@
             // Initialize Telegram WebApp
             if (window.Telegram && window.Telegram.WebApp) {
                 window.Telegram.WebApp.ready();
-                this.userTelegramId = window.Telegram.WebApp.initDataUnsafe?.user?.id;
+                this.userTelegramId = window.userManager?.getUserId?.() || window.tgApp?.getUserId?.() || window.Telegram.WebApp.initDataUnsafe?.user?.id || null;
 
                 // Set theme colors
                 this.setTelegramTheme();
@@ -3065,6 +3065,7 @@
 
             // Load product
             this.loadProduct();
+            this.waitForUserContext().then(() => this.loadUserDependentData());
         }
 
         goBack() {
@@ -3148,8 +3149,13 @@
 
         async loadProduct() {
             try {
-                // Получаем выбранный регион из localStorage
-                const selectedRegion = localStorage.getItem('selectedRegion');
+                const queryRegion = new URLSearchParams(window.location.search).get('region');
+                if (queryRegion) {
+                    localStorage.setItem('selectedRegion', queryRegion);
+                }
+
+                // Получаем выбранный регион из URL или localStorage
+                const selectedRegion = queryRegion || localStorage.getItem('selectedRegion');
 
                 // Строим URL с параметром региона, если он выбран
                 let url = `/api/products/${this.productId}`;
@@ -3160,7 +3166,7 @@
                     console.log('🌍 Loading product with region:', selectedRegion);
                 }
 
-                if (this.userTelegramId) {
+                if (this.syncUserContext()) {
                     params.append('telegram_id', this.userTelegramId);
                 }
 
@@ -3178,15 +3184,7 @@
                 console.log('📦 Product loaded:', this.product);
                 this.displayProduct();
 
-                // Check if favorite
-                if (this.userTelegramId) {
-                    this.checkFavoriteStatus();
-                    this.loadAllFavorites();
-                    this.checkPSNCredentials();
-                    this.checkPaymentEmail();
-                    this.checkPsnAccountForRegion('UA');
-                    this.loadRegionSettings();
-                }
+                this.loadUserDependentData();
 
                 // Load similar products
                 this.loadSimilarProducts();
@@ -3706,7 +3704,7 @@
         }
 
         async checkFavoriteStatus() {
-            if (!this.userTelegramId || !this.product) return;
+            if (!this.syncUserContext() || !this.product) return;
 
             try {
                 const response = await fetch(`/api/users/${this.userTelegramId}/favorites/${this.product.id}/check`);
@@ -3721,7 +3719,7 @@
         }
 
         async loadAllFavorites() {
-            if (!this.userTelegramId) return;
+            if (!this.syncUserContext()) return;
 
             try {
                 const response = await fetch(`/api/users/${this.userTelegramId}/favorites/`);
@@ -3736,7 +3734,7 @@
         }
 
         async toggleFavorite() {
-            if (!this.userTelegramId) {
+            if (!this.syncUserContext()) {
                 this.showError('Необходимо авторизоваться через Telegram');
                 return;
             }
@@ -3765,6 +3763,15 @@
 
                 if (response.ok) {
                     this.isFavorite = !this.isFavorite;
+                    if (this.isFavorite) {
+                        this.favorites.add(parseInt(this.product.id));
+                        if (this.product?.region) {
+                            localStorage.setItem(`favorite_region_${this.product.id}`, this.product.region);
+                        }
+                    } else {
+                        this.favorites.delete(parseInt(this.product.id));
+                        localStorage.removeItem(`favorite_region_${this.product.id}`);
+                    }
                     this.updateFavoriteButton();
                     this.showSuccess(this.isFavorite ? 'Добавлено в избранное' : 'Удалено из избранного');
 
@@ -4054,8 +4061,8 @@
             return cardWrapper;
         }
 
-        async toggleFavoriteFromSimilar(productId, favoriteBtn) {
-            if (!this.userTelegramId) {
+        async toggleFavoriteFromSimilar(productId, productRegion, favoriteBtn) {
+            if (!this.syncUserContext()) {
                 this.showToast('Для работы с избранным нужна авторизация');
                 return;
             }
@@ -4075,6 +4082,7 @@
                     if (response.ok) {
                         favoriteBtn.classList.remove('active');
                         if (this.favorites) this.favorites.delete(parseInt(productId));
+                        localStorage.removeItem(`favorite_region_${productId}`);
                     }
                 } else {
                     const response = await fetch(`/api/users/${this.userTelegramId}/favorites/`, {
@@ -4083,14 +4091,17 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            product_id: productId,
-                            region: this.product?.region || null
+                            product_id: parseInt(productId),
+                            region: productRegion || null
                         })
                     });
                     if (response.ok) {
                         favoriteBtn.classList.add('active');
                         if (!this.favorites) this.favorites = new Set();
                         this.favorites.add(parseInt(productId));
+                        if (productRegion) {
+                            localStorage.setItem(`favorite_region_${productId}`, productRegion);
+                        }
                     }
                 }
 
