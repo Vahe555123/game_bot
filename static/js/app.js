@@ -956,6 +956,14 @@ class FavoritesManager {
         this.listeners = new Set();
     }
 
+    normalizeProductId(productId) {
+        if (productId === null || productId === undefined) {
+            return '';
+        }
+
+        return String(productId).trim();
+    }
+
     async loadFavorites() {
         const userId = this.userManager.getUserId();
         if (!userId) return;
@@ -963,12 +971,17 @@ class FavoritesManager {
         try {
             // ИСПРАВЛЕНИЕ: Не используем кеш (useCache = false), чтобы всегда получать актуальные данные
             const favorites = await this.api.get(`/users/${userId}/favorites/`, {}, false);
-            this.favorites = new Set(favorites.map(f => parseInt(f.product_id)));
+            this.favorites = new Set(
+                favorites
+                    .map(f => this.normalizeProductId(f.product_id))
+                    .filter(Boolean)
+            );
 
             // КРИТИЧЕСКИ ВАЖНО: Сохраняем регионы избранного в localStorage
             favorites.forEach(f => {
-                if (f.region) {
-                    localStorage.setItem(`favorite_region_${f.product_id}`, f.region);
+                const normalizedProductId = this.normalizeProductId(f.product_id);
+                if (normalizedProductId && f.region) {
+                    localStorage.setItem(`favorite_region_${normalizedProductId}`, f.region);
                 }
             });
 
@@ -985,12 +998,13 @@ class FavoritesManager {
         if (!userId) {
             throw new Error('User not authenticated');
         }
+        const normalizedProductId = this.normalizeProductId(productId);
 
         try {
             await this.api.post(`/users/${userId}/favorites/`, {
-                product_id: parseInt(productId)
+                product_id: normalizedProductId
             });
-            this.favorites.add(parseInt(productId));
+            this.favorites.add(normalizedProductId);
             this.notifyListeners();
             return true;
         } catch (error) {
@@ -1004,13 +1018,14 @@ class FavoritesManager {
         if (!userId) {
             throw new Error('User not authenticated');
         }
+        const normalizedProductId = this.normalizeProductId(productId);
 
         try {
-            await this.api.delete(`/users/${userId}/favorites/${productId}`);
-            this.favorites.delete(parseInt(productId));
+            await this.api.delete(`/users/${userId}/favorites/${normalizedProductId}`);
+            this.favorites.delete(normalizedProductId);
 
             // КРИТИЧЕСКИ ВАЖНО: Удаляем сохраненный регион из localStorage
-            localStorage.removeItem(`favorite_region_${productId}`);
+            localStorage.removeItem(`favorite_region_${normalizedProductId}`);
             console.log('🗑️ Removed favorite region from localStorage for product:', productId);
 
             this.notifyListeners();
@@ -1022,7 +1037,7 @@ class FavoritesManager {
     }
 
     isFavorite(productId) {
-        return this.favorites.has(parseInt(productId));
+        return this.favorites.has(this.normalizeProductId(productId));
     }
 
     getFavorites() {

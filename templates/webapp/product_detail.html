@@ -3038,6 +3038,14 @@
                 : `/webapp/product/${productId}`;
         }
 
+        normalizeProductId(productId) {
+            if (productId === null || productId === undefined) {
+                return '';
+            }
+
+            return String(productId).trim();
+        }
+
         init() {
             // Get product ID from URL
             const pathParts = window.location.pathname.split('/');
@@ -3725,7 +3733,17 @@
                 const response = await fetch(`/api/users/${this.userTelegramId}/favorites/`);
                 if (response.ok) {
                     const favorites = await response.json();
-                    this.favorites = new Set(favorites.map(f => parseInt(f.product_id)));
+                    this.favorites = new Set(
+                        favorites
+                            .map(f => this.normalizeProductId(f.product_id))
+                            .filter(Boolean)
+                    );
+                    favorites.forEach(favorite => {
+                        const normalizedProductId = this.normalizeProductId(favorite.product_id);
+                        if (normalizedProductId && favorite.region) {
+                            localStorage.setItem(`favorite_region_${normalizedProductId}`, favorite.region);
+                        }
+                    });
                     console.log('Loaded favorites:', this.favorites.size, 'items');
                 }
             } catch (error) {
@@ -3762,15 +3780,16 @@
                 }
 
                 if (response.ok) {
+                    const normalizedProductId = this.normalizeProductId(this.product.id);
                     this.isFavorite = !this.isFavorite;
                     if (this.isFavorite) {
-                        this.favorites.add(parseInt(this.product.id));
+                        this.favorites.add(normalizedProductId);
                         if (this.product?.region) {
-                            localStorage.setItem(`favorite_region_${this.product.id}`, this.product.region);
+                            localStorage.setItem(`favorite_region_${normalizedProductId}`, this.product.region);
                         }
                     } else {
-                        this.favorites.delete(parseInt(this.product.id));
-                        localStorage.removeItem(`favorite_region_${this.product.id}`);
+                        this.favorites.delete(normalizedProductId);
+                        localStorage.removeItem(`favorite_region_${normalizedProductId}`);
                     }
                     this.updateFavoriteButton();
                     this.showSuccess(this.isFavorite ? 'Добавлено в избранное' : 'Удалено из избранного');
@@ -3868,8 +3887,12 @@
             favoriteBtn.innerHTML = '<i class="fas fa-heart"></i>';
 
             // Проверяем, есть ли товар в избранном
-            if (this.favorites && this.favorites.has(parseInt(product.id))) {
-                favoriteBtn.classList.add('active');
+            const normalizedProductId = this.normalizeProductId(product.id);
+            if (this.favorites && this.favorites.has(normalizedProductId)) {
+                const savedRegion = localStorage.getItem(`favorite_region_${normalizedProductId}`);
+                if (!savedRegion || savedRegion === (product.region || '')) {
+                    favoriteBtn.classList.add('active');
+                }
             }
 
             favoriteBtn.onclick = (e) => {
@@ -4070,6 +4093,7 @@
                 this.showToast('Для работы с избранным нужна авторизация');
                 return;
             }
+            const normalizedProductId = this.normalizeProductId(productId);
 
             // Тактильная обратная связь
             if (window.Telegram?.WebApp?.HapticFeedback) {
@@ -4080,13 +4104,13 @@
 
             try {
                 if (isCurrentlyFavorite) {
-                    const response = await fetch(`/api/users/${this.userTelegramId}/favorites/${productId}`, {
+                    const response = await fetch(`/api/users/${this.userTelegramId}/favorites/${normalizedProductId}`, {
                         method: 'DELETE'
                     });
                     if (response.ok) {
                         favoriteBtn.classList.remove('active');
-                        if (this.favorites) this.favorites.delete(parseInt(productId));
-                        localStorage.removeItem(`favorite_region_${productId}`);
+                        if (this.favorites) this.favorites.delete(normalizedProductId);
+                        localStorage.removeItem(`favorite_region_${normalizedProductId}`);
                     }
                 } else {
                     const response = await fetch(`/api/users/${this.userTelegramId}/favorites/`, {
@@ -4095,16 +4119,16 @@
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            product_id: parseInt(productId),
+                            product_id: normalizedProductId,
                             region: productRegion || null
                         })
                     });
                     if (response.ok) {
                         favoriteBtn.classList.add('active');
                         if (!this.favorites) this.favorites = new Set();
-                        this.favorites.add(parseInt(productId));
+                        this.favorites.add(normalizedProductId);
                         if (productRegion) {
-                            localStorage.setItem(`favorite_region_${productId}`, productRegion);
+                            localStorage.setItem(`favorite_region_${normalizedProductId}`, productRegion);
                         }
                     }
                 }

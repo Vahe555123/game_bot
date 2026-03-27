@@ -222,6 +222,14 @@
                 return this.userTelegramId;
             }
 
+            normalizeProductId(productId) {
+                if (productId === null || productId === undefined) {
+                    return '';
+                }
+
+                return String(productId).trim();
+            }
+
             async init() {
                 // Wait for Telegram WebApp to be ready
                 await this.waitForTelegramReady();
@@ -344,7 +352,16 @@
                         return product;
                     }).filter(p => p !== null);
 
-                    const favoriteIds = favoritesResponse.map(f => parseInt(f.product_id));
+                    const favoriteIds = favoritesResponse
+                        .map(f => this.normalizeProductId(f.product_id))
+                        .filter(Boolean);
+
+                    favoritesResponse.forEach(favorite => {
+                        const normalizedProductId = this.normalizeProductId(favorite.product_id);
+                        if (normalizedProductId && favorite.region) {
+                            localStorage.setItem(`favorite_region_${normalizedProductId}`, favorite.region);
+                        }
+                    });
 
                     if (products.length === 0) {
                         this.showEmptyState();
@@ -596,28 +613,29 @@
             async removeFromFavorites(productId) {
                 const userId = this.getUserId();
                 if (!userId) return;
+                const normalizedProductId = this.normalizeProductId(productId);
 
                 try {
                     // Add removing animation
-                    const productCard = document.querySelector(`[data-product-id="${productId}"]`);
+                    const productCard = document.querySelector(`[data-product-id="${normalizedProductId}"]`);
                     if (productCard) {
                         productCard.classList.add('removing');
                     }
 
                     // API call to remove from favorites
-                    await this.apiClient.delete(`/users/${userId}/favorites/${productId}`);
+                    await this.apiClient.delete(`/users/${userId}/favorites/${normalizedProductId}`);
 
                     // Update local state
-                    this.favorites.delete(parseInt(productId));
+                    this.favorites.delete(normalizedProductId);
 
                     // КРИТИЧЕСКИ ВАЖНО: Обновляем глобальный favoritesManager
                     if (window.favoritesManager) {
-                        window.favoritesManager.favorites.delete(parseInt(productId));
+                        window.favoritesManager.favorites.delete(normalizedProductId);
                         console.log('✅ Global favoritesManager updated after removal');
                     }
 
                     // Удаляем сохраненный регион из localStorage
-                    localStorage.removeItem(`favorite_region_${productId}`);
+                    localStorage.removeItem(`favorite_region_${normalizedProductId}`);
                     console.log('🗑️ Removed favorite region from localStorage');
 
                     // Remove from DOM after animation
