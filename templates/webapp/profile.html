@@ -949,6 +949,121 @@
             this.init();
         }
 
+        sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        getUserId() {
+            return window.userManager?.getUserId?.() || this.tgApp?.getUserId?.() || null;
+        }
+
+        getTelegramUser() {
+            const currentUser = window.userManager?.getCurrentUser?.();
+            const telegramUser =
+                this.tgApp?.getCurrentUser?.() ||
+                this.tgApp?.user ||
+                this.tgApp?.getInitDataUnsafe?.()?.user ||
+                null;
+
+            const id = currentUser?.telegram_id || telegramUser?.id || this.tgApp?.getUserId?.() || null;
+            const username = telegramUser?.username || currentUser?.username || this.tgApp?.getUserName?.() || null;
+            const firstName = telegramUser?.first_name || currentUser?.first_name || this.tgApp?.getUserFirstName?.() || null;
+            const lastName = telegramUser?.last_name || currentUser?.last_name || this.tgApp?.getUserLastName?.() || null;
+
+            if (!id && !username && !firstName && !lastName) {
+                return null;
+            }
+
+            return {
+                id,
+                username,
+                first_name: firstName,
+                last_name: lastName
+            };
+        }
+
+        getTelegramFullName(user = this.getTelegramUser()) {
+            if (!user) {
+                return 'Профиль Telegram';
+            }
+
+            const fullName = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+            return fullName || (user.username ? `@${user.username}` : 'Профиль Telegram');
+        }
+
+        renderProfile(user) {
+            if (!user) {
+                this.showProfileFallback();
+                return;
+            }
+
+            const profileAvatar = document.getElementById('profileAvatar');
+            const profileName = document.getElementById('profileName');
+            const profileUsername = document.getElementById('profileUsername');
+
+            const avatarSource = user.first_name || user.username || 'U';
+            profileAvatar.textContent = avatarSource.charAt(0).toUpperCase();
+            profileName.textContent = this.getTelegramFullName(user);
+            profileUsername.textContent = user.username ? `@${user.username}` : 'Аккаунт Telegram';
+        }
+
+        showProfileFallback() {
+            const profileAvatar = document.getElementById('profileAvatar');
+            const profileName = document.getElementById('profileName');
+            const profileUsername = document.getElementById('profileUsername');
+
+            profileAvatar.innerHTML = '<i class="fas fa-user"></i>';
+            profileName.textContent = 'Профиль Telegram';
+            profileUsername.textContent = 'Данные появятся автоматически';
+        }
+
+        async waitForUserContext() {
+            const maxWait = 4000;
+            const checkInterval = 200;
+            let waited = 0;
+
+            while (waited < maxWait) {
+                if (this.getTelegramUser()) {
+                    return true;
+                }
+
+                await this.sleep(checkInterval);
+                waited += checkInterval;
+            }
+
+            return Boolean(this.getTelegramUser());
+        }
+
+        async ensureUserInitialized() {
+            if (!window.userManager || !this.getUserId()) {
+                return null;
+            }
+
+            if (window.userManager.isUserInitialized?.()) {
+                return window.userManager.getCurrentUser?.() || null;
+            }
+
+            const maxWait = 1500;
+            const checkInterval = 150;
+            let waited = 0;
+
+            while (waited < maxWait) {
+                if (window.userManager.isUserInitialized?.()) {
+                    return window.userManager.getCurrentUser?.() || null;
+                }
+
+                await this.sleep(checkInterval);
+                waited += checkInterval;
+            }
+
+            try {
+                return await window.userManager.initUser();
+            } catch (error) {
+                console.warn('Failed to initialize user on profile page:', error);
+                return window.userManager.getCurrentUser?.() || null;
+            }
+        }
+
         async init() {
             // Wait for Telegram WebApp to be ready
             await this.waitForTelegramReady();
@@ -1894,6 +2009,100 @@
             }
         }
 
+        async init() {
+            await this.waitForTelegramReady();
+            await this.waitForUserContext();
+            await this.loadUserProfileWithRetry();
+            await this.ensureUserInitialized();
+
+            setTimeout(() => {
+                this.forceUpdateProfile();
+            }, 500);
+
+            this.loadUserStats();
+            this.setupEventListeners();
+            this.updateCurrencyDisplay();
+
+            setTimeout(() => {
+                this.loadRegionSettings();
+                this.loadPsnSettings();
+                this.loadPaymentEmail();
+                this.checkAdminAccess();
+            }, 1000);
+
+            this.tgApp.showBackButton(() => {
+                window.location.href = '/webapp';
+            });
+        }
+
+        async loadUserProfileWithRetry() {
+            for (let attempt = 1; attempt <= 8; attempt++) {
+                const user = this.getTelegramUser();
+                if (user) {
+                    this.renderProfile(user);
+                    return true;
+                }
+
+                await this.sleep(250);
+            }
+
+            this.showProfileFallback();
+            return false;
+        }
+
+        forceUpdateProfile() {
+            this.renderProfile(this.getTelegramUser());
+        }
+
+        loadUserProfile() {
+            this.renderProfile(this.getTelegramUser());
+        }
+
+        async loadUserStats() {
+            try {
+                const userId = this.getUserId();
+                if (!userId) {
+                    document.getElementById('favoritesCount').textContent = '0';
+                    return;
+                }
+
+                const favorites = await this.api.get(`/users/${userId}/favorites/`);
+                document.getElementById('favoritesCount').textContent = favorites.length;
+            } catch (error) {
+                console.error('Error loading user stats:', error);
+                document.getElementById('favoritesCount').textContent = '0';
+            }
+        }
+
+        async checkAdminAccess() {
+            const adminAccess = document.getElementById('adminAccess');
+            if (adminAccess) {
+                adminAccess.style.display = 'none';
+            }
+
+            try {
+                const userId = this.getUserId();
+                if (!userId) {
+                    console.info('Admin access check skipped: no Telegram user ID available');
+                    return;
+                }
+
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'X-Telegram-User-Id': userId.toString()
+                };
+
+                const currentUrl = window.location.origin;
+                const response = await fetch(`${currentUrl}/api/admin/stats`, { headers });
+
+                if (response.ok && adminAccess) {
+                    adminAccess.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error checking admin access:', error);
+            }
+        }
+
     }
 
     // Global functions for modal controls
@@ -1975,6 +2184,26 @@
             console.log('No user ID found, redirecting without parameter');
             window.location.href = '/webapp/admin';
         }
+    }
+
+    function openAdminPanel() {
+        const userId =
+            window.profileManager?.getUserId?.() ||
+            window.userManager?.getUserId?.() ||
+            window.tgApp?.getUserId?.() ||
+            null;
+
+        console.log('Opening admin panel with user ID:', userId);
+
+        if (userId) {
+            const adminUrl = `/webapp/admin?tg_user_id=${userId}`;
+            console.log('Redirecting to:', adminUrl);
+            window.location.href = adminUrl;
+            return;
+        }
+
+        console.log('No user ID found, redirecting without parameter');
+        window.location.href = '/webapp/admin';
     }
 
     // PSN Region selection handler

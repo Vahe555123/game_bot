@@ -7,6 +7,7 @@ class TelegramWebApp {
         this.tg = window.Telegram?.WebApp;
         this.user = null;
         this.isInitialized = false;
+        this.userStorageKey = 'telegram_webapp_user';
 
         // Диагностическая информация
         console.log('=== Telegram WebApp Initialization ===');
@@ -100,6 +101,22 @@ class TelegramWebApp {
                     } else {
                         console.log('❌ No hash in URL');
                     }
+                }
+
+                // Preserve the resolved Telegram user between server-rendered page navigations.
+                if (!this.user) {
+                    console.log('=== Trying Method 4: Restoring cached user ===');
+                    const storedUser = this.getStoredUser();
+                    if (storedUser) {
+                        this.user = storedUser;
+                        console.log('✅ User restored from storage:', this.user);
+                    } else {
+                        console.log('❌ No stored user data available');
+                    }
+                }
+
+                if (this.user?.id) {
+                    this.storeUser(this.user);
                 }
 
                 console.log('=== Final Result ===');
@@ -256,14 +273,63 @@ class TelegramWebApp {
         return false;
     }
 
+    storeUser(user) {
+        if (!user?.id) {
+            return;
+        }
+
+        const normalizedUser = {
+            id: user.id,
+            username: user.username || null,
+            first_name: user.first_name || null,
+            last_name: user.last_name || null,
+            language_code: user.language_code || null
+        };
+
+        try {
+            const serializedUser = JSON.stringify(normalizedUser);
+            sessionStorage.setItem(this.userStorageKey, serializedUser);
+            localStorage.setItem(this.userStorageKey, serializedUser);
+        } catch (error) {
+            console.warn('Failed to persist Telegram user data:', error);
+        }
+    }
+
+    getStoredUser() {
+        const storages = [sessionStorage, localStorage];
+
+        for (const storage of storages) {
+            try {
+                const rawUser = storage.getItem(this.userStorageKey);
+                if (!rawUser) {
+                    continue;
+                }
+
+                const parsedUser = JSON.parse(rawUser);
+                if (parsedUser?.id) {
+                    return parsedUser;
+                }
+            } catch (error) {
+                console.warn('Failed to read persisted Telegram user data:', error);
+            }
+        }
+
+        return null;
+    }
+
+    getCurrentUser() {
+        return this.user || this.getStoredUser();
+    }
+
     // User information getters
     getUserId() {
         console.log('=== Getting User ID ===');
         console.log('this.user:', this.user);
 
-        if (this.user?.id) {
-            console.log('✅ User ID found:', this.user.id);
-            return this.user.id;
+        const currentUser = this.getCurrentUser();
+        if (currentUser?.id) {
+            console.log('✅ User ID found:', currentUser.id);
+            return currentUser.id;
         }
 
         console.log('❌ No user.id, trying alternative methods...');
@@ -283,6 +349,8 @@ class TelegramWebApp {
 
                     if (userStr) {
                         const user = JSON.parse(decodeURIComponent(userStr));
+                        this.user = user;
+                        this.storeUser(user);
                         console.log('✅ User ID found from hash:', user.id);
                         return user.id;
                     }
@@ -300,6 +368,8 @@ class TelegramWebApp {
                 const userParam = initDataParams.get('user');
                 if (userParam) {
                     const user = JSON.parse(decodeURIComponent(userParam));
+                    this.user = user;
+                    this.storeUser(user);
                     console.log('✅ User ID found from initData:', user.id);
                     return user.id;
                 }
@@ -313,15 +383,15 @@ class TelegramWebApp {
     }
 
     getUserName() {
-        return this.user?.username;
+        return this.getCurrentUser()?.username;
     }
 
     getUserFirstName() {
-        return this.user?.first_name;
+        return this.getCurrentUser()?.first_name;
     }
 
     getUserLastName() {
-        return this.user?.last_name;
+        return this.getCurrentUser()?.last_name;
     }
 
     getUserFullName() {
@@ -367,6 +437,221 @@ class TelegramWebApp {
         if (this.tg) {
             this.tg.sendData(JSON.stringify(data));
         }
+    }
+
+    async init() {
+        if (this.tg) {
+            try {
+                console.log('Telegram WebApp found, initializing...');
+                this.tg.ready();
+
+                console.log('=== Telegram WebApp Data ===');
+                console.log('initData:', this.tg.initData);
+                console.log('initDataUnsafe:', this.tg.initDataUnsafe);
+                console.log('version:', this.tg.version);
+                console.log('platform:', this.tg.platform);
+                console.log('colorScheme:', this.tg.colorScheme);
+
+                this.user = null;
+                this.refreshUserContext({ log: true });
+                await this.waitForUserContext();
+
+                console.log('=== Final Result ===');
+                console.log('Final user:', this.user);
+                console.log('User ID:', this.user?.id);
+
+                this.setupTheme();
+                this.setupMainButton();
+                this.setupBackButton();
+                this.setupViewport();
+                this.isInitialized = true;
+
+                console.log('✅ Telegram WebApp initialization completed');
+            } catch (error) {
+                console.error('Error initializing Telegram WebApp:', error);
+            }
+        } else {
+            console.log('❌ No Telegram WebApp detected');
+            console.log('This might mean:');
+            console.log('1. Opening outside Telegram');
+            console.log('2. Telegram WebApp script not loaded');
+            console.log('3. Wrong domain/HTTPS issues');
+        }
+    }
+
+    refreshUserContext({ log = false } = {}) {
+        const userFromInitDataUnsafe = this.readUserFromInitDataUnsafe(log);
+        if (userFromInitDataUnsafe?.id) {
+            this.user = userFromInitDataUnsafe;
+            this.storeUser(this.user);
+            return this.user;
+        }
+
+        const userFromInitData = this.readUserFromInitData(log);
+        if (userFromInitData?.id) {
+            this.user = userFromInitData;
+            this.storeUser(this.user);
+            return this.user;
+        }
+
+        const userFromHash = this.readUserFromHash(log);
+        if (userFromHash?.id) {
+            this.user = userFromHash;
+            this.storeUser(this.user);
+            return this.user;
+        }
+
+        const storedUser = this.getStoredUser();
+        if (storedUser?.id) {
+            if (log) {
+                console.log('=== Trying Method 4: Restoring cached user ===');
+                console.log('✅ User restored from storage:', storedUser);
+            }
+            this.user = storedUser;
+            return this.user;
+        }
+
+        if (log) {
+            console.log('❌ No stored user data available');
+        }
+
+        return this.user;
+    }
+
+    async waitForUserContext(maxWait = 4000, checkInterval = 200) {
+        let waited = 0;
+
+        while (waited < maxWait) {
+            const user = this.refreshUserContext({ log: false });
+            if (user?.id) {
+                return user;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, checkInterval));
+            waited += checkInterval;
+        }
+
+        return this.refreshUserContext({ log: false });
+    }
+
+    readUserFromInitDataUnsafe(log = false) {
+        if (log) {
+            console.log('=== Trying Method 1: initDataUnsafe ===');
+        }
+
+        if (this.tg?.initDataUnsafe?.user) {
+            if (log) {
+                console.log('✅ User found via initDataUnsafe:', this.tg.initDataUnsafe.user);
+            }
+            return this.tg.initDataUnsafe.user;
+        }
+
+        if (log) {
+            console.log('❌ No user in initDataUnsafe');
+        }
+
+        return null;
+    }
+
+    readUserFromInitData(log = false) {
+        if (log) {
+            console.log('=== Trying Method 2: Manual parsing initData ===');
+        }
+
+        if (!this.tg?.initData) {
+            if (log) {
+                console.log('❌ No initData available');
+            }
+            return null;
+        }
+
+        try {
+            const initDataParams = new URLSearchParams(this.tg.initData);
+            const userParam = initDataParams.get('user');
+            if (log) {
+                console.log('initData userParam:', userParam);
+            }
+
+            if (userParam) {
+                const user = JSON.parse(decodeURIComponent(userParam));
+                if (log) {
+                    console.log('✅ User found via initData parsing:', user);
+                }
+                return user;
+            }
+
+            if (log) {
+                console.log('❌ No user parameter in initData');
+            }
+        } catch (error) {
+            if (log) {
+                console.log('❌ Error parsing initData:', error);
+            }
+        }
+
+        return null;
+    }
+
+    readUserFromHash(log = false) {
+        if (log) {
+            console.log('=== Trying Method 3: URL hash parsing ===');
+        }
+
+        const hash = window.location.hash;
+        if (!hash) {
+            if (log) {
+                console.log('❌ No hash in URL');
+            }
+            return null;
+        }
+
+        try {
+            const hashParams = new URLSearchParams(hash.substring(1));
+            const tgWebAppData = hashParams.get('tgWebAppData');
+            if (log) {
+                console.log('Hash tgWebAppData:', tgWebAppData);
+            }
+
+            if (!tgWebAppData) {
+                if (log) {
+                    console.log('❌ No tgWebAppData in hash');
+                }
+                return null;
+            }
+
+            const decodedData = decodeURIComponent(tgWebAppData);
+            if (log) {
+                console.log('Decoded data:', decodedData);
+            }
+
+            const initData = new URLSearchParams(decodedData);
+            const userStr = initData.get('user');
+            if (log) {
+                console.log('Hash userStr:', userStr);
+            }
+
+            if (userStr) {
+                const user = JSON.parse(decodeURIComponent(userStr));
+                if (log) {
+                    console.log('✅ User found via hash parsing:', user);
+                }
+                return user;
+            }
+
+            if (log) {
+                console.log('❌ No user in hash data');
+            }
+        } catch (error) {
+            if (log) {
+                console.log('❌ Error parsing hash:', error);
+            }
+        }
+
+        return null;
+    }
+
+    getCurrentUser() {
+        return this.user || this.refreshUserContext({ log: false }) || this.getStoredUser();
     }
 
 
