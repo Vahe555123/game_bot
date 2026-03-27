@@ -100,11 +100,37 @@
                 }
 
                 getUserId() {
+                    const globalUserId = window.userManager?.getUserId?.();
+                    if (globalUserId) {
+                        return globalUserId;
+                    }
+
                     if (this.tg?.initDataUnsafe?.user?.id) {
                         return this.tg.initDataUnsafe.user.id;
                     }
-                    // Fallback для тестирования
-                    return 628176879;
+
+                    const queryUserId = new URLSearchParams(window.location.search).get('tg_user_id');
+                    if (queryUserId) {
+                        const parsedQueryUserId = Number.parseInt(queryUserId, 10);
+                        if (Number.isFinite(parsedQueryUserId)) {
+                            return parsedQueryUserId;
+                        }
+                    }
+
+                    const storedUserRaw = sessionStorage.getItem('telegram_webapp_user') || localStorage.getItem('telegram_webapp_user');
+                    if (storedUserRaw) {
+                        try {
+                            const storedUser = JSON.parse(storedUserRaw);
+                            const storedUserId = Number.parseInt(storedUser?.id, 10);
+                            if (Number.isFinite(storedUserId)) {
+                                return storedUserId;
+                            }
+                        } catch (error) {
+                            console.warn('Failed to parse stored Telegram user on favorites page:', error);
+                        }
+                    }
+
+                    return null;
                 }
 
                 showBackButton(callback) {
@@ -169,6 +195,15 @@
             constructor() {
                 this.tgApp = window.tgApp; // Use global instance
                 this.apiClient = window.apiClient; // Use global API client
+                this._userTelegramId = null;
+                Object.defineProperty(this, 'userTelegramId', {
+                    configurable: true,
+                    get: () => window.userManager?.getUserId?.() || this.tgApp?.getUserId?.() || this._userTelegramId || null,
+                    set: (value) => {
+                        const parsedValue = Number.parseInt(value, 10);
+                        this._userTelegramId = Number.isFinite(parsedValue) ? parsedValue : null;
+                    }
+                });
                 this.favorites = new Set();
                 this.currentCurrency = localStorage.getItem('currency') || 'UAH';
                 this.productToRemove = null;
@@ -176,6 +211,15 @@
                 this.init().catch(error => {
                     console.error('Ошибка инициализации:', error);
                 });
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            getUserId() {
+                this.userTelegramId = this.userTelegramId;
+                return this.userTelegramId;
             }
 
             async init() {
@@ -199,15 +243,15 @@
 
             async waitForTelegramReady() {
                 // Wait up to 3 seconds for Telegram WebApp to initialize
-                const maxWait = 3000;
+                const maxWait = 5000;
                 const checkInterval = 100;
                 let waited = 0;
 
                 while (waited < maxWait) {
-                    if (this.tgApp && this.tgApp.isInitialized) {
+                    if (this.tgApp && (this.tgApp.isInitialized || this.getUserId())) {
                         return;
                     }
-                    await new Promise(resolve => setTimeout(resolve, checkInterval));
+                    await this.sleep(checkInterval);
                     waited += checkInterval;
                 }
 
@@ -232,7 +276,10 @@
                             sessionStorage.setItem('productDetailReturn', JSON.stringify({ from: 'favorites' }));
 
                             this.tgApp.hapticFeedback('impact', 'light');
-                            window.location.href = `/webapp/product/${productId}`;
+                            const productUrl = productRegion
+                                ? `/webapp/product/${productId}?region=${encodeURIComponent(productRegion)}`
+                                : `/webapp/product/${productId}`;
+                            window.location.href = productUrl;
                         }
                     }
 
@@ -261,7 +308,7 @@
             }
 
             async loadFavorites() {
-                const userId = this.tgApp.getUserId();
+                const userId = this.getUserId();
 
                 if (!userId) {
                     this.showEmptyState();
@@ -297,7 +344,7 @@
                         return product;
                     }).filter(p => p !== null);
 
-                    const favoriteIds = favoritesResponse.map(f => f.product_id);
+                    const favoriteIds = favoritesResponse.map(f => parseInt(f.product_id));
 
                     if (products.length === 0) {
                         this.showEmptyState();
@@ -547,7 +594,7 @@
             }
 
             async removeFromFavorites(productId) {
-                const userId = this.tgApp.getUserId();
+                const userId = this.getUserId();
                 if (!userId) return;
 
                 try {

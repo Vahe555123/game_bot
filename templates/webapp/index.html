@@ -562,12 +562,20 @@ class ModernProductCatalog {
         this.hasNextPage = true;
         this.isLoading = false;
         this.currentFilters = {};
-        this.userTelegramId = null;
+        this._userTelegramId = null;
         this.favorites = new Set();
 
         // Use global instances
         this.tgApp = window.tgApp;
         this.api = window.apiClient;
+        Object.defineProperty(this, 'userTelegramId', {
+            configurable: true,
+            get: () => window.userManager?.getUserId?.() || this.tgApp?.getUserId?.() || this._userTelegramId || null,
+            set: (value) => {
+                const parsedValue = Number.parseInt(value, 10);
+                this._userTelegramId = Number.isFinite(parsedValue) ? parsedValue : null;
+            }
+        });
         this.userTelegramId = this.tgApp?.getUserId();
 
         console.log('📋 Catalog state:', {
@@ -636,12 +644,12 @@ class ModernProductCatalog {
 
         // Параллельно инициализируем Telegram и загружаем данные (НЕ блокируем отображение)
         Promise.all([
-            this.waitForTelegramReady().then(() => {
+            this.waitForTelegramReady().then(async () => {
                 this.tgApp?.expand();
-                return this.initUser();
+                await this.initUser();
+                await this.loadFavorites();
             }),
-            this.loadCategories(),
-            this.loadFavorites()
+            this.loadCategories()
         ]).then(() => {
             // После загрузки избранного - обновляем UI
             this.updateFavoritesUI();
@@ -653,13 +661,12 @@ class ModernProductCatalog {
     }
 
     async waitForTelegramReady() {
-        // ОПТИМИЗАЦИЯ: Сокращено время ожидания до 200мс
-        const maxWait = 200;
-        const checkInterval = 20;
+        const maxWait = 5000;
+        const checkInterval = 100;
         let waited = 0;
 
         while (waited < maxWait) {
-            if (this.tgApp && this.tgApp.isInitialized) {
+            if (this.tgApp && this.tgApp.isInitialized && this.userTelegramId) {
                 this.userTelegramId = this.tgApp.getUserId();
                 console.log('✅ Telegram готов за', waited, 'мс');
                 await this.applyUserRegionSettingsToFilter();
@@ -677,8 +684,13 @@ class ModernProductCatalog {
         }
 
         try {
-            const user = this.tgApp.user;
-            if (user) {
+            if (window.userManager?.initUser) {
+                await window.userManager.initUser();
+                return;
+            }
+
+            const user = this.tgApp.getCurrentUser?.() || this.tgApp.user;
+            if (user?.id) {
                 const userData = {
                     telegram_id: user.id,
                     username: user.username,
@@ -884,7 +896,10 @@ class ModernProductCatalog {
                         localStorage.removeItem('selectedRegion');
                         console.log('🌍 Регион не указан в карточке, удален из localStorage');
                     }
-                    window.location.href = `/webapp/product/${productId}`;
+                    const productUrl = productRegion
+                        ? `/webapp/product/${productId}?region=${encodeURIComponent(productRegion)}`
+                        : `/webapp/product/${productId}`;
+                    window.location.href = productUrl;
                 }
             }
 
@@ -940,7 +955,7 @@ class ModernProductCatalog {
             console.log(' Loading favorites for user:', this.userTelegramId);
             // Явно отключаем кеш для получения актуальных данных
             const favorites = await this.api.get(`/users/${this.userTelegramId}/favorites/`, {}, false);
-            this.favorites = new Set(favorites.map(f => f.product_id));
+            this.favorites = new Set(favorites.map(f => parseInt(f.product_id)));
             console.log(' Favorites loaded:', this.favorites.size, 'items', Array.from(this.favorites));
         } catch (error) {
             console.error('Error loading favorites:', error);
@@ -1095,7 +1110,7 @@ class ModernProductCatalog {
         favoriteBtn.dataset.productId = product.id;
 
         // ВИЗУАЛЬНОЕ РЕШЕНИЕ: Проверяем регион для избранного
-        if (this.favorites.has(product.id)) {
+        if (this.favorites.has(parseInt(product.id))) {
             const savedRegion = localStorage.getItem(`favorite_region_${product.id}`);
             const cardRegion = cardElement.dataset.productRegion;
 
@@ -1347,7 +1362,7 @@ class ModernProductCatalog {
                 console.log('➕ Product region to save:', productRegion);
 
                 const payload = {
-                    product_id: productId,
+                    product_id: parseInt(productId),
                     region: productRegion || null
                 };
                 console.log('➕ Sending payload:', payload);
@@ -1457,7 +1472,7 @@ class ModernProductCatalog {
             const productCard = btn.closest('.product-card');
             const cardRegion = productCard ? productCard.dataset.productRegion : '';
 
-            if (this.favorites.has(productId)) {
+            if (this.favorites.has(parseInt(productId))) {
                 const savedRegion = localStorage.getItem(`favorite_region_${productId}`);
 
                 // Показываем активное сердечко только если регионы совпадают или регион не сохранен

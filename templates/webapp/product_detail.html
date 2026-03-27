@@ -2962,7 +2962,15 @@
         constructor() {
             this.productId = null;
             this.product = null;
-            this.userTelegramId = null;
+            this._userTelegramId = null;
+            Object.defineProperty(this, 'userTelegramId', {
+                configurable: true,
+                get: () => window.userManager?.getUserId?.() || window.tgApp?.getUserId?.() || this._userTelegramId || null,
+                set: (value) => {
+                    const parsedValue = Number.parseInt(value, 10);
+                    this._userTelegramId = Number.isFinite(parsedValue) ? parsedValue : null;
+                }
+            });
 
             this.isFavorite = false;
             this.userHasPSN = false;
@@ -2980,6 +2988,54 @@
                 show_india_prices: true
             };
             this.init();
+        }
+
+        sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        syncUserContext() {
+            this.userTelegramId = this.userTelegramId;
+            return this.userTelegramId;
+        }
+
+        async waitForUserContext(maxWait = 5000, checkInterval = 100) {
+            let waited = 0;
+
+            while (waited < maxWait) {
+                if (this.syncUserContext()) {
+                    return this.userTelegramId;
+                }
+
+                await this.sleep(checkInterval);
+                waited += checkInterval;
+            }
+
+            return this.syncUserContext();
+        }
+
+        loadUserDependentData() {
+            if (!this.syncUserContext() || !this.product) {
+                return;
+            }
+
+            this.checkFavoriteStatus();
+            this.loadAllFavorites();
+            this.checkPSNCredentials();
+            this.checkPaymentEmail();
+            this.checkPsnAccountForRegion('UA');
+            this.loadRegionSettings();
+        }
+
+        buildProductUrl(productId, region = '') {
+            const params = new URLSearchParams();
+            if (region) {
+                params.append('region', region);
+            }
+
+            return params.toString()
+                ? `/webapp/product/${productId}?${params.toString()}`
+                : `/webapp/product/${productId}`;
         }
 
         init() {
