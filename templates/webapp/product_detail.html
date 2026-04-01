@@ -2823,6 +2823,11 @@
                 <input id="psnUaEmail" type="email" class="form-control" placeholder="email@example.com" autocomplete="email">
             </div>
 
+            <div class="form-group" style="margin-bottom: 12px;">
+                <label for="psnUaPaymentEmail" style="display:block; margin-bottom:6px; color: var(--tg-theme-text-color);">Email для покупки</label>
+                <input id="psnUaPaymentEmail" type="email" class="form-control" placeholder="email@example.com" autocomplete="email">
+            </div>
+
             <div class="form-group" style="margin-bottom: 16px;">
                 <label for="psnUaPassword" style="display:block; margin-bottom:6px; color: var(--tg-theme-text-color);">Пароль</label>
                 <input id="psnUaPassword" type="password" class="form-control" placeholder="Пароль" autocomplete="current-password">
@@ -4638,6 +4643,13 @@
                 return;
             }
 
+            if (dbRegion === 'UA' && !(this.paymentEmail && this.paymentEmail.trim())) {
+                this.pendingRegionSelectionAfterEmailSave = 'UA';
+                this.closeRegionBottomSheet();
+                this.showPaymentEmailModal();
+                return;
+            }
+
             // Закрываем bottom sheet
             this.closeRegionBottomSheet();
 
@@ -4709,9 +4721,11 @@
             if (!modal) return;
 
             const emailInput = document.getElementById('psnUaEmail');
+            const paymentEmailInput = document.getElementById('psnUaPaymentEmail');
             const passwordInput = document.getElementById('psnUaPassword');
             const twofaInput = document.getElementById('psnUaTwofaCode');
             if (emailInput) emailInput.value = '';
+            if (paymentEmailInput) paymentEmailInput.value = (this.paymentEmail || '').trim();
             if (passwordInput) passwordInput.value = '';
             if (twofaInput) twofaInput.value = '';
             modal.style.display = 'flex';
@@ -4738,16 +4752,18 @@
             }
 
             const emailInput = document.getElementById('psnUaEmail');
+            const paymentEmailInput = document.getElementById('psnUaPaymentEmail');
             const passwordInput = document.getElementById('psnUaPassword');
             const twofaInput = document.getElementById('psnUaTwofaCode');
             const saveBtn = document.getElementById('psnUaSaveBtn');
 
             const psn_email = (emailInput?.value || '').trim();
+            const payment_email = (paymentEmailInput?.value || '').trim();
             const psn_password = (passwordInput?.value || '').trim();
             const twofa_code = (twofaInput?.value || '').trim();
 
-            if (!psn_email || !psn_password) {
-                this.showToast('Укажите email и пароль', 'error');
+            if (!psn_email || !payment_email || !psn_password) {
+                this.showToast('Укажите email, email для покупки и пароль', 'error');
                 return;
             }
 
@@ -4759,6 +4775,14 @@
                 return;
             }
 
+            if (!this.isValidEmail(payment_email)) {
+                this.showToast('Введите корректный email для покупки', 'error');
+                if (paymentEmailInput) {
+                    paymentEmailInput.focus();
+                }
+                return;
+            }
+
             const originalText = saveBtn ? saveBtn.innerHTML : '';
             if (saveBtn) {
                 saveBtn.disabled = true;
@@ -4766,6 +4790,23 @@
             }
 
             try {
+                if (payment_email !== (this.paymentEmail || '').trim()) {
+                    const paymentEmailResponse = await fetch(`/api/users/${this.userTelegramId}/payment-email`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            payment_email
+                        })
+                    });
+
+                    if (!paymentEmailResponse.ok) {
+                        const err = await paymentEmailResponse.json().catch(() => ({}));
+                        throw new Error(err.detail || 'Ошибка сохранения email для покупки');
+                    }
+                }
+
                 const response = await fetch(`/api/users/${this.userTelegramId}/psn-accounts/UA`, {
                     method: 'PUT',
                     headers: {
@@ -4784,7 +4825,8 @@
                 }
 
                 this.userHasPsnUa = true;
-                this.showToast('PSN аккаунт Украины сохранён', 'success');
+                this.paymentEmail = payment_email;
+                this.showToast('Данные для покупки Украины сохранены', 'success');
                 this.updateBuyButton();
 
                 const regionToContinue = this.pendingRegionSelectionAfterPsnSave;

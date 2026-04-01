@@ -52,6 +52,9 @@ BROWSER_HEADERS = {
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
 
+DEFAULT_TURKEY_TYPECURR = "API_5020_RUB"
+LOW_AMOUNT_TURKEY_TYPECURR = "API_17432_RUB"
+
 
 class TurkeyPaymentAPIError(Exception):
     """Исключение для ошибок API оплаты Турции"""
@@ -123,6 +126,14 @@ class TurkeyPaymentAPI:
     def _get_available_cards(self) -> List[CardDenomination]:
         """Получить список доступных карт (можно обновлять динамически)"""
         return [card for card in TURKEY_CARD_DENOMINATIONS if card.available]
+
+    def _get_type_curr_for_card(self, card: CardDenomination) -> str:
+        """Pick the available TypeCurr for the selected card denomination."""
+        # 250 TL cards are not offered with API_5020_RUB on Oplata, so the page
+        # opens with 0.00 unless we switch to the low-amount SBP provider.
+        if card.value <= 250:
+            return LOW_AMOUNT_TURKEY_TYPECURR
+        return DEFAULT_TURKEY_TYPECURR
 
     async def check_card_availability(self) -> Dict[int, bool]:
         """
@@ -238,6 +249,7 @@ class TurkeyPaymentAPI:
     ) -> Dict[str, str]:
         """Создает данные для POST запроса к API оплаты"""
         import uuid
+        type_curr = self._get_type_curr_for_card(card)
 
         data = {
             "Lang": "ru-RU",
@@ -249,7 +261,7 @@ class TurkeyPaymentAPI:
             "NoClearBuyerQueryString": "NoClear",
             "digiuid": str(uuid.uuid4()).upper(),
             "Curr_add": "",
-            "TypeCurr": "API_5020_RUB",
+            "TypeCurr": type_curr,
             "_subcurr": "",
             "_ow": "0",
             "firstrun": "0",
