@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from enum import Enum
@@ -11,6 +12,27 @@ class RegionEnum(str, Enum):
 class PlatformEnum(str, Enum):
     PS4 = "PS4"
     PS5 = "PS5"
+
+
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
+def validate_email_value(value: Optional[str], *, required: bool = False) -> Optional[str]:
+    if value is None:
+        if required:
+            raise ValueError("Укажите email")
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        if required:
+            raise ValueError("Укажите email")
+        return None
+
+    if not EMAIL_PATTERN.match(normalized):
+        raise ValueError("Введите корректный email")
+
+    return normalized
 
 # Схемы для пользователя
 class UserBase(BaseModel):
@@ -311,6 +333,11 @@ class PSNAccountBase(BaseModel):
     psn_email: Optional[str] = Field(None, description="Email для PSN аккаунта")
     platform: Optional[PlatformEnum] = Field(None, description="PlayStation платформа")
 
+    @field_validator('psn_email')
+    @classmethod
+    def validate_psn_email(cls, value: Optional[str]) -> Optional[str]:
+        return validate_email_value(value)
+
 
 class PSNAccountCreate(PSNAccountBase):
     """Схема для создания PSN аккаунта"""
@@ -324,6 +351,11 @@ class PSNAccountUpdate(BaseModel):
     psn_password: Optional[str] = Field(None, description="PSN пароль")
     platform: Optional[PlatformEnum] = Field(None, description="PlayStation платформа")
     twofa_code: Optional[str] = Field(None, description="Резервный код 2FA")
+
+    @field_validator('psn_email')
+    @classmethod
+    def validate_psn_email(cls, value: Optional[str]) -> Optional[str]:
+        return validate_email_value(value)
 
 
 class PSNAccountResponse(BaseModel):
@@ -374,6 +406,12 @@ class RegionalPSNCredentialsWithPassword(RegionalPSNCredentials):
 class PaymentEmailUpdate(BaseModel):
     """Схема для обновления email привязки покупки"""
     payment_email: str = Field(..., description="Email для привязки покупки на oplata.info")
+
+    @field_validator('payment_email')
+    @classmethod
+    def validate_payment_email(cls, value: str) -> str:
+        validated = validate_email_value(value, required=True)
+        return validated or ""
 
 
 class PaymentEmailResponse(BaseModel):

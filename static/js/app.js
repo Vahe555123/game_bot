@@ -145,9 +145,11 @@ class TelegramWebApp {
     }
 
     setupTheme() {
+        const root = document.documentElement;
+        const body = document.body;
+
         if (this.tg?.themeParams) {
             const theme = this.tg.themeParams;
-            const root = document.documentElement;
 
             // Apply Telegram theme colors
             const themeMap = {
@@ -165,11 +167,30 @@ class TelegramWebApp {
                 root.style.setProperty(property, value);
             });
 
+            const isDarkTheme = this.tg.colorScheme === 'dark';
+            root.classList.toggle('tg-theme-dark', isDarkTheme);
+            root.classList.toggle('tg-theme-light', !isDarkTheme);
+            if (body) {
+                body.classList.toggle('tg-theme-dark', isDarkTheme);
+                body.classList.toggle('tg-theme-light', !isDarkTheme);
+            }
+
             // Adjust for dark theme
-            if (this.tg.colorScheme === 'dark') {
+            if (isDarkTheme) {
                 root.style.setProperty('--shadow-sm', '0 1px 2px 0 rgba(255, 255, 255, 0.05)');
                 root.style.setProperty('--shadow-md', '0 4px 6px -1px rgba(255, 255, 255, 0.1)');
                 root.style.setProperty('--shadow-lg', '0 10px 15px -3px rgba(255, 255, 255, 0.1)');
+            } else {
+                root.style.setProperty('--shadow-sm', '0 1px 2px 0 rgba(0, 0, 0, 0.05)');
+                root.style.setProperty('--shadow-md', '0 4px 6px -1px rgba(0, 0, 0, 0.1)');
+                root.style.setProperty('--shadow-lg', '0 10px 15px -3px rgba(0, 0, 0, 0.1)');
+            }
+        } else {
+            root.classList.add('tg-theme-light');
+            root.classList.remove('tg-theme-dark');
+            if (body) {
+                body.classList.add('tg-theme-light');
+                body.classList.remove('tg-theme-dark');
             }
         }
     }

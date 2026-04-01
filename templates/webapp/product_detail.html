@@ -2819,15 +2819,6 @@
             </div>
 
             <div class="form-group" style="margin-bottom: 12px;">
-                <label for="psnUaPlatform" style="display:block; margin-bottom:6px; color: var(--tg-theme-text-color);">Платформа</label>
-                <select id="psnUaPlatform" class="form-control">
-                    <option value="">Выберите платформу</option>
-                    <option value="PS4">PlayStation 4</option>
-                    <option value="PS5">PlayStation 5</option>
-                </select>
-            </div>
-
-            <div class="form-group" style="margin-bottom: 12px;">
                 <label for="psnUaEmail" style="display:block; margin-bottom:6px; color: var(--tg-theme-text-color);">Email</label>
                 <input id="psnUaEmail" type="email" class="form-control" placeholder="email@example.com" autocomplete="email">
             </div>
@@ -2838,8 +2829,8 @@
             </div>
 
             <div class="form-group" style="margin-bottom: 16px;">
-                <label for="psnUaTwofaCode" style="display:block; margin-bottom:6px; color: var(--tg-theme-text-color);">Резервный код 2FA (опционально)</label>
-                <input id="psnUaTwofaCode" type="password" class="form-control" placeholder="Код 2FA">
+                <label for="psnUaTwofaCode" style="display:block; margin-bottom:6px; color: var(--tg-theme-text-color);">Резервный код (опционально)</label>
+                <input id="psnUaTwofaCode" type="text" class="form-control" placeholder="Резервный код">
             </div>
 
             <div style="display:flex; gap:10px;">
@@ -3044,6 +3035,10 @@
             }
 
             return String(productId).trim();
+        }
+
+        isValidEmail(email) {
+            return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
         }
 
         init() {
@@ -4713,20 +4708,16 @@
             const modal = document.getElementById('psnUaModal');
             if (!modal) return;
 
-            const platformSelect = document.getElementById('psnUaPlatform');
             const emailInput = document.getElementById('psnUaEmail');
             const passwordInput = document.getElementById('psnUaPassword');
             const twofaInput = document.getElementById('psnUaTwofaCode');
-            if (platformSelect) platformSelect.value = '';
             if (emailInput) emailInput.value = '';
             if (passwordInput) passwordInput.value = '';
             if (twofaInput) twofaInput.value = '';
             modal.style.display = 'flex';
 
             setTimeout(() => {
-                if (platformSelect) {
-                    platformSelect.focus();
-                } else if (emailInput) {
+                if (emailInput) {
                     emailInput.focus();
                 }
             }, 50);
@@ -4746,19 +4737,25 @@
                 return;
             }
 
-            const platformSelect = document.getElementById('psnUaPlatform');
             const emailInput = document.getElementById('psnUaEmail');
             const passwordInput = document.getElementById('psnUaPassword');
             const twofaInput = document.getElementById('psnUaTwofaCode');
             const saveBtn = document.getElementById('psnUaSaveBtn');
 
-            const platform = (platformSelect?.value || '').trim();
             const psn_email = (emailInput?.value || '').trim();
             const psn_password = (passwordInput?.value || '').trim();
             const twofa_code = (twofaInput?.value || '').trim();
 
-            if (!platform || !psn_email || !psn_password) {
-                this.showToast('Укажите платформу, email и пароль', 'error');
+            if (!psn_email || !psn_password) {
+                this.showToast('Укажите email и пароль', 'error');
+                return;
+            }
+
+            if (!this.isValidEmail(psn_email)) {
+                this.showToast('Введите корректный email PSN', 'error');
+                if (emailInput) {
+                    emailInput.focus();
+                }
                 return;
             }
 
@@ -4775,7 +4772,6 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        platform,
                         psn_email,
                         psn_password,
                         twofa_code
@@ -4845,6 +4841,14 @@
 
             if (!payment_email) {
                 this.showToast('Укажите email', 'error');
+                return;
+            }
+
+            if (!this.isValidEmail(payment_email)) {
+                this.showToast('Введите корректный email для покупки', 'error');
+                if (input) {
+                    input.focus();
+                }
                 return;
             }
 
@@ -5096,12 +5100,12 @@
             dialog.style.display = 'flex';
             dialog.innerHTML = `
             <div class="modal-content" style="max-width: 420px;">
-                <div class="modal-header" style="background: linear-gradient(135deg, #005bbb 0%, #ffd500 100%); color: white;">
+                <div class="modal-header" style="background: linear-gradient(135deg, #005bbb 0%, #ffd500 100%); color: #0b1736;">
                     <h3 style="display: flex; align-items: center; gap: 10px;">
                         <img src="/static/images/flags/ukraine.png" alt="Ukraine" style="width: 28px; height: 28px; border-radius: 50%;">
                         Важная информация
                     </h3>
-                    <button class="modal-close" onclick="productDetailPage.closeUkraineDialog()" style="color: white;">
+                    <button class="modal-close" onclick="productDetailPage.closeUkraineDialog()" style="color: #0b1736;">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>

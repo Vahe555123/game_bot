@@ -262,11 +262,13 @@ async def set_psn_account(
         if not account_data.psn_password:
             raise HTTPException(status_code=400, detail="Пароль обязателен для нового аккаунта")
 
+        platform_value = account_data.platform.value if account_data.platform else ('PS5' if region == 'UA' else None)
+
         new_account = PSNAccount(
             user_id=user.id,
             region=region,
             psn_email=account_data.psn_email,
-            platform=account_data.platform.value if account_data.platform else None,
+            platform=platform_value,
             is_active=1
         )
         new_account.set_psn_password(account_data.psn_password)
@@ -642,14 +644,14 @@ async def generate_payment_url(
 
         if psn_account and psn_account.has_credentials:
             # Используем региональный аккаунт
-            platform = psn_account.platform or user.platform
+            platform = psn_account.platform or user.platform or ('PS5' if normalized_region == 'UA' else None)
             psn_email = psn_account.psn_email
             psn_password = psn_account.get_psn_password()
             twofa_code = psn_account.get_twofa_code()
             logger.info(f"📧 Using regional PSN account for {normalized_region}: {psn_email}")
         elif user.has_psn_credentials:
             # Fallback на глобальные данные (для обратной совместимости)
-            platform = user.platform
+            platform = user.platform or ('PS5' if normalized_region == 'UA' else None)
             psn_email = user.psn_email
             psn_password = user.get_psn_password()
             twofa_code = ''
@@ -661,7 +663,14 @@ async def generate_payment_url(
                 detail="Для покупки в регионе UA необходимо настроить PSN аккаунт Украины (email и пароль) в профиле"
             )
 
-        if not platform or not psn_email:
+        if normalized_region == 'UA':
+            platform = platform or 'PS5'
+            if not psn_email:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Неполные PSN данные для региона {normalized_region}. Проверьте настройки профиля"
+                )
+        elif not platform or not psn_email:
             raise HTTPException(
                 status_code=400,
                 detail=f"Неполные PSN данные для региона {normalized_region}. Проверьте настройки профиля"

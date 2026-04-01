@@ -6,7 +6,7 @@
 <style>
 /* Skeleton карточки с улучшенной анимацией */
 .skeleton-card {
-    background: white;
+    background: var(--tg-theme-bg-color);
     border-radius: 16px;
     padding: 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -16,7 +16,7 @@
 .skeleton-image {
     width: 100%;
     aspect-ratio: 16/9;
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background: linear-gradient(90deg, var(--tg-theme-secondary-bg-color) 25%, rgba(36, 129, 204, 0.08) 50%, var(--tg-theme-secondary-bg-color) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 12px;
@@ -29,7 +29,7 @@
 
 .skeleton-text {
     height: 14px;
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background: linear-gradient(90deg, var(--tg-theme-secondary-bg-color) 25%, rgba(36, 129, 204, 0.08) 50%, var(--tg-theme-secondary-bg-color) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s infinite;
     border-radius: 4px;
@@ -484,7 +484,7 @@
 <!-- Small Loading Spinner (for pagination) -->
 <div class="text-center" id="loadingSpinner" style="display: none; padding: 20px 0;">
     <div class="spinner"></div>
-    <p style="margin-top: 8px; margin-bottom: 0; font-size: 0.9rem; color: #666;">Загрузка...</p>
+    <p style="margin-top: 8px; margin-bottom: 0; font-size: 0.9rem; color: var(--tg-theme-hint-color);">Загрузка...</p>
 </div>
 
 <!-- Load More Button -->
