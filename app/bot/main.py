@@ -119,7 +119,7 @@ async def start_command(message: types.Message) -> None:
     welcome_message = f"""
 🎮 Добро пожаловать в PlayStation Store, {user.first_name}!
 
-Здесь вы можете:
+Здесь вы можете23:
 • Просматривать каталог игр PlayStation
 • Фильтровать товары по категориям и ценам
 • Добавлять игры в избранное
