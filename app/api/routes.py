@@ -699,7 +699,10 @@ async def generate_payment_url(
                 logger.info(f"✅ India payment URL generated for user {telegram_id}, product {product_id}")
 
                 # Получаем цену карты в рублях через API
-                card_price_rub = await india_payment_api.get_card_price_rub(purchase_info.total_value)
+                card_price_rub = await india_payment_api.get_purchase_price_rub(
+                    purchase_info,
+                    payment_url=payment_url
+                )
                 logger.info(f"💰 India card {purchase_info.total_value} Rs price: {card_price_rub} RUB")
 
                 # Получаем прямую ссылку на покупку карты с количеством
@@ -816,7 +819,10 @@ async def generate_payment_url(
                 logger.info(f"✅ Turkey payment URL generated for user {telegram_id}, product {product_id}")
 
                 # Получаем цену карты в рублях через API
-                card_price_rub = await turkey_payment_api.get_card_price_rub(purchase_info.total_value)
+                card_price_rub = await turkey_payment_api.get_purchase_price_rub(
+                    purchase_info,
+                    payment_url=payment_url
+                )
                 logger.info(f"💰 Turkey card {purchase_info.total_value} TL price: {card_price_rub} RUB")
 
                 # Получаем прямую ссылку на покупку карты с количеством

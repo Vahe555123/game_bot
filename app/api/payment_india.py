@@ -454,6 +454,57 @@ class IndiaPaymentAPI:
 
         return None
 
+    async def get_purchase_price_rub(
+        self,
+        purchase_info: CardPurchaseInfo,
+        payment_url: Optional[str] = None
+    ) -> Optional[int]:
+        """
+        Получить итоговую цену покупки в рублях.
+
+        Для одиночного номинала пробуем стандартный price_options.asp.
+        Если покупка состоит из нескольких карт и прямой номинал не существует,
+        пробуем распарсить цену из готовой страницы оплаты. Если и это не удалось,
+        суммируем цены отдельных номиналов.
+        """
+        has_direct_denomination = any(
+            card.value == purchase_info.total_value
+            for card in INDIA_CARD_DENOMINATIONS
+        )
+        if has_direct_denomination:
+            direct_price = await self.get_card_price_rub(purchase_info.total_value)
+            if direct_price is not None:
+                return direct_price
+
+        if payment_url:
+            parsed_price = await self.get_card_price_rub_from_payment_url(payment_url)
+            if parsed_price is not None:
+                logger.info(
+                    f"Parsed India purchase price from payment page: "
+                    f"{purchase_info.total_value} Rs -> {parsed_price} RUB"
+                )
+                return parsed_price
+
+        total_price_rub = 0
+        for denomination, quantity in purchase_info.quantity_map.items():
+            unit_price_rub = await self.get_card_price_rub(denomination)
+            if unit_price_rub is None:
+                logger.warning(
+                    f"Unable to resolve India card price for denomination "
+                    f"{denomination} Rs while calculating total purchase price"
+                )
+                return None
+            total_price_rub += unit_price_rub * quantity
+
+        if total_price_rub > 0:
+            logger.info(
+                f"Calculated India purchase price from denominations: "
+                f"{purchase_info.quantity_map} -> {total_price_rub} RUB"
+            )
+            return total_price_rub
+
+        return None
+
     async def get_all_cards_prices_rub(self) -> Dict[int, int]:
         """
         Получить цены всех доступных карт в рублях
