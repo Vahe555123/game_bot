@@ -472,13 +472,18 @@
 
     .price-display .price-old {
         font-size: 2.5rem;
-        color: rgba(255, 255, 255, 0.4);
+        color: rgba(0, 0, 0, 0.45);
         text-decoration: line-through;
         text-decoration-thickness: 2px;
         font-weight: 700;
         line-height: 1;
         letter-spacing: -1px;
         opacity: 0.7;
+    }
+
+    .tg-theme-dark .price-display .price-old,
+    body.tg-theme-dark .price-display .price-old {
+        color: rgba(255, 255, 255, 0.4);
     }
 
     /* Карточка скидки */
@@ -683,9 +688,14 @@
 
     .ps-plus-price-old {
         font-size: 1rem;
-        color: rgba(255, 255, 255, 0.6);
+        color: rgba(0, 0, 0, 0.5);
         text-decoration: line-through;
         font-weight: 600;
+    }
+
+    .tg-theme-dark .ps-plus-price-old,
+    body.tg-theme-dark .ps-plus-price-old {
+        color: rgba(255, 255, 255, 0.6);
     }
 
     .ps-plus-price-new {
@@ -1235,17 +1245,28 @@
     .price-old {
         font-size: 0.7rem;
         text-decoration: line-through;
-        color: rgba(255, 255, 255, 0.7) !important;
+        color: rgba(0, 0, 0, 0.5) !important;
         font-weight: 500;
         margin-top: 4px;
-        opacity: 0.5;
+        opacity: 0.7;
     }
 
     .region-price-old {
         font-size: 0.85rem;
         text-decoration: line-through;
-        color: rgba(255, 255, 255, 0.65);
+        color: rgba(0, 0, 0, 0.5);
         font-weight: 500;
+    }
+
+    .tg-theme-dark .price-old,
+    body.tg-theme-dark .price-old {
+        color: rgba(255, 255, 255, 0.7) !important;
+        opacity: 0.5;
+    }
+
+    .tg-theme-dark .region-price-old,
+    body.tg-theme-dark .region-price-old {
+        color: rgba(255, 255, 255, 0.65);
     }
 
     .region-discount {
