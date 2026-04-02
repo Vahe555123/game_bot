@@ -49,13 +49,30 @@ class Settings:
     @property
     def ADMIN_TELEGRAM_IDS(self) -> list:
         """Список Telegram ID администраторов"""
-        admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "")
+        admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "") or os.getenv("ADMIN_TELEGRAM_ID", "")
         if not admin_ids_str:
             return []
-        try:
-            return [int(user_id.strip()) for user_id in admin_ids_str.split(",") if user_id.strip()]
-        except ValueError:
-            return []
+
+        admin_ids = []
+        seen_ids = set()
+
+        for raw_user_id in admin_ids_str.split(","):
+            user_id = raw_user_id.strip()
+            if not user_id:
+                continue
+
+            try:
+                parsed_id = int(user_id)
+            except ValueError:
+                continue
+
+            if parsed_id in seen_ids:
+                continue
+
+            seen_ids.add(parsed_id)
+            admin_ids.append(parsed_id)
+
+        return admin_ids
     
     ADMIN_SECRET_KEY: str = os.getenv("ADMIN_SECRET_KEY", "your-secret-admin-key-here")
     
