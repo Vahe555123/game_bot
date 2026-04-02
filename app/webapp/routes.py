@@ -8,7 +8,6 @@ import time
 import asyncio
 from app.database.connection import get_db
 from config.settings import settings
-from app.api.admin_auth import check_admin_access, get_telegram_user_id
 from app.api.crud import product_crud
 from app.api.schemas import ProductFilter, PaginationParams
 
@@ -148,30 +147,6 @@ async def webapp_faq(request: Request, db: Session = Depends(get_db)):
 @router.get("/webapp/admin", response_class=HTMLResponse)
 async def webapp_admin(request: Request, db: Session = Depends(get_db)):
     """Страница администрирования"""
-    # Проверяем права админа
-    telegram_id = get_telegram_user_id(request)
-
-    # Для отладки: логируем все заголовки
-    print(f"Admin access attempt:")
-    print(f"  Telegram ID from headers: {telegram_id}")
-    print(f"  All headers: {dict(request.headers)}")
-    print(f"  Query params: {dict(request.query_params)}")
-
-    if not telegram_id or not check_admin_access(telegram_id):
-        return templates.TemplateResponse(
-            "webapp/admin_access_denied.html",
-            {
-                "request": request,
-                "title": "Доступ запрещен",
-                "debug_info": {
-                    "telegram_id": telegram_id,
-                    "headers": dict(request.headers),
-                    "query_params": dict(request.query_params)
-                },
-                "cache_buster": int(time.time())
-            }
-        )
-
     # Определяем API base URL
     if settings.WEBAPP_URL:
         api_base_url = settings.WEBAPP_URL.replace('/webapp', '').rstrip('/')
@@ -187,7 +162,6 @@ async def webapp_admin(request: Request, db: Session = Depends(get_db)):
             "request": request,
             "title": "Админ-панель",
             "api_base_url": api_base_url,
-            "admin_telegram_id": telegram_id,
             "cache_buster": int(time.time())
         }
     )

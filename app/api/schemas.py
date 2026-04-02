@@ -307,6 +307,7 @@ class AdminUser(BaseModel):
     created_at: datetime
     favorites_count: int
     has_psn_credentials: bool
+    is_admin: bool = False
 
     class Config:
         from_attributes = True

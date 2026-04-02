@@ -13,6 +13,7 @@ from app.api.schemas import (
     AdminStats, AdminUser
 )
 from app.api.crud import currency_rate_crud, admin_crud
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,40 @@ async def get_admin_users(
         raise HTTPException(status_code=500, detail="Ошибка получения пользователей")
 
 # Курсы валют
+@router.delete("/admin/users/{user_id}", response_model=dict, tags=["Admin"], summary="Удалить пользователя")
+async def delete_admin_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin_id: int = Depends(verify_admin_access)
+):
+    """Delete a user from the admin panel."""
+    try:
+        user = admin_crud.get_user_by_id(db, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+        if user.telegram_id in settings.ADMIN_TELEGRAM_IDS:
+            raise HTTPException(
+                status_code=400,
+                detail="Нельзя удалить admin-пользователя из .env",
+            )
+
+        if user.telegram_id == admin_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Нельзя удалить собственный admin-аккаунт",
+            )
+
+        user_name = user.full_name
+        admin_crud.delete_user(db, user)
+        return {"message": f"Пользователь {user_name} удален"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка удаления пользователя")
+
 @router.get("/admin/currency-rates", response_model=List[CurrencyRate], tags=["Admin"], summary="Список курсов валют")
 async def get_currency_rates(
     request: Request,

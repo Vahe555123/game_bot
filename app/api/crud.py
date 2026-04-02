@@ -4,6 +4,7 @@ from typing import Optional, List, Dict
 from app.models import User, Product, UserFavoriteProduct, Localization
 from app.models.currency_rate import CurrencyRate
 from app.api.schemas import UserCreate, UserUpdate, ProductFilter, PaginationParams, CurrencyRateCreate, CurrencyRateUpdate
+from config.settings import settings
 
 class UserCRUD:
     @staticmethod
@@ -1145,11 +1146,22 @@ class AdminCRUD:
                 'is_active': user.is_active,
                 'created_at': user.created_at,
                 'favorites_count': favorites_count,
-                'has_psn_credentials': user.has_psn_credentials
+                'has_psn_credentials': user.has_psn_credentials,
+                'is_admin': user.telegram_id in settings.ADMIN_TELEGRAM_IDS
             }
             users.append(user_data)
 
         return users
+
+    @staticmethod
+    def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+        return db.query(User).filter(User.id == user_id).first()
+
+    @staticmethod
+    def delete_user(db: Session, user: User) -> bool:
+        db.delete(user)
+        db.commit()
+        return True
 
 # Создаем экземпляры для использования
 user_crud = UserCRUD()
