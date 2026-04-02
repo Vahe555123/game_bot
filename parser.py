@@ -27,7 +27,32 @@ class ParserConfig:
 
     def __init__(self):
         self.last_modified = 0
+        self.ensure_config_file()
         self.load_config()
+
+    def ensure_config_file(self):
+        """Создает конфиг с безопасными значениями, если файла еще нет"""
+        config_dir = os.path.dirname(self.CONFIG_FILE)
+        if config_dir:
+            os.makedirs(config_dir, exist_ok=True)
+
+        if os.path.exists(self.CONFIG_FILE):
+            return
+
+        default_config = {
+            "MAX_RETRIES": 3,
+            "REQUEST_TIMEOUT": 120,
+            "BATCH_SIZE_PAGES": 8,
+            "BATCH_SIZE_PRODUCTS": 12,
+            "BATCH_SIZE_UNQUOTE": 30,
+            "SLEEP_BETWEEN_BATCHES": 8,
+            "SLEEP_ON_CLOUDFLARE": 300,
+            "ACCESS_DENIED_CHECK_INTERVAL": 180,
+            "CONFIG_CHECK_INTERVAL": 5
+        }
+
+        with open(self.CONFIG_FILE, 'w', encoding='utf-8') as f:
+            f.write(dumps(default_config, ensure_ascii=False, indent=2))
 
     def load_config(self):
         """Загружает конфигурацию из JSON файла"""
@@ -42,12 +67,12 @@ class ParserConfig:
 
                     self.MAX_RETRIES = config.get('MAX_RETRIES', 3)
                     self.REQUEST_TIMEOUT = config.get('REQUEST_TIMEOUT', 120)
-                    self.BATCH_SIZE_PAGES = config.get('BATCH_SIZE_PAGES', 30)
-                    self.BATCH_SIZE_PRODUCTS = config.get('BATCH_SIZE_PRODUCTS', 70)
-                    self.BATCH_SIZE_UNQUOTE = config.get('BATCH_SIZE_UNQUOTE', 250)
-                    self.SLEEP_BETWEEN_BATCHES = config.get('SLEEP_BETWEEN_BATCHES', 3)
-                    self.SLEEP_ON_CLOUDFLARE = config.get('SLEEP_ON_CLOUDFLARE', 30)
-                    self.ACCESS_DENIED_CHECK_INTERVAL = config.get('ACCESS_DENIED_CHECK_INTERVAL', 60)
+                    self.BATCH_SIZE_PAGES = config.get('BATCH_SIZE_PAGES', 8)
+                    self.BATCH_SIZE_PRODUCTS = config.get('BATCH_SIZE_PRODUCTS', 12)
+                    self.BATCH_SIZE_UNQUOTE = config.get('BATCH_SIZE_UNQUOTE', 30)
+                    self.SLEEP_BETWEEN_BATCHES = config.get('SLEEP_BETWEEN_BATCHES', 8)
+                    self.SLEEP_ON_CLOUDFLARE = config.get('SLEEP_ON_CLOUDFLARE', 300)
+                    self.ACCESS_DENIED_CHECK_INTERVAL = config.get('ACCESS_DENIED_CHECK_INTERVAL', 180)
                     self.CONFIG_CHECK_INTERVAL = config.get('CONFIG_CHECK_INTERVAL', 5)
 
                     self.last_modified = current_modified
@@ -65,12 +90,12 @@ class ParserConfig:
         """Устанавливает значения по умолчанию"""
         self.MAX_RETRIES = 3
         self.REQUEST_TIMEOUT = 120
-        self.BATCH_SIZE_PAGES = 30
-        self.BATCH_SIZE_PRODUCTS = 70
-        self.BATCH_SIZE_UNQUOTE = 250
-        self.SLEEP_BETWEEN_BATCHES = 3
-        self.SLEEP_ON_CLOUDFLARE = 30
-        self.ACCESS_DENIED_CHECK_INTERVAL = 60
+        self.BATCH_SIZE_PAGES = 8
+        self.BATCH_SIZE_PRODUCTS = 12
+        self.BATCH_SIZE_UNQUOTE = 30
+        self.SLEEP_BETWEEN_BATCHES = 8
+        self.SLEEP_ON_CLOUDFLARE = 300
+        self.ACCESS_DENIED_CHECK_INTERVAL = 180
         self.CONFIG_CHECK_INTERVAL = 5
 
     # Дополнительные категории для парсинга
@@ -304,6 +329,8 @@ class AccessController:
         self.is_blocked = False
         self.no_internet = False
         self.test_url = "https://store.playstation.com/ru-ua/pages/browse"
+        self._wait_task = None
+        self._wait_task_lock = asyncio.Lock()
         self.internet_check_urls = [
             "https://www.google.com",
             "https://1.1.1.1",  # Cloudflare DNS
@@ -331,7 +358,14 @@ class AccessController:
                 html = await resp.text()
 
             # Проверяем блокировку Cloudflare
-            if "You don't have permission to access" in html:
+            if resp.status in (403, 429):
+                return False, "cloudflare"
+            if (
+                "You don't have permission to access" in html
+                or "Attention Required!" in html
+                or "cf-browser-verification" in html
+                or "/cdn-cgi/" in html
+            ):
                 return False, "cloudflare"
             return True, ""
 
@@ -346,7 +380,7 @@ class AccessController:
         except Exception:
             return False, "unknown"
 
-    async def wait_for_access(self, session: aiohttp.ClientSession):
+    async def _wait_for_access_internal(self, session: aiohttp.ClientSession):
         """Ожидает восстановления доступа (блокировка или интернет)"""
         if not self.is_blocked and not self.no_internet:
             # Первая проверка - определяем причину
@@ -363,7 +397,9 @@ class AccessController:
                 print("\n" + "=" * 80)
                 print(" ОБНАРУЖЕНА БЛОКИРОВКА CLOUDFLARE")
                 print("=" * 80)
-                print(f" Ожидание восстановления доступа (проверка каждые {parser_config.ACCESS_DENIED_CHECK_INTERVAL} сек)...")
+                print(f" Пауза {parser_config.SLEEP_ON_CLOUDFLARE} сек перед первой повторной проверкой...")
+                print(f" Дальше проверка каждые {parser_config.ACCESS_DENIED_CHECK_INTERVAL} сек...")
+                await asyncio.sleep(parser_config.SLEEP_ON_CLOUDFLARE)
             elif reason == "site_down":
                 print("\n" + "=" * 80)
                 print("САЙТ НЕДОСТУПЕН")
@@ -411,6 +447,21 @@ class AccessController:
                     print(" Обнаружена блокировка Cloudflare...")
 
             await asyncio.sleep(parser_config.ACCESS_DENIED_CHECK_INTERVAL)
+
+    async def wait_for_access(self, session: aiohttp.ClientSession):
+        """Координирует единое ожидание доступа для всех параллельных задач"""
+        async with self._wait_task_lock:
+            if self._wait_task is None or self._wait_task.done():
+                self._wait_task = asyncio.create_task(self._wait_for_access_internal(session))
+            wait_task = self._wait_task
+
+        try:
+            await wait_task
+            return True
+        finally:
+            async with self._wait_task_lock:
+                if self._wait_task is wait_task and wait_task.done():
+                    self._wait_task = None
 
 
 # Глобальный экземпляр контроллера доступа
