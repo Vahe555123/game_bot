@@ -919,7 +919,13 @@ function getTelegramWebApp() {
 }
 
 function getTelegramInitData() {
-    return getTelegramWebApp()?.initData || '';
+    const webAppInitData = getTelegramWebApp()?.initData;
+    if (webAppInitData) {
+        return webAppInitData;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    return params.get('tg_init_data') || params.get('tgWebAppData') || params.get('initData') || '';
 }
 
 function getTelegramUserId() {
