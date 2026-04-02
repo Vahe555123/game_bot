@@ -58,7 +58,6 @@ class Settings:
             return []
     
     ADMIN_SECRET_KEY: str = os.getenv("ADMIN_SECRET_KEY", "your-secret-admin-key-here")
-    ADMIN_INIT_DATA_MAX_AGE_SECONDS: int = int(os.getenv("ADMIN_INIT_DATA_MAX_AGE_SECONDS", 86400))
     
     class Config:
         case_sensitive = True

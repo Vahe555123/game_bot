@@ -2168,13 +2168,16 @@
     }
 
     function openAdminPanel() {
+        // Получаем Telegram ID из того же источника что и в checkAdminAccess
         const webAppInfo = window.Telegram?.WebApp;
-        const initData = webAppInfo?.initData || '';
+        const user = webAppInfo?.initDataUnsafe?.user;
+        const userId = user?.id;
 
-        console.log('Opening admin panel with initData:', Boolean(initData));
+        console.log('Opening admin panel with user ID:', userId);
 
-        if (initData) {
-            const adminUrl = `/webapp/admin?tg_init_data=${encodeURIComponent(initData)}`;
+        if (userId) {
+            // Передаем ID через URL параметр
+            const adminUrl = `/webapp/admin?tg_user_id=${userId}`;
             console.log('Redirecting to:', adminUrl);
             window.location.href = adminUrl;
         } else {
@@ -2184,21 +2187,22 @@
     }
 
     function openAdminPanel() {
-        const initData =
-            window.Telegram?.WebApp?.initData ||
-            window.tgApp?.getInitData?.() ||
-            '';
+        const userId =
+            window.profileManager?.getUserId?.() ||
+            window.userManager?.getUserId?.() ||
+            window.tgApp?.getUserId?.() ||
+            null;
 
-        console.log('Opening admin panel with initData:', Boolean(initData));
+        console.log('Opening admin panel with user ID:', userId);
 
-        if (initData) {
-            const adminUrl = `/webapp/admin?tg_init_data=${encodeURIComponent(initData)}`;
+        if (userId) {
+            const adminUrl = `/webapp/admin?tg_user_id=${userId}`;
             console.log('Redirecting to:', adminUrl);
             window.location.href = adminUrl;
             return;
         }
 
-        console.log('No initData found, redirecting without parameter');
+        console.log('No user ID found, redirecting without parameter');
         window.location.href = '/webapp/admin';
     }
 

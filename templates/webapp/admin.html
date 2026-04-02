@@ -5,9 +5,10 @@
 {% block content %}
 <!-- Admin Header -->
 <div class="admin-header fade-in">
+    <div id="adminMeta" data-admin-telegram-id="{{ admin_telegram_id }}" style="display: none;"></div>
     <div class="admin-header-content">
         <h1><i class="fas fa-tools"></i> Админ-панель</h1>
-        <p id="adminIdentity">Проверка доступа...</p>
+        <p>ID: {{ admin_telegram_id }}</p>
     </div>
     <div class="admin-actions">
         <button class="btn btn-outline" onclick="window.location.href='/webapp'">
@@ -19,12 +20,6 @@
     </div>
 </div>
 
-<div class="access-status fade-in" id="adminAccessState">
-    <i class="fas fa-shield-alt"></i>
-    <span>Проверка доступа...</span>
-</div>
-
-<div id="adminApp" style="display: none;">
 <!-- Statistics Cards -->
 <div class="stats-grid fade-in" id="statsGrid">
     <!-- Статистика загружается динамически -->
@@ -102,7 +97,6 @@
             </div>
         </div>
     </div>
-</div>
 </div>
 
 <!-- Add Rate Modal -->
@@ -839,24 +833,6 @@ html, body {
     margin-top: var(--spacing-sm);
 }
 
-.access-status {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--spacing-sm);
-    padding: var(--spacing-lg);
-    border-radius: var(--border-radius-md);
-    background: rgba(0, 102, 255, 0.08);
-    color: var(--primary-color);
-    margin-bottom: var(--spacing-md);
-    text-align: center;
-}
-
-.access-status.error {
-    background: rgba(220, 53, 69, 0.08);
-    color: var(--danger-color);
-}
-
 /* Loading */
 .loading {
     display: flex;
@@ -911,101 +887,8 @@ html, body {
 <script>
 // Глобальные переменные
 let currentEditingRateId = null;
-let verifiedAdminId = null;
 const apiBaseUrl = '{{ api_base_url }}'.replace(/\/$/, ''); // Remove trailing slash
-
-function getTelegramWebApp() {
-    return window.Telegram?.WebApp || null;
-}
-
-function getTelegramInitData() {
-    const webAppInitData = getTelegramWebApp()?.initData;
-    if (webAppInitData) {
-        return webAppInitData;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-    return params.get('tg_init_data') || params.get('tgWebAppData') || params.get('initData') || '';
-}
-
-function getTelegramUserId() {
-    return Number(getTelegramWebApp()?.initDataUnsafe?.user?.id || 0);
-}
-
-function getAdminHeaders(includeContentType = true) {
-    const initData = getTelegramInitData();
-    if (!initData) {
-        throw new Error('Откройте админку из Telegram WebApp, чтобы подтвердить доступ');
-    }
-
-    const headers = {
-        'X-Telegram-Init-Data': initData
-    };
-
-    if (includeContentType) {
-        headers['Content-Type'] = 'application/json';
-    }
-
-    return headers;
-}
-
-async function getResponseError(response, fallbackMessage) {
-    try {
-        const error = await response.json();
-        return error.detail || fallbackMessage;
-    } catch (parseError) {
-        return fallbackMessage;
-    }
-}
-
-function escapeHtml(value) {
-    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#39;'
-    }[char]));
-}
-
-function showAdminAccessState(message, isError = false) {
-    const state = document.getElementById('adminAccessState');
-    state.classList.toggle('error', isError);
-    state.innerHTML = `
-        <i class="fas ${isError ? 'fa-ban' : 'fa-shield-alt'}"></i>
-        <span>${escapeHtml(message)}</span>
-    `;
-}
-
-async function ensureAdminAccess() {
-    const adminApp = document.getElementById('adminApp');
-
-    showAdminAccessState('Проверка доступа...');
-
-    try {
-        const response = await fetch(`${apiBaseUrl}/api/admin/check-access`, {
-            headers: getAdminHeaders(false)
-        });
-
-        if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Доступ запрещен'));
-        }
-
-        const data = await response.json();
-        verifiedAdminId = Number(data.telegram_id || getTelegramUserId() || 0);
-        document.getElementById('adminIdentity').textContent = verifiedAdminId
-            ? `ID: ${verifiedAdminId}`
-            : 'Доступ подтвержден';
-
-        document.getElementById('adminAccessState').style.display = 'none';
-        adminApp.style.display = 'block';
-        return true;
-    } catch (error) {
-        adminApp.style.display = 'none';
-        showAdminAccessState(error.message || 'Доступ запрещен', true);
-        return false;
-    }
-}
+const adminTelegramId = Number(document.getElementById('adminMeta')?.dataset?.adminTelegramId || 0);
 
 // Инициализация админки
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1036,9 +919,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.addEventListener('resize', adjustHeight);
         window.addEventListener('orientationchange', adjustHeight);
     }
-
-    const hasAccess = await ensureAdminAccess();
-    if (!hasAccess) return;
 
     await loadAdminData();
     setupEventListeners();
@@ -1093,12 +973,13 @@ async function loadAdminData() {
 
 async function loadStats() {
     try {
-        const response = await fetch(`${apiBaseUrl}/api/admin/stats`, {
-            headers: getAdminHeaders()
-        });
-        if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Failed to load stats'));
-        }
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/stats`, { headers });
+        if (!response.ok) throw new Error('Failed to load stats');
 
         const stats = await response.json();
         renderStats(stats);
@@ -1133,12 +1014,13 @@ function renderStats(stats) {
 
 async function loadCurrencyRates() {
     try {
-        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, {
-            headers: getAdminHeaders()
-        });
-        if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Failed to load currency rates'));
-        }
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, { headers });
+        if (!response.ok) throw new Error('Failed to load currency rates');
 
         const rates = await response.json();
         renderCurrencyRates(rates);
@@ -1205,7 +1087,7 @@ function renderCurrencyRates(rates) {
                     <div class="rates-table-row ${rate.is_active ? '' : 'inactive'}" data-rate-id="${rate.id}">
                         <div class="col-range">
                             <strong>${rate.price_range_display}</strong> ${currency}
-                            ${rate.description ? `<div class="rate-note">${escapeHtml(rate.description)}</div>` : ''}
+                            ${rate.description ? `<div class="rate-note">${rate.description}</div>` : ''}
                         </div>
                         <div class="col-rate">
                             <strong>×${rate.rate}</strong>
@@ -1245,12 +1127,13 @@ async function loadUsers() {
     container.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i> Загрузка пользователей...</div>';
 
     try {
-        const response = await fetch(`${apiBaseUrl}/api/admin/users?limit=50`, {
-            headers: getAdminHeaders()
-        });
-        if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Failed to load users'));
-        }
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/users?limit=50`, { headers });
+        if (!response.ok) throw new Error('Failed to load users');
 
         const users = await response.json();
         renderUsers(users);
@@ -1275,7 +1158,7 @@ function renderUsers(users) {
         <div class="user-card">
             <div class="user-header">
                 <div class="user-header-main">
-                    <span class="user-name">${escapeHtml(user.full_name || `User ${user.telegram_id}`)}</span>
+                    <span class="user-name">${user.full_name}</span>
                     ${user.is_admin ? '<span class="user-badge"><i class="fas fa-shield-alt"></i> Админ</span>' : ''}
                 </div>
                 <span class="user-date">${new Date(user.created_at).toLocaleDateString()}</span>
@@ -1323,11 +1206,14 @@ async function deleteUser(userId) {
     try {
         const response = await fetch(`${apiBaseUrl}/api/admin/users/${userId}`, {
             method: 'DELETE',
-            headers: getAdminHeaders(false)
+            headers: {
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            }
         });
 
         if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Ошибка удаления пользователя'));
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка удаления пользователя');
         }
 
         const result = await response.json();
@@ -1364,12 +1250,13 @@ async function editRate(rateId) {
     currentEditingRateId = rateId;
 
     try {
-        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, {
-            headers: getAdminHeaders()
-        });
-        if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Failed to load currency rates'));
-        }
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-Telegram-User-Id': adminTelegramId.toString()
+        };
+
+        const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, { headers });
+        if (!response.ok) throw new Error('Failed to load currency rates');
 
         const rates = await response.json();
         const rate = rates.find(r => r.id === rateId);
@@ -1416,12 +1303,16 @@ async function handleAddRate(event) {
     try {
         const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates`, {
             method: 'POST',
-            headers: getAdminHeaders(),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            },
             body: JSON.stringify(data)
         });
 
         if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Ошибка создания курса'));
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка создания курса');
         }
 
         showSuccess('Курс валют добавлен успешно');
@@ -1449,12 +1340,16 @@ async function handleEditRate(event) {
     try {
         const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates/${currentEditingRateId}`, {
             method: 'PUT',
-            headers: getAdminHeaders(),
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            },
             body: JSON.stringify(data)
         });
 
         if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Ошибка обновления курса'));
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка обновления курса');
         }
 
         showSuccess('Курс валют обновлен успешно');
@@ -1474,11 +1369,14 @@ async function deleteRate() {
     try {
         const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates/${currentEditingRateId}`, {
             method: 'DELETE',
-            headers: getAdminHeaders(false)
+            headers: {
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            }
         });
 
         if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Ошибка удаления курса'));
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка удаления курса');
         }
 
         showSuccess('Курс валют удален успешно');
@@ -1495,11 +1393,14 @@ async function deleteRateDirectly(rateId) {
     try {
         const response = await fetch(`${apiBaseUrl}/api/admin/currency-rates/${rateId}`, {
             method: 'DELETE',
-            headers: getAdminHeaders(false)
+            headers: {
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            }
         });
 
         if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Ошибка удаления курса'));
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка удаления курса');
         }
 
         showSuccess('Диапазон курса удален успешно');
@@ -1521,11 +1422,14 @@ async function updateAllPrices() {
     try {
         const response = await fetch(`${apiBaseUrl}/api/admin/update-prices`, {
             method: 'POST',
-            headers: getAdminHeaders(false)
+            headers: {
+                'X-Telegram-User-Id': adminTelegramId.toString()
+            }
         });
 
         if (!response.ok) {
-            throw new Error(await getResponseError(response, 'Ошибка обновления цен'));
+            const error = await response.json();
+            throw new Error(error.detail || 'Ошибка обновления цен');
         }
 
         const result = await response.json();
