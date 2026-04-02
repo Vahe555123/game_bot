@@ -7,6 +7,7 @@ import aiohttp
 from typing import Dict, Optional, Tuple
 import logging
 from dataclasses import dataclass
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,39 @@ class UkrainePaymentAPI:
         except aiohttp.ClientError as e:
             logger.error(f"Payment API request failed: {str(e)}")
             raise UkrainePaymentAPIError(f"Ошибка соединения с API оплаты: {str(e)}")
+
+    async def get_payment_price_rub_from_url(self, payment_url: str) -> Optional[int]:
+        """
+        Получить итоговую цену оплаты в рублях, распарсив страницу oplata.
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(payment_url, headers=BROWSER_HEADERS) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            f"Unable to fetch Ukraine payment page for RUB price: status={response.status}"
+                        )
+                        return None
+
+                    html = await response.text()
+
+                    match = re.search(r'<span[^>]*id=["\']price_value["\'][^>]*>(\d+(?:\.\d+)?)</span>', html)
+                    if match:
+                        price_rub = int(float(match.group(1)))
+                        logger.info(f"Parsed Ukraine payment price from page: {price_rub} RUB")
+                        return price_rub
+
+                    match = re.search(r'price:\s*(\d+(?:\.\d+)?)', html)
+                    if match:
+                        price_rub = int(float(match.group(1)))
+                        logger.info(f"Parsed Ukraine payment price from JS: {price_rub} RUB")
+                        return price_rub
+
+                    logger.warning("Ukraine payment page does not contain a parsable RUB price")
+        except Exception as e:
+            logger.error(f"Error parsing Ukraine payment price from URL: {e}")
+
+        return None
 
     def get_direct_payment_url(self, buyer_email: str = None) -> str:
         """

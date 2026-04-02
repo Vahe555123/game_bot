@@ -1583,6 +1583,8 @@
                         this.psnSettings[account.region] = {
                             platform: account.platform,
                             psn_email: account.psn_email,
+                            psn_password: account.psn_password,
+                            twofa_code: account.twofa_code,
                             has_password: account.has_password,
                             has_twofa: account.has_twofa
                         };
@@ -1714,14 +1716,12 @@
                 emailInput.value = regionData.psn_email || '';
             }
 
-            // Пароль не загружаем из соображений безопасности
             if (passwordInput) {
-                passwordInput.value = '';
+                passwordInput.value = regionData.psn_password || '';
             }
 
-            // 2FA код тоже не загружаем из соображений безопасности
             if (twofaInput) {
-                twofaInput.value = '';
+                twofaInput.value = regionData.twofa_code || '';
                 // Показываем подсказку если 2FA уже настроен
                 const helpText = twofaInput.parentElement?.nextElementSibling;
                 if (helpText && helpText.classList.contains('form-help')) {

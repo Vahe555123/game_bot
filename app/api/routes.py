@@ -177,6 +177,8 @@ async def get_psn_accounts(telegram_id: int, db: Session = Depends(get_db)):
                 region=acc.region,
                 psn_email=acc.psn_email,
                 platform=acc.platform,
+                psn_password=acc.get_psn_password(),
+                twofa_code=acc.get_twofa_code(),
                 has_password=bool(acc.psn_password_hash),
                 has_twofa=bool(acc.twofa_backup_code),
                 is_active=bool(acc.is_active),
@@ -209,6 +211,8 @@ async def get_psn_account_for_region(telegram_id: int, region: str, db: Session 
         region=account.region,
         psn_email=account.psn_email,
         platform=account.platform,
+        psn_password=account.get_psn_password(),
+        twofa_code=account.get_twofa_code(),
         has_password=bool(account.psn_password_hash),
         has_twofa=bool(account.twofa_backup_code),
         is_active=bool(account.is_active),
@@ -772,6 +776,9 @@ async def generate_payment_url(
 
                 logger.info(f"✅ Ukraine payment URL generated for user {telegram_id}, product {product_id}")
 
+                card_price_rub = await ukraine_payment_api.get_payment_price_rub_from_url(payment_url)
+                logger.info(f"💰 Ukraine payment {payment_info.topup_amount} UAH price: {card_price_rub} RUB")
+
                 # Добавляем payment_email к URL для автозаполнения
                 if payment_email:
                     parsed = urlparse(payment_url)
@@ -796,6 +803,7 @@ async def generate_payment_url(
                     "topup_info": {
                         "game_price": payment_info.game_price,
                         "topup_amount": payment_info.topup_amount,
+                        "card_price_rub": card_price_rub,
                         "remaining_balance": payment_info.remaining_balance,
                         "message_ru": payment_info.get_description_ru(),
                         "message_en": payment_info.get_description_en()

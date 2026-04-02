@@ -359,11 +359,13 @@ class PSNAccountUpdate(BaseModel):
 
 
 class PSNAccountResponse(BaseModel):
-    """Схема ответа PSN аккаунта (без пароля)"""
+    """Схема ответа PSN аккаунта"""
     id: int
     region: str = Field(..., description="Регион аккаунта (UA, TR)")
     psn_email: Optional[str] = Field(None, description="Email для PSN аккаунта")
     platform: Optional[str] = Field(None, description="PlayStation платформа")
+    psn_password: Optional[str] = Field(None, description="PSN пароль")
+    twofa_code: Optional[str] = Field(None, description="Резервный код 2FA")
     has_password: bool = Field(False, description="Установлен ли пароль")
     has_twofa: bool = Field(False, description="Установлен ли код 2FA")
     is_active: bool = Field(True, description="Активен ли аккаунт")
