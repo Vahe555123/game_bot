@@ -1292,8 +1292,9 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                     text = await resp.text()
 
                 if "You don't have permission to access" in text:
+                    print(f"   Обнаружена блокировка при получении расширенных данных для {product}")
+                    await access_controller.wait_for_access(session)
                     counter = 0
-                    await asyncio.sleep(30)
                     continue
 
                 soup = bs(text, "html.parser")
@@ -3491,6 +3492,136 @@ async def add_update_table():
         """)
         await db.commit()
 
+
+async def add_parser_progress_table():
+    """
+    Создает таблицу parser_progress для чекпоинтов полного парсинга.
+    """
+    db_path = "products.db"
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS parser_progress (
+                scope TEXT PRIMARY KEY,
+                products_hash TEXT NOT NULL,
+                total_products INTEGER NOT NULL,
+                current_index INTEGER NOT NULL DEFAULT 0,
+                current_percent INTEGER NOT NULL DEFAULT 0,
+                db_initialized INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        await db.commit()
+
+
+def calculate_products_hash(products: List[str]) -> str:
+    """
+    Считает hash списка URL, чтобы резюмировать только совместимый чекпоинт.
+    """
+    digest = hashlib.sha256()
+    for product_url in products:
+        digest.update(product_url.encode("utf-8", errors="ignore"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def get_parser_progress_scope(limit_products: Optional[int]) -> str:
+    """
+    Возвращает ключ чекпоинта для текущего режима парсинга.
+    """
+    if limit_products is None:
+        return "mode1_full"
+    return f"mode1_limit_{limit_products}"
+
+
+async def load_parser_checkpoint(scope: str, products_hash: str, total_products: int) -> Optional[Dict]:
+    """
+    Загружает чекпоинт полного парсинга, если он подходит под текущий набор URL.
+    """
+    db_path = "products.db"
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute("""
+            SELECT products_hash, total_products, current_index, current_percent, db_initialized
+            FROM parser_progress
+            WHERE scope = ?
+        """, (scope,))
+        row = await cursor.fetchone()
+
+        if not row:
+            return None
+
+        stored_hash, stored_total, current_index, current_percent, db_initialized = row
+
+        if stored_hash != products_hash or stored_total != total_products:
+            print("\n⚠ Найден старый чекпоинт, но набор товаров изменился. Чекпоинт будет сброшен.")
+            await db.execute("DELETE FROM parser_progress WHERE scope = ?", (scope,))
+            await db.commit()
+            return None
+
+        if current_index >= total_products:
+            print("\n⚠ Найден завершенный чекпоинт. Он будет очищен перед новым запуском.")
+            await db.execute("DELETE FROM parser_progress WHERE scope = ?", (scope,))
+            await db.commit()
+            return None
+
+        return {
+            "current_index": current_index,
+            "current_percent": current_percent,
+            "db_initialized": bool(db_initialized),
+        }
+
+
+async def save_parser_checkpoint(
+    scope: str,
+    products_hash: str,
+    total_products: int,
+    current_index: int,
+    current_percent: int,
+    db_initialized: bool,
+):
+    """
+    Сохраняет активный чекпоинт полного парсинга.
+    """
+    db_path = "products.db"
+    updated_at = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute("""
+            INSERT INTO parser_progress (
+                scope, products_hash, total_products, current_index,
+                current_percent, db_initialized, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(scope) DO UPDATE SET
+                products_hash = excluded.products_hash,
+                total_products = excluded.total_products,
+                current_index = excluded.current_index,
+                current_percent = excluded.current_percent,
+                db_initialized = excluded.db_initialized,
+                updated_at = excluded.updated_at
+        """, (
+            scope,
+            products_hash,
+            total_products,
+            current_index,
+            current_percent,
+            int(db_initialized),
+            updated_at,
+        ))
+        await db.commit()
+
+
+async def clear_parser_checkpoint(scope: Optional[str] = None):
+    """
+    Удаляет чекпоинт после успешного завершения или принудительного сброса.
+    """
+    db_path = "products.db"
+    async with aiosqlite.connect(db_path) as db:
+        if scope is None:
+            await db.execute("DELETE FROM parser_progress")
+        else:
+            await db.execute("DELETE FROM parser_progress WHERE scope = ?", (scope,))
+        await db.commit()
+
+
 async def process_and_save_to_db(result: list, promo: list, start_time: float, clear_db: bool = True):
     """
     Обработка спарсенных данных и сохранение в SQLite БД
@@ -4092,6 +4223,7 @@ async def main():
     print(" ЗАГРУЗКА КУРСОВ ВАЛЮТ")
     print("=" * 80)
     await currency_converter.load_rates()
+    await add_parser_progress_table()
     print("=" * 80)
 
     # Проверка аргументов командной строки для очистки кеша
@@ -4106,6 +4238,8 @@ async def main():
                 print(f" Удален {cache_file}")
             else:
                 print(f"⚪ {cache_file} не найден")
+        await clear_parser_checkpoint()
+        print(" Сброшены чекпоинты парсинга в products.db")
         print("=" * 80)
         print("\n")
 
@@ -4822,6 +4956,7 @@ async def main():
 
     start = perf_counter()
     await add_update_table()
+    await add_parser_progress_table()
 
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
         # Get promo (подписки PS Plus)
@@ -5014,17 +5149,59 @@ async def main():
             print(f" (Ограничение: {limit_products} товаров)")
         print("=" * 80)
 
+        checkpoint_scope = get_parser_progress_scope(limit_products)
+        products_hash = calculate_products_hash(products)
+        checkpoint = await load_parser_checkpoint(checkpoint_scope, products_hash, len(products))
+
         shift = parser_config.BATCH_SIZE_PRODUCTS
         result = []
+        pending_result = []
         parse_start = perf_counter()
+        checkpoint_percent = 0
+        db_initialized = False
+        start_index = 0
 
-        for i in range(0, len(products), shift):
+        if checkpoint:
+            start_index = max(0, min(checkpoint["current_index"], len(products)))
+            checkpoint_percent = max(0, checkpoint["current_percent"])
+            db_initialized = checkpoint["db_initialized"]
+
+            if os.path.exists("result.pkl"):
+                try:
+                    with open("result.pkl", "rb") as file:
+                        result = pickle.load(file)
+                    uni(result)
+                    print("\n" + "=" * 80)
+                    print(" НАЙДЕН ЧЕКПОИНТ ПОЛНОГО ПАРСИНГА")
+                    print("=" * 80)
+                    print(f" Продолжение с позиции: {start_index}/{len(products)} ({checkpoint_percent}%)")
+                    print(f" Уже накоплено записей в result.pkl: {len(result)}")
+                    print("=" * 80)
+                except Exception as e:
+                    print(f"\n⚠ Чекпоинт найден, но result.pkl не удалось прочитать: {e}")
+                    print(" Чекпоинт будет сброшен, парсинг начнется заново.")
+                    await clear_parser_checkpoint(checkpoint_scope)
+                    start_index = 0
+                    checkpoint_percent = 0
+                    db_initialized = False
+                    result = []
+            else:
+                print("\n⚠ Чекпоинт найден, но result.pkl отсутствует. Парсинг начнется заново.")
+                await clear_parser_checkpoint(checkpoint_scope)
+                start_index = 0
+                checkpoint_percent = 0
+                db_initialized = False
+        else:
+            print("\n Чекпоинт полного парсинга не найден, стартуем с начала.")
+
+        for i in range(start_index, len(products), shift):
             # Перезагружаем конфигурацию на каждой итерации
             parser_config.load_config()
             shift = parser_config.BATCH_SIZE_PRODUCTS
 
             _result = sum(await asyncio.gather(*[parse(session, products[j]) for j in range(i, min(len(products), i+shift))]), [])
             result.extend(_result)
+            pending_result.extend(_result)
             await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
 
             # Удаляем дубликаты после каждого батча
@@ -5033,6 +5210,40 @@ async def main():
             current = min(len(products), i+shift)
             elapsed = perf_counter() - parse_start
             print_progress_bar(current, len(products), elapsed, prefix=" Парсинг", suffix=f"| Спарсено: {len(result)}")
+
+            current_percent = int((current / len(products)) * 100) if products else 100
+            current_checkpoint_percent = (current_percent // 5) * 5
+            if current == len(products):
+                current_checkpoint_percent = 100
+
+            if current_checkpoint_percent >= checkpoint_percent + 5:
+                print("\n" + "=" * 80)
+                print(f" CHECKPOINT {current_checkpoint_percent}%")
+                print("=" * 80)
+                print(f" Сохраняем прогресс: {current}/{len(products)} товаров")
+                print(f" Накоплено записей: {len(result)}")
+
+                with open("result.pkl", "wb") as file:
+                    pickle.dump(result, file)
+                print(" Частичный result.pkl обновлен")
+
+                if db_initialized:
+                    await process_specific_products_to_db(pending_result, promo, start)
+                else:
+                    await process_and_save_to_db(result, promo, start, clear_db=True)
+                    db_initialized = True
+
+                await save_parser_checkpoint(
+                    checkpoint_scope,
+                    products_hash,
+                    len(products),
+                    current,
+                    current_checkpoint_percent,
+                    db_initialized,
+                )
+                print(" Чекпоинт сохранен в products.db")
+                checkpoint_percent = current_checkpoint_percent
+                pending_result = []
 
         print()
 
@@ -5044,16 +5255,37 @@ async def main():
         pickle.dump(result, file)
     print(f" Результаты сохранены в result.pkl")
 
-    # Обработка и загрузка в БД
-    await process_and_save_to_db(result, promo, start)
+    if pending_result or not db_initialized:
+        print("\n" + "=" * 80)
+        print(" ФИНАЛЬНАЯ СИНХРОНИЗАЦИЯ ПЕРЕД ЗАВЕРШЕНИЕМ")
+        print("=" * 80)
+        if db_initialized:
+            await process_specific_products_to_db(pending_result, promo, start)
+        else:
+            await process_and_save_to_db(result, promo, start, clear_db=True)
+            db_initialized = True
+
+        await save_parser_checkpoint(
+            checkpoint_scope,
+            products_hash,
+            len(products),
+            len(products),
+            100,
+            db_initialized,
+        )
+
+    await clear_parser_checkpoint(checkpoint_scope)
+    print(" Чекпоинт полного парсинга очищен")
 
 
 if __name__ == "__main__":
     try:
+        if sys.platform.startswith("win") and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(main())
     except KeyboardInterrupt:
         print("\n  Парсинг прерван пользователем")
     finally:
-        print("\n До свидания!")
+        print("\n До свидания!!")
