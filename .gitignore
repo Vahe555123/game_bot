@@ -6,6 +6,8 @@
 # Python cache
 __pycache__/
 *.py[cod]
+.venv/
+venv/
 
 # Local databases and parser artifacts
 products.db
