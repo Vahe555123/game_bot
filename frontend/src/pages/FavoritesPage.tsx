@@ -118,7 +118,7 @@ export function FavoritesPage() {
 
             {!isLoading && !products.length ? (
               <div className="panel-soft mt-6 rounded-[28px] px-6 py-12 text-center text-slate-300">
-                Не удалось загрузить сохранённые товары. Попробуй открыть каталог и добавить их заново.
+                Не удалось загрузить  сохранённые товары. Попробуй открыть каталог и добавить их заново.
               </div>
             ) : null}
           </>
