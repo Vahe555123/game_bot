@@ -261,7 +261,6 @@ export function CatalogPage() {
       <SectionHeader
         eyebrow="Каталог"
         title="Каталог сайта в логике miniapp"
-        description="Фильтры, значения и параметры запроса теперь повторяют miniapp: категории, регион, платформа, игроки, цена, скидки, PS Plus и EA Access."
         action={
           <button
             type="button"

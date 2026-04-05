@@ -75,7 +75,6 @@ export function FavoritesPage() {
       <SectionHeader
         eyebrow="Избранное"
         title="Твои сохранённые игры"
-        description="Список повторяет логику miniapp: сюда попадают товары, которые ты отметил сердцем в каталоге или на внутренней странице."
         action={
           <Link to="/catalog" className="btn-secondary">
             <Search size={16} />

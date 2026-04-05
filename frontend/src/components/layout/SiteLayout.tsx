@@ -169,12 +169,6 @@ export function SiteLayout() {
         <Outlet />
       </main>
 
-      <footer className="border-t border-white/8 py-8">
-        <div className="container flex flex-col gap-3 text-sm text-slate-400 md:flex-row md:items-center md:justify-between">
-          <p>Сайт повторяет стиль miniapp, но уже с отдельной web-авторизацией, профилем и избранным.</p>
-          <p>Следующий шаг можно сделать вокруг checkout и сохранения избранного уже на backend.</p>
-        </div>
-      </footer>
     </div>
   )
 }
