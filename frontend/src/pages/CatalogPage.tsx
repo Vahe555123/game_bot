@@ -260,7 +260,7 @@ export function CatalogPage() {
     <div className="container py-10 md:py-14">
       <SectionHeader
         eyebrow="Каталог"
-        title="Каталог сайта в логике miniapp"
+        title="Найди свою игру мечты"
         action={
           <button
             type="button"
