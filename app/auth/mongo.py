@@ -41,6 +41,10 @@ def init_mongo_indexes() -> bool:
         codes = get_auth_codes_collection()
         sessions = get_auth_sessions_collection()
 
+        users.update_many({"telegram_id": None}, {"$unset": {"telegram_id": ""}})
+        users.update_many({"google_id": None}, {"$unset": {"google_id": ""}})
+        users.update_many({"vk_id": None}, {"$unset": {"vk_id": ""}})
+
         users.create_index([("email_normalized", ASCENDING)], unique=True, sparse=True)
         users.create_index([("telegram_id", ASCENDING)], unique=True, sparse=True)
         users.create_index([("google_id", ASCENDING)], unique=True, sparse=True)

@@ -166,6 +166,7 @@ class AuthServiceTests(unittest.TestCase):
         self.assertNotEqual(stored_user["password_hash"], "supersecret123")
         self.assertEqual(stored_user["preferred_region"], "TR")
         self.assertEqual(stored_user["platform"], "PS5")
+        self.assertNotIn("telegram_id", stored_user)
 
         verification_doc = self.codes.find_one(
             {"email_normalized": "user@test.com", "purpose": "register"}
@@ -271,6 +272,22 @@ class AuthServiceTests(unittest.TestCase):
         self.assertEqual(user.telegram_id, 725505758)
         self.assertIn("telegram", user.auth_providers)
         self.assertTrue(session_token)
+
+    def test_social_login_without_telegram_omits_null_telegram_id(self):
+        user, session_token = self.service.authenticate_social_user(
+            provider="google",
+            provider_id="google-sub-2",
+            email="google-only@test.com",
+            email_verified=True,
+            first_name="Google",
+        )
+
+        self.assertEqual(user.email, "google-only@test.com")
+        self.assertTrue(session_token)
+
+        stored_user = self.users.find_one({"email_normalized": "google-only@test.com"})
+        self.assertIsNotNone(stored_user)
+        self.assertNotIn("telegram_id", stored_user)
 
     def test_profile_preferences_switch_to_single_region_and_purchase_email(self):
         self.service.start_registration(self._register_payload())

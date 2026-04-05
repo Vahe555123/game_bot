@@ -24,6 +24,7 @@ from app.auth.service import (
     build_public_user,
     is_admin_user_doc,
     is_env_admin_telegram_id,
+    omit_none_fields,
     resolve_site_user_role,
     resolve_user_identifier,
     utcnow,
@@ -265,6 +266,7 @@ class SiteAdminService:
             "registration_user_agent": "admin-panel",
             "registration_ip_address": None,
         }
+        user_doc = omit_none_fields(user_doc, fields={"telegram_id", "google_id", "vk_id"})
 
         try:
             result = self.users.insert_one(user_doc)

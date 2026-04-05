@@ -44,6 +44,16 @@ from .security import (
 REGISTER_PURPOSE = "register"
 SITE_ROLE_CLIENT = "client"
 SITE_ROLE_ADMIN = "admin"
+OPTIONAL_IDENTITY_FIELDS = {"telegram_id", "google_id", "vk_id"}
+
+
+def omit_none_fields(payload: dict[str, Any], *, fields: Optional[set[str]] = None) -> dict[str, Any]:
+    target_fields = fields or set(payload.keys())
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in target_fields or value is not None
+    }
 
 
 def utcnow() -> datetime:
@@ -546,6 +556,7 @@ class AuthService:
                     user_fields["google_id"] = provider_id
                 if provider == "vk":
                     user_fields["vk_id"] = provider_id
+                user_fields = omit_none_fields(user_fields, fields=OPTIONAL_IDENTITY_FIELDS)
                 insert_result = self.users.insert_one(user_fields)
                 user_id = insert_result.inserted_id
 
@@ -762,6 +773,7 @@ class AuthService:
             "registration_user_agent": user_agent,
             "registration_ip_address": ip_address,
         }
+        user_fields = omit_none_fields(user_fields, fields=OPTIONAL_IDENTITY_FIELDS)
 
         if existing_user:
             self.users.update_one({"_id": existing_user["_id"]}, {"$set": user_fields})
