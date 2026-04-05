@@ -3,15 +3,21 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-ENV_FILE="${APP_ENV_FILE:-/home/deploy/data/game_bot2/.env}"
+LOCAL_ENV_FILE="$(pwd)/.env"
+LEGACY_ENV_FILE="/home/deploy/data/game_bot2/.env"
+ENV_FILE="${APP_ENV_FILE:-$LOCAL_ENV_FILE}"
 
 if [ -f "$ENV_FILE" ]; then
   set -a
   . "$ENV_FILE"
   set +a
-elif [ -f ./.env ]; then
+elif [ -f "$LOCAL_ENV_FILE" ]; then
   set -a
-  . ./.env
+  . "$LOCAL_ENV_FILE"
+  set +a
+elif [ -f "$LEGACY_ENV_FILE" ]; then
+  set -a
+  . "$LEGACY_ENV_FILE"
   set +a
 fi
 

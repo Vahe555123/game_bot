@@ -14,9 +14,34 @@ import pickle
 import sys
 import hashlib
 from typing import List, Dict, Set, Tuple, Optional
+from pathlib import Path
 
 
 load_dotenv()
+
+
+def get_sqlite_db_path() -> str:
+    """
+    Возвращает путь к SQLite БД из DATABASE_URL.
+
+    Это позволяет парсеру и backend работать с одной и той же базой.
+    """
+    database_url = os.getenv("DATABASE_URL", "sqlite:///./products.db").strip()
+
+    if not database_url.startswith("sqlite:"):
+        return "products.db"
+
+    if database_url.startswith("sqlite:////"):
+        return database_url.replace("sqlite:///", "/", 1)
+
+    if database_url.startswith("sqlite:///"):
+        relative_path = database_url.replace("sqlite:///", "", 1)
+        return str((Path.cwd() / relative_path).resolve())
+
+    return "products.db"
+
+
+SQLITE_DB_PATH = get_sqlite_db_path()
 
 
 # Configuration
@@ -221,7 +246,7 @@ class CurrencyConverter:
 
     def __init__(self):
         self.rates_cache = {}
-        self.db_path = "products.db"
+        self.db_path = SQLITE_DB_PATH
 
     async def load_rates(self):
         """Загружает курсы валют из БД"""
@@ -3429,7 +3454,7 @@ async def add_update_table():
     Создает таблицу update_info в SQLite БД (если не существует)
     Используется для отслеживания обновлений товаров
     """
-    db_path = "products.db"
+    db_path = SQLITE_DB_PATH
     async with aiosqlite.connect(db_path) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS update_info (
@@ -3445,7 +3470,7 @@ async def add_parser_progress_table():
     """
     Создает таблицу parser_progress для сохранения прогресса полного парсинга.
     """
-    db_path = "products.db"
+    db_path = SQLITE_DB_PATH
     async with aiosqlite.connect(db_path) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS parser_progress (
@@ -3485,7 +3510,7 @@ async def load_parser_checkpoint(scope: str, products_hash: str, total_products:
     """
     Загружает сохраненный прогресс, если он относится к текущему набору товаров.
     """
-    db_path = "products.db"
+    db_path = SQLITE_DB_PATH
     async with aiosqlite.connect(db_path) as db:
         cursor = await db.execute("""
             SELECT products_hash, total_products, current_index, current_percent, db_initialized
@@ -3526,7 +3551,7 @@ async def save_parser_checkpoint(
     """
     Сохраняет текущий прогресс полного парсинга.
     """
-    db_path = "products.db"
+    db_path = SQLITE_DB_PATH
     updated_at = datetime.utcnow().isoformat()
     async with aiosqlite.connect(db_path) as db:
         await db.execute("""
@@ -3558,7 +3583,7 @@ async def clear_parser_checkpoint(scope: Optional[str] = None):
     """
     Очищает прогресс парсинга.
     """
-    db_path = "products.db"
+    db_path = SQLITE_DB_PATH
     async with aiosqlite.connect(db_path) as db:
         if scope is None:
             await db.execute("DELETE FROM parser_progress")
@@ -3582,7 +3607,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("=" * 80)
 
     # Подключение к SQLite
-    db_path = "products.db"
+    db_path = SQLITE_DB_PATH
 
     # Подготовка данных для вставки
     products_to_insert = []

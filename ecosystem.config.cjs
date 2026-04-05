@@ -12,7 +12,7 @@ module.exports = {
       env: {
         PYTHONIOENCODING: "utf-8",
         NODE_ENV: "production",
-        APP_ENV_FILE: "/home/deploy/data/game_bot2/.env",
+        APP_ENV_FILE: "/home/deploy/apps/game_bot2/.env",
       },
     },
   ],
