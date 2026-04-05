@@ -1,5 +1,6 @@
 import logging
 from functools import lru_cache
+from typing import Any
 
 from pymongo import ASCENDING, MongoClient
 from pymongo.collection import Collection
@@ -9,6 +10,44 @@ from pymongo.errors import PyMongoError
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+
+OPTIONAL_IDENTITY_FIELDS = ("telegram_id", "google_id", "vk_id")
+
+
+def _is_single_field_index(spec: dict[str, Any], field_name: str) -> bool:
+    keys = spec.get("key") or []
+    return len(keys) == 1 and keys[0][0] == field_name
+
+
+def _is_optional_identity_index_compatible(spec: dict[str, Any]) -> bool:
+    return bool(spec.get("unique")) and bool(spec.get("sparse"))
+
+
+def ensure_optional_unique_identity_index(collection: Collection, field_name: str) -> None:
+    index_info = collection.index_information()
+    has_compatible_index = False
+
+    for index_name, spec in list(index_info.items()):
+        if index_name == "_id_":
+            continue
+
+        if not _is_single_field_index(spec, field_name):
+            continue
+
+        if _is_optional_identity_index_compatible(spec):
+            has_compatible_index = True
+            continue
+
+        logger.warning(
+            "Dropping legacy MongoDB index %s for %s because it is not unique+sparse",
+            index_name,
+            field_name,
+        )
+        collection.drop_index(index_name)
+
+    if not has_compatible_index:
+        collection.create_index([(field_name, ASCENDING)], unique=True, sparse=True)
 
 
 @lru_cache(maxsize=1)
@@ -41,14 +80,13 @@ def init_mongo_indexes() -> bool:
         codes = get_auth_codes_collection()
         sessions = get_auth_sessions_collection()
 
-        users.update_many({"telegram_id": None}, {"$unset": {"telegram_id": ""}})
-        users.update_many({"google_id": None}, {"$unset": {"google_id": ""}})
-        users.update_many({"vk_id": None}, {"$unset": {"vk_id": ""}})
+        for field_name in OPTIONAL_IDENTITY_FIELDS:
+            users.update_many({field_name: None}, {"$unset": {field_name: ""}})
+            users.update_many({field_name: ""}, {"$unset": {field_name: ""}})
 
         users.create_index([("email_normalized", ASCENDING)], unique=True, sparse=True)
-        users.create_index([("telegram_id", ASCENDING)], unique=True, sparse=True)
-        users.create_index([("google_id", ASCENDING)], unique=True, sparse=True)
-        users.create_index([("vk_id", ASCENDING)], unique=True, sparse=True)
+        for field_name in OPTIONAL_IDENTITY_FIELDS:
+            ensure_optional_unique_identity_index(users, field_name)
         users.create_index([("role", ASCENDING)])
         users.create_index([("is_active", ASCENDING)])
 
