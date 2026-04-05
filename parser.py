@@ -27,32 +27,7 @@ class ParserConfig:
 
     def __init__(self):
         self.last_modified = 0
-        self.ensure_config_file()
         self.load_config()
-
-    def ensure_config_file(self):
-        """Создает конфиг с безопасными значениями, если файла еще нет"""
-        config_dir = os.path.dirname(self.CONFIG_FILE)
-        if config_dir:
-            os.makedirs(config_dir, exist_ok=True)
-
-        if os.path.exists(self.CONFIG_FILE):
-            return
-
-        default_config = {
-            "MAX_RETRIES": 3,
-            "REQUEST_TIMEOUT": 120,
-            "BATCH_SIZE_PAGES": 8,
-            "BATCH_SIZE_PRODUCTS": 12,
-            "BATCH_SIZE_UNQUOTE": 30,
-            "SLEEP_BETWEEN_BATCHES": 8,
-            "SLEEP_ON_CLOUDFLARE": 300,
-            "ACCESS_DENIED_CHECK_INTERVAL": 180,
-            "CONFIG_CHECK_INTERVAL": 5
-        }
-
-        with open(self.CONFIG_FILE, 'w', encoding='utf-8') as f:
-            f.write(dumps(default_config, ensure_ascii=False, indent=2))
 
     def load_config(self):
         """Загружает конфигурацию из JSON файла"""
@@ -67,12 +42,12 @@ class ParserConfig:
 
                     self.MAX_RETRIES = config.get('MAX_RETRIES', 3)
                     self.REQUEST_TIMEOUT = config.get('REQUEST_TIMEOUT', 120)
-                    self.BATCH_SIZE_PAGES = config.get('BATCH_SIZE_PAGES', 8)
-                    self.BATCH_SIZE_PRODUCTS = config.get('BATCH_SIZE_PRODUCTS', 12)
-                    self.BATCH_SIZE_UNQUOTE = config.get('BATCH_SIZE_UNQUOTE', 30)
-                    self.SLEEP_BETWEEN_BATCHES = config.get('SLEEP_BETWEEN_BATCHES', 8)
-                    self.SLEEP_ON_CLOUDFLARE = config.get('SLEEP_ON_CLOUDFLARE', 300)
-                    self.ACCESS_DENIED_CHECK_INTERVAL = config.get('ACCESS_DENIED_CHECK_INTERVAL', 180)
+                    self.BATCH_SIZE_PAGES = config.get('BATCH_SIZE_PAGES', 30)
+                    self.BATCH_SIZE_PRODUCTS = config.get('BATCH_SIZE_PRODUCTS', 70)
+                    self.BATCH_SIZE_UNQUOTE = config.get('BATCH_SIZE_UNQUOTE', 250)
+                    self.SLEEP_BETWEEN_BATCHES = config.get('SLEEP_BETWEEN_BATCHES', 3)
+                    self.SLEEP_ON_CLOUDFLARE = config.get('SLEEP_ON_CLOUDFLARE', 30)
+                    self.ACCESS_DENIED_CHECK_INTERVAL = config.get('ACCESS_DENIED_CHECK_INTERVAL', 60)
                     self.CONFIG_CHECK_INTERVAL = config.get('CONFIG_CHECK_INTERVAL', 5)
 
                     self.last_modified = current_modified
@@ -90,12 +65,12 @@ class ParserConfig:
         """Устанавливает значения по умолчанию"""
         self.MAX_RETRIES = 3
         self.REQUEST_TIMEOUT = 120
-        self.BATCH_SIZE_PAGES = 8
-        self.BATCH_SIZE_PRODUCTS = 12
-        self.BATCH_SIZE_UNQUOTE = 30
-        self.SLEEP_BETWEEN_BATCHES = 8
-        self.SLEEP_ON_CLOUDFLARE = 300
-        self.ACCESS_DENIED_CHECK_INTERVAL = 180
+        self.BATCH_SIZE_PAGES = 30
+        self.BATCH_SIZE_PRODUCTS = 70
+        self.BATCH_SIZE_UNQUOTE = 250
+        self.SLEEP_BETWEEN_BATCHES = 3
+        self.SLEEP_ON_CLOUDFLARE = 30
+        self.ACCESS_DENIED_CHECK_INTERVAL = 60
         self.CONFIG_CHECK_INTERVAL = 5
 
     # Дополнительные категории для парсинга
@@ -329,8 +304,6 @@ class AccessController:
         self.is_blocked = False
         self.no_internet = False
         self.test_url = "https://store.playstation.com/ru-ua/pages/browse"
-        self._wait_task = None
-        self._wait_task_lock = asyncio.Lock()
         self.internet_check_urls = [
             "https://www.google.com",
             "https://1.1.1.1",  # Cloudflare DNS
@@ -358,14 +331,7 @@ class AccessController:
                 html = await resp.text()
 
             # Проверяем блокировку Cloudflare
-            if resp.status in (403, 429):
-                return False, "cloudflare"
-            if (
-                "You don't have permission to access" in html
-                or "Attention Required!" in html
-                or "cf-browser-verification" in html
-                or "/cdn-cgi/" in html
-            ):
+            if "You don't have permission to access" in html:
                 return False, "cloudflare"
             return True, ""
 
@@ -380,7 +346,7 @@ class AccessController:
         except Exception:
             return False, "unknown"
 
-    async def _wait_for_access_internal(self, session: aiohttp.ClientSession):
+    async def wait_for_access(self, session: aiohttp.ClientSession):
         """Ожидает восстановления доступа (блокировка или интернет)"""
         if not self.is_blocked and not self.no_internet:
             # Первая проверка - определяем причину
@@ -397,9 +363,7 @@ class AccessController:
                 print("\n" + "=" * 80)
                 print(" ОБНАРУЖЕНА БЛОКИРОВКА CLOUDFLARE")
                 print("=" * 80)
-                print(f" Пауза {parser_config.SLEEP_ON_CLOUDFLARE} сек перед первой повторной проверкой...")
-                print(f" Дальше проверка каждые {parser_config.ACCESS_DENIED_CHECK_INTERVAL} сек...")
-                await asyncio.sleep(parser_config.SLEEP_ON_CLOUDFLARE)
+                print(f" Ожидание восстановления доступа (проверка каждые {parser_config.ACCESS_DENIED_CHECK_INTERVAL} сек)...")
             elif reason == "site_down":
                 print("\n" + "=" * 80)
                 print("САЙТ НЕДОСТУПЕН")
@@ -447,21 +411,6 @@ class AccessController:
                     print(" Обнаружена блокировка Cloudflare...")
 
             await asyncio.sleep(parser_config.ACCESS_DENIED_CHECK_INTERVAL)
-
-    async def wait_for_access(self, session: aiohttp.ClientSession):
-        """Координирует единое ожидание доступа для всех параллельных задач"""
-        async with self._wait_task_lock:
-            if self._wait_task is None or self._wait_task.done():
-                self._wait_task = asyncio.create_task(self._wait_for_access_internal(session))
-            wait_task = self._wait_task
-
-        try:
-            await wait_task
-            return True
-        finally:
-            async with self._wait_task_lock:
-                if self._wait_task is wait_task and wait_task.done():
-                    self._wait_task = None
 
 
 # Глобальный экземпляр контроллера доступа
@@ -1292,9 +1241,8 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                     text = await resp.text()
 
                 if "You don't have permission to access" in text:
-                    print(f"   Обнаружена блокировка при получении расширенных данных для {product}")
-                    await access_controller.wait_for_access(session)
                     counter = 0
+                    await asyncio.sleep(30)
                     continue
 
                 soup = bs(text, "html.parser")
@@ -3495,7 +3443,7 @@ async def add_update_table():
 
 async def add_parser_progress_table():
     """
-    Создает таблицу parser_progress для чекпоинтов полного парсинга.
+    Создает таблицу parser_progress для сохранения прогресса полного парсинга.
     """
     db_path = "products.db"
     async with aiosqlite.connect(db_path) as db:
@@ -3515,7 +3463,7 @@ async def add_parser_progress_table():
 
 def calculate_products_hash(products: List[str]) -> str:
     """
-    Считает hash списка URL, чтобы резюмировать только совместимый чекпоинт.
+    Считает hash списка товаров, чтобы возобновлять только совместимый прогресс.
     """
     digest = hashlib.sha256()
     for product_url in products:
@@ -3526,7 +3474,7 @@ def calculate_products_hash(products: List[str]) -> str:
 
 def get_parser_progress_scope(limit_products: Optional[int]) -> str:
     """
-    Возвращает ключ чекпоинта для текущего режима парсинга.
+    Возвращает ключ прогресса для полного или тестового парсинга.
     """
     if limit_products is None:
         return "mode1_full"
@@ -3535,7 +3483,7 @@ def get_parser_progress_scope(limit_products: Optional[int]) -> str:
 
 async def load_parser_checkpoint(scope: str, products_hash: str, total_products: int) -> Optional[Dict]:
     """
-    Загружает чекпоинт полного парсинга, если он подходит под текущий набор URL.
+    Загружает сохраненный прогресс, если он относится к текущему набору товаров.
     """
     db_path = "products.db"
     async with aiosqlite.connect(db_path) as db:
@@ -3550,15 +3498,12 @@ async def load_parser_checkpoint(scope: str, products_hash: str, total_products:
             return None
 
         stored_hash, stored_total, current_index, current_percent, db_initialized = row
-
         if stored_hash != products_hash or stored_total != total_products:
-            print("\n⚠ Найден старый чекпоинт, но набор товаров изменился. Чекпоинт будет сброшен.")
             await db.execute("DELETE FROM parser_progress WHERE scope = ?", (scope,))
             await db.commit()
             return None
 
         if current_index >= total_products:
-            print("\n⚠ Найден завершенный чекпоинт. Он будет очищен перед новым запуском.")
             await db.execute("DELETE FROM parser_progress WHERE scope = ?", (scope,))
             await db.commit()
             return None
@@ -3579,7 +3524,7 @@ async def save_parser_checkpoint(
     db_initialized: bool,
 ):
     """
-    Сохраняет активный чекпоинт полного парсинга.
+    Сохраняет текущий прогресс полного парсинга.
     """
     db_path = "products.db"
     updated_at = datetime.utcnow().isoformat()
@@ -3611,7 +3556,7 @@ async def save_parser_checkpoint(
 
 async def clear_parser_checkpoint(scope: Optional[str] = None):
     """
-    Удаляет чекпоинт после успешного завершения или принудительного сброса.
+    Очищает прогресс парсинга.
     """
     db_path = "products.db"
     async with aiosqlite.connect(db_path) as db:
@@ -4223,7 +4168,6 @@ async def main():
     print(" ЗАГРУЗКА КУРСОВ ВАЛЮТ")
     print("=" * 80)
     await currency_converter.load_rates()
-    await add_parser_progress_table()
     print("=" * 80)
 
     # Проверка аргументов командной строки для очистки кеша
@@ -4238,8 +4182,9 @@ async def main():
                 print(f" Удален {cache_file}")
             else:
                 print(f"⚪ {cache_file} не найден")
+        await add_parser_progress_table()
         await clear_parser_checkpoint()
-        print(" Сброшены чекпоинты парсинга в products.db")
+        print(" Сброшен сохраненный прогресс парсинга")
         print("=" * 80)
         print("\n")
 
@@ -5167,32 +5112,23 @@ async def main():
             db_initialized = checkpoint["db_initialized"]
 
             if os.path.exists("result.pkl"):
-                try:
-                    with open("result.pkl", "rb") as file:
-                        result = pickle.load(file)
-                    uni(result)
-                    print("\n" + "=" * 80)
-                    print(" НАЙДЕН ЧЕКПОИНТ ПОЛНОГО ПАРСИНГА")
-                    print("=" * 80)
-                    print(f" Продолжение с позиции: {start_index}/{len(products)} ({checkpoint_percent}%)")
-                    print(f" Уже накоплено записей в result.pkl: {len(result)}")
-                    print("=" * 80)
-                except Exception as e:
-                    print(f"\n⚠ Чекпоинт найден, но result.pkl не удалось прочитать: {e}")
-                    print(" Чекпоинт будет сброшен, парсинг начнется заново.")
-                    await clear_parser_checkpoint(checkpoint_scope)
-                    start_index = 0
-                    checkpoint_percent = 0
-                    db_initialized = False
-                    result = []
+                with open("result.pkl", "rb") as file:
+                    result = pickle.load(file)
+                uni(result)
+                print("\n" + "=" * 80)
+                print(" НАЙДЕН СОХРАНЕННЫЙ ПРОГРЕСС")
+                print("=" * 80)
+                print(f" Продолжение с {checkpoint_percent}% ({start_index}/{len(products)})")
+                print(f" Записей уже накоплено: {len(result)}")
+                print("=" * 80)
             else:
-                print("\n⚠ Чекпоинт найден, но result.pkl отсутствует. Парсинг начнется заново.")
+                print("\n⚠ Прогресс найден, но result.pkl отсутствует. Начинаем заново.")
                 await clear_parser_checkpoint(checkpoint_scope)
                 start_index = 0
                 checkpoint_percent = 0
                 db_initialized = False
         else:
-            print("\n Чекпоинт полного парсинга не найден, стартуем с начала.")
+            print("\n Сохраненный прогресс не найден, стартуем с начала.")
 
         for i in range(start_index, len(products), shift):
             # Перезагружаем конфигурацию на каждой итерации
@@ -5212,20 +5148,15 @@ async def main():
             print_progress_bar(current, len(products), elapsed, prefix=" Парсинг", suffix=f"| Спарсено: {len(result)}")
 
             current_percent = int((current / len(products)) * 100) if products else 100
-            current_checkpoint_percent = (current_percent // 5) * 5
-            if current == len(products):
-                current_checkpoint_percent = 100
+            if current_percent > checkpoint_percent:
+                with open("result.pkl", "wb") as file:
+                    pickle.dump(result, file)
 
-            if current_checkpoint_percent >= checkpoint_percent + 5:
                 print("\n" + "=" * 80)
-                print(f" CHECKPOINT {current_checkpoint_percent}%")
+                print(f" CHECKPOINT {current_percent}%")
                 print("=" * 80)
                 print(f" Сохраняем прогресс: {current}/{len(products)} товаров")
                 print(f" Накоплено записей: {len(result)}")
-
-                with open("result.pkl", "wb") as file:
-                    pickle.dump(result, file)
-                print(" Частичный result.pkl обновлен")
 
                 if db_initialized:
                     await process_specific_products_to_db(pending_result, promo, start)
@@ -5238,12 +5169,12 @@ async def main():
                     products_hash,
                     len(products),
                     current,
-                    current_checkpoint_percent,
+                    current_percent,
                     db_initialized,
                 )
-                print(" Чекпоинт сохранен в products.db")
-                checkpoint_percent = current_checkpoint_percent
+                print(" Прогресс сохранен в products.db")
                 pending_result = []
+                checkpoint_percent = current_percent
 
         print()
 
@@ -5256,9 +5187,6 @@ async def main():
     print(f" Результаты сохранены в result.pkl")
 
     if pending_result or not db_initialized:
-        print("\n" + "=" * 80)
-        print(" ФИНАЛЬНАЯ СИНХРОНИЗАЦИЯ ПЕРЕД ЗАВЕРШЕНИЕМ")
-        print("=" * 80)
         if db_initialized:
             await process_specific_products_to_db(pending_result, promo, start)
         else:
@@ -5275,17 +5203,15 @@ async def main():
         )
 
     await clear_parser_checkpoint(checkpoint_scope)
-    print(" Чекпоинт полного парсинга очищен")
+    print(" Сохраненный прогресс очищен")
 
 
 if __name__ == "__main__":
     try:
-        if sys.platform.startswith("win") and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(main())
     except KeyboardInterrupt:
         print("\n  Парсинг прерван пользователем")
     finally:
-        print("\n До свидания!!")
+        print("\n До свидания!")

@@ -56,6 +56,7 @@ def create_tables():
     from app.models.product import Product
     from app.models.favorite import UserFavoriteProduct
     from app.models.currency_rate import CurrencyRate
+    from app.models.purchase_order import SitePurchaseOrder
     
     Base.metadata.create_all(bind=engine)
     print("✅ Таблицы базы данных созданы/обновлены")

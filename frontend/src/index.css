@@ -1,0 +1,137 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family: Manrope, sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(38, 196, 255, 0.16), transparent 28%),
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.18), transparent 34%),
+    radial-gradient(circle at bottom center, rgba(14, 165, 233, 0.12), transparent 30%),
+    #07111f;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  color: #f8fbff;
+  background: transparent;
+}
+
+body::before,
+body::after {
+  position: fixed;
+  z-index: 0;
+  pointer-events: none;
+  content: '';
+  inset: auto;
+  filter: blur(80px);
+}
+
+body::before {
+  top: 12%;
+  left: -6rem;
+  width: 18rem;
+  height: 18rem;
+  background: rgba(56, 189, 248, 0.16);
+}
+
+body::after {
+  right: -6rem;
+  bottom: 8%;
+  width: 22rem;
+  height: 22rem;
+  background: rgba(14, 165, 233, 0.1);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+}
+
+@layer base {
+  * {
+    @apply border-slate-800/60;
+  }
+
+  body {
+    @apply font-body antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5 {
+    @apply font-display tracking-tight;
+  }
+
+  a {
+    @apply no-underline;
+  }
+}
+
+@layer components {
+  .container {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .panel {
+    @apply rounded-[32px] border border-white/10 bg-slate-950/70 shadow-card backdrop-blur-xl;
+  }
+
+  .panel-soft {
+    @apply rounded-[28px] border border-white/10 bg-white/[0.045] shadow-card backdrop-blur-xl;
+  }
+
+  .mesh-bg {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+      radial-gradient(circle at 20% 20%, rgba(18, 180, 245, 0.22), transparent 0),
+      radial-gradient(circle at 80% 20%, rgba(96, 165, 250, 0.16), transparent 0),
+      linear-gradient(160deg, rgba(15, 23, 42, 0.88), rgba(4, 10, 22, 0.98));
+    background-size: 24px 24px, 24px 24px, 100% 100%, 100% 100%, 100% 100%;
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-xs font-semibold tracking-wide;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-glow transition hover:bg-brand-400;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold text-slate-100 transition hover:border-brand-300/60 hover:bg-brand-500/10;
+  }
+
+  .input-shell {
+    @apply flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus-within:border-brand-300/60 focus-within:bg-white/[0.08];
+  }
+
+  .auth-input {
+    @apply w-full rounded-[22px] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 focus:bg-white/[0.08];
+  }
+
+  .auth-alert {
+    @apply rounded-[22px] border px-4 py-3 text-sm;
+  }
+
+  .auth-alert-error {
+    @apply border-rose-400/25 bg-rose-500/10 text-rose-100;
+  }
+
+  .auth-alert-info {
+    @apply border-brand-300/25 bg-brand-500/10 text-brand-50;
+  }
+}

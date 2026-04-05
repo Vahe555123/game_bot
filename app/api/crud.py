@@ -51,6 +51,65 @@ class UserCRUD:
 
 class ProductCRUD:
     @staticmethod
+    def _get_region_priority(user: Optional[User] = None, filter_region: Optional[str] = None) -> Dict[str, int]:
+        """Вернуть приоритет регионов для выбора базовой записи товара."""
+        default_order = ['TR', 'IN', 'UA']
+
+        if filter_region and filter_region in default_order:
+            ordered_regions = [filter_region] + [region for region in default_order if region != filter_region]
+        else:
+            preferred_region = getattr(user, 'preferred_region', None)
+            if preferred_region in default_order:
+                ordered_regions = [preferred_region] + [region for region in default_order if region != preferred_region]
+            else:
+                ordered_regions = default_order
+
+        return {region: index for index, region in enumerate(ordered_regions)}
+
+    @staticmethod
+    def _get_product_sort_name(product: Product) -> str:
+        """Получить безопасное имя товара для сортировки и группировки."""
+        return (
+            getattr(product, 'main_name', None)
+            or getattr(product, 'name', None)
+            or ''
+        ).lower()
+
+    @staticmethod
+    def _group_product_rows(
+        rows: List[tuple[Product, Optional[float]]],
+        user: Optional[User] = None,
+        filter_region: Optional[str] = None
+    ) -> List[tuple[Product, Optional[float]]]:
+        """
+        Сгруппировать товары по ID, оставив одну базовую запись на товар.
+
+        В БД один и тот же товар хранится отдельной строкой для каждого региона.
+        Для каталога и главной страницы нужна одна карточка товара с мультирегиональными ценами,
+        поэтому здесь выбирается только одна представительная строка на `product.id`.
+        """
+        region_priority = ProductCRUD._get_region_priority(user, filter_region)
+        grouped_rows: Dict[str, tuple[Product, Optional[float]]] = {}
+
+        for product, price_rub in rows:
+            current = grouped_rows.get(product.id)
+            if current is None:
+                grouped_rows[product.id] = (product, price_rub)
+                continue
+
+            current_product, _ = current
+            current_priority = region_priority.get(getattr(current_product, 'region', None), len(region_priority))
+            next_priority = region_priority.get(getattr(product, 'region', None), len(region_priority))
+
+            if next_priority < current_priority:
+                grouped_rows[product.id] = (product, price_rub)
+
+        return sorted(
+            grouped_rows.values(),
+            key=lambda item: (ProductCRUD._get_product_sort_name(item[0]), item[0].id),
+        )
+
+    @staticmethod
     def get_by_id(db: Session, product_id: str, region: Optional[str] = None) -> Optional[Product]:
         """Получить товар по ID с учетом региона"""
         import logging
@@ -380,6 +439,9 @@ class ProductCRUD:
                         'flag': region_info['flag'],
                         'name': region_info['name'],
                         'currency_code': region_info['code'],
+                        'price_local': price,
+                        'old_price_local': old_price if old_price and old_price > 0 else None,
+                        'ps_plus_price_local': ps_plus_price if ps_plus_price and ps_plus_price > 0 else None,
                         'price_rub': price_rub,
                         'old_price_rub': old_price_rub,
                         'ps_plus_price_rub': ps_plus_price_rub,
@@ -554,6 +616,9 @@ class ProductCRUD:
                         'flag': region_info['flag'],
                         'name': region_info['name'],
                         'currency_code': region_info['code'],
+                        'price_local': price,
+                        'old_price_local': old_price if old_price and old_price > 0 else None,
+                        'ps_plus_price_local': ps_plus_price if ps_plus_price and ps_plus_price > 0 else None,
                         'price_rub': price_rub,
                         'old_price_rub': old_price_rub,
                         'ps_plus_price_rub': ps_plus_price_rub,
@@ -932,27 +997,31 @@ class ProductCRUD:
 
                 filtered_products.append((product, price_rub))
 
-            # Сортируем только по алфавиту (английский алфавит, без учета регистра)
-            filtered_products.sort(key=lambda x: (x[0].name or '').lower())
+            grouped_products = ProductCRUD._group_product_rows(
+                filtered_products,
+                user=user,
+                filter_region=filter_region,
+            )
 
-            total = len(filtered_products)
+            total = len(grouped_products)
 
             # Применяем пагинацию в памяти
             offset = (pagination.page - 1) * pagination.limit
-            paginated_products = filtered_products[offset:offset + pagination.limit]
+            paginated_products = grouped_products[offset:offset + pagination.limit]
         else:
-            # ⚡ ОПТИМИЗАЦИЯ: Пагинация на уровне БД - загружаем только нужные товары
-            total = query.count()
+            # Для каталога нужен один товар на карточку, поэтому сначала группируем строки по ID,
+            # а уже потом считаем total и применяем пагинацию.
+            products = query.all()
+            grouped_products = ProductCRUD._group_product_rows(
+                [(product, None) for product in products],
+                user=user,
+                filter_region=filter_region,
+            )
 
-            # Сортировка на уровне БД по английскому алфавиту (без учета регистра)
-            query = query.order_by(func.lower(Product.name))
+            total = len(grouped_products)
 
-            # Применяем LIMIT и OFFSET на уровне SQL
             offset = (pagination.page - 1) * pagination.limit
-            products = query.offset(offset).limit(pagination.limit).all()
-
-            # Создаем список для совместимости с кодом ниже
-            paginated_products = [(product, None) for product in products]
+            paginated_products = grouped_products[offset:offset + pagination.limit]
 
         # Подготавливаем продукты с мультирегиональными ценами
         result = []

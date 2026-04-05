@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: game-bot2-production
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -48,16 +52,7 @@ jobs:
             set -e
             cd /home/deploy/apps/game_bot2
             git fetch origin main
-            git reset --hard origin/main
-
-            if [ ! -d ".venv" ]; then
-              python3 -m venv .venv
-            fi
-
-            .venv/bin/pip install --upgrade pip
-            .venv/bin/pip install -r requirements.txt
-            chmod +x start_pm2.sh
-
-            pm2 startOrReload ecosystem.config.cjs --only game_bot2 --update-env
-            pm2 save
-            pm2 show game_bot2
+            git checkout main
+            git pull --ff-only origin main
+            chmod +x scripts/deploy_server.sh
+            SKIP_GIT_UPDATE=true bash scripts/deploy_server.sh

@@ -7,8 +7,12 @@ module.exports = {
       interpreter: "/bin/bash",
       autorestart: true,
       watch: false,
+      max_restarts: 10,
+      restart_delay: 3000,
       env: {
         PYTHONIOENCODING: "utf-8",
+        NODE_ENV: "production",
+        APP_ENV_FILE: "/home/deploy/data/game_bot2/.env",
       },
     },
   ],

@@ -1,1 +1,26 @@
+# Secrets
 .env
+.env.*
+!.env.example
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local databases and parser artifacts
+products.db
+products.db-shm
+products.db-wal
+*.sqlite3
+*.pkl
+
+# Local uploads and temp files
+uploads/
+
+# Frontend local env/build artifacts
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+!frontend/.env.production
+frontend/dist/
+frontend/node_modules/

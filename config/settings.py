@@ -11,6 +11,11 @@ class Settings:
     
     # Настройки базы данных
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./products.db")
+    MONGODB_URL: str = os.getenv("MONGODB_URL", "mongodb://127.0.0.1:27017")
+    MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "game_bot2")
+    MONGODB_AUTH_USERS_COLLECTION: str = os.getenv("MONGODB_AUTH_USERS_COLLECTION", "site_users")
+    MONGODB_AUTH_CODES_COLLECTION: str = os.getenv("MONGODB_AUTH_CODES_COLLECTION", "email_verifications")
+    MONGODB_AUTH_SESSIONS_COLLECTION: str = os.getenv("MONGODB_AUTH_SESSIONS_COLLECTION", "site_sessions")
     
     # Настройки Telegram
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -21,6 +26,7 @@ class Settings:
     # Настройки FastAPI
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", 8000))
+    CORS_ALLOW_ALL: bool = os.getenv("CORS_ALLOW_ALL", "true").lower() == "true"
     
     # Настройки CORS
     @property
@@ -29,7 +35,19 @@ class Settings:
             "https://web.telegram.org",
             "http://localhost:3000",
             "http://127.0.0.1:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
         ]
+
+        extra_origins = os.getenv("CORS_ORIGINS", "")
+        if extra_origins:
+            for raw_origin in extra_origins.split(","):
+                origin = raw_origin.strip()
+                if origin and origin not in origins:
+                    origins.append(origin)
+
         # Добавляем WEBAPP_URL если он задан
         if self.WEBAPP_URL:
             webapp_origin = self.WEBAPP_URL.replace('/webapp', '')
@@ -40,6 +58,37 @@ class Settings:
     # Настройки файлов
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
+
+    # Настройки email авторизации
+    AUTH_PASSWORD_MIN_LENGTH: int = int(os.getenv("AUTH_PASSWORD_MIN_LENGTH", 8))
+    AUTH_EMAIL_CODE_LENGTH: int = int(os.getenv("AUTH_EMAIL_CODE_LENGTH", 6))
+    AUTH_EMAIL_CODE_TTL_MINUTES: int = int(os.getenv("AUTH_EMAIL_CODE_TTL_MINUTES", 10))
+    AUTH_EMAIL_RESEND_COOLDOWN_SECONDS: int = int(os.getenv("AUTH_EMAIL_RESEND_COOLDOWN_SECONDS", 60))
+    AUTH_EMAIL_MAX_ATTEMPTS: int = int(os.getenv("AUTH_EMAIL_MAX_ATTEMPTS", 5))
+    AUTH_SESSION_TTL_DAYS: int = int(os.getenv("AUTH_SESSION_TTL_DAYS", 30))
+    AUTH_SESSION_COOKIE_NAME: str = os.getenv("AUTH_SESSION_COOKIE_NAME", "site_session")
+    AUTH_COOKIE_SECURE: bool = os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true"
+    AUTH_COOKIE_SAMESITE: str = os.getenv("AUTH_COOKIE_SAMESITE", "lax")
+    AUTH_OAUTH_STATE_SECRET: str = os.getenv("AUTH_OAUTH_STATE_SECRET", os.getenv("ADMIN_SECRET_KEY", "oauth-state-secret"))
+    AUTH_OAUTH_STATE_TTL_SECONDS: int = int(os.getenv("AUTH_OAUTH_STATE_TTL_SECONDS", 600))
+    AUTH_TELEGRAM_LOGIN_TTL_SECONDS: int = int(os.getenv("AUTH_TELEGRAM_LOGIN_TTL_SECONDS", 300))
+    PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
+    AUTH_DEFAULT_REDIRECT_PATH: str = os.getenv("AUTH_DEFAULT_REDIRECT_PATH", "/profile")
+
+    SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT: int = int(os.getenv("SMTP_PORT", 587))
+    SMTP_USERNAME: str = os.getenv("SMTP_USERNAME", "")
+    SMTP_APP_PASSWORD: str = os.getenv("SMTP_APP_PASSWORD", "")
+    SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", os.getenv("SMTP_USERNAME", ""))
+    SMTP_FROM_NAME: str = os.getenv("SMTP_FROM_NAME", "PlayStation Store")
+    SMTP_USE_TLS: bool = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+    SMTP_USE_SSL: bool = os.getenv("SMTP_USE_SSL", "false").lower() == "true"
+
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    GOOGLE_CLIENT_SECRET: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
+    VK_CLIENT_ID: str = os.getenv("VK_CLIENT_ID", "")
+    VK_CLIENT_SECRET: str = os.getenv("VK_CLIENT_SECRET", "")
+    TELEGRAM_BOT_USERNAME: str = os.getenv("TELEGRAM_BOT_USERNAME", "")
     
     # Настройки валют
     DEFAULT_CURRENCY: str = "RUB"
@@ -75,6 +124,14 @@ class Settings:
         return admin_ids
     
     ADMIN_SECRET_KEY: str = os.getenv("ADMIN_SECRET_KEY", "your-secret-admin-key-here")
+
+    @property
+    def GOOGLE_REDIRECT_URI(self) -> str:
+        return f"{self.PUBLIC_APP_URL}/api/auth/oauth/google/callback"
+
+    @property
+    def VK_REDIRECT_URI(self) -> str:
+        return f"{self.PUBLIC_APP_URL}/api/auth/oauth/vk/callback"
     
     class Config:
         case_sensitive = True
