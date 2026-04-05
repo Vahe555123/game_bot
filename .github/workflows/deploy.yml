@@ -67,6 +67,18 @@ jobs:
           script: |
             set -e
             cd /home/deploy/apps/game_bot2
+            mkdir -p /home/deploy/backups/game_bot2
+            pm2 stop game_bot2 || true
+
+            if [ -n "$(git status --porcelain -- products.db)" ]; then
+              backup_suffix="$(date +%F-%H%M%S)"
+              [ -f products.db ] && cp products.db "/home/deploy/backups/game_bot2/products.db.${backup_suffix}"
+              [ -f products.db-wal ] && cp products.db-wal "/home/deploy/backups/game_bot2/products.db-wal.${backup_suffix}"
+              [ -f products.db-shm ] && cp products.db-shm "/home/deploy/backups/game_bot2/products.db-shm.${backup_suffix}"
+              rm -f products.db-wal products.db-shm
+              git restore --staged --worktree products.db
+            fi
+
             git fetch origin main
             git checkout main
             git pull --ff-only origin main

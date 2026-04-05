@@ -10,7 +10,6 @@ __pycache__/
 venv/
 
 # Local databases and parser artifacts
-products.db
 products.db-shm
 products.db-wal
 *.sqlite3
