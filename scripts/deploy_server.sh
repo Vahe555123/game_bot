@@ -36,7 +36,6 @@ else
 fi
 
 echo "==> Restarting application with PM2"
-chmod +x start_pm2.sh
 pm2 startOrReload ecosystem.config.cjs --only game_bot2 --update-env
 pm2 save
 pm2 show game_bot2

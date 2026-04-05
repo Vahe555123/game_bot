@@ -70,7 +70,6 @@ jobs:
             git fetch origin main
             git checkout main
             git pull --ff-only origin main
-            chmod +x scripts/deploy_server.sh
             SKIP_GIT_UPDATE=true SKIP_FRONTEND_BUILD=true bash scripts/deploy_server.sh
 
       - name: Upload frontend dist
