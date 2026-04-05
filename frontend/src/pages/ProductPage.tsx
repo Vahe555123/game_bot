@@ -110,17 +110,17 @@ function buildHighlights(product: CatalogProduct) {
 
   return [
     {
-      label: 'РР·РґР°С‚РµР»СЊ',
+      label: 'Издатель',
       value: product.publisher || 'PlayStation Store',
       icon: ShieldCheck,
     },
     {
-      label: 'РџР»Р°С‚С„РѕСЂРјС‹',
+      label: 'Платформы',
       value: product.platforms || 'PS5 / PS4',
       icon: Gamepad2,
     },
     {
-      label: 'Р›РѕРєР°Р»РёР·Р°С†РёСЏ',
+      label: 'Локализация',
       value: localization.fullLabel,
       icon: Languages,
     },
@@ -255,8 +255,8 @@ function CheckoutDialog({
         <div className="shrink-0 border-b border-white/10 px-5 py-4 md:px-6">
           <div className="flex items-center justify-between gap-4">
             <div>
-            <p className="text-xs uppercase tracking-[0.28em] text-brand-200/80">РџРѕРєСѓРїРєР°</p>
-            <h2 className="mt-1 text-2xl text-white">{checkoutOrder ? 'Р—Р°РєР°Р· СЃРѕР·РґР°РЅ' : 'Р’С‹Р±РµСЂРёС‚Рµ СЂРµРіРёРѕРЅ РѕРїР»Р°С‚С‹'}</h2>
+            <p className="text-xs uppercase tracking-[0.28em] text-brand-200/80">Покупка</p>
+            <h2 className="mt-1 text-2xl text-white">{checkoutOrder ? 'Заказ создан' : 'Выберите регион оплаты'}</h2>
             </div>
 
             <button
@@ -310,9 +310,9 @@ function CheckoutDialog({
                     className="mt-1 h-4 w-4 rounded border-white/10 bg-slate-950/50 text-brand-400"
                   />
                   <span>
-                    <span className="block text-sm font-semibold text-white">РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ С†РµРЅСѓ PS Plus</span>
+                    <span className="block text-sm font-semibold text-white">Использовать цену PS Plus</span>
                     <span className="mt-1 block text-sm leading-7 text-slate-400">
-                      Р”Р»СЏ РІС‹Р±СЂР°РЅРЅРѕРіРѕ СЂРµРіРёРѕРЅР° РґРѕСЃС‚СѓРїРЅР° РѕС‚РґРµР»СЊРЅР°СЏ С†РµРЅР° РїРѕРґРїРёСЃС‡РёРєР°.
+                      Для выбранного региона доступна отдельная цена подписчика.
                     </span>
                   </span>
                 </label>
@@ -321,22 +321,22 @@ function CheckoutDialog({
               <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-white">Р”Р°РЅРЅС‹Рµ РґР»СЏ РїРѕРєСѓРїРєРё</p>
+                    <p className="text-sm font-semibold text-white">Данные для покупки</p>
                     <p className="mt-1 text-sm leading-7 text-slate-400">
-                      Р•СЃР»Рё С‡РµРіРѕ-С‚Рѕ РµС‰С‘ РЅРµС‚ РІ РїСЂРѕС„РёР»Рµ, РјРѕР¶РЅРѕ Р·Р°РїРѕР»РЅРёС‚СЊ РїСЂСЏРјРѕ Р·РґРµСЃСЊ.
+                      Если чего-то ещё нет в профиле, можно заполнить прямо здесь.
                     </p>
                   </div>
                   {profileLoading ? (
                     <span className="pill bg-white/5 text-slate-300">
                       <LoaderCircle size={14} className="animate-spin" />
-                      РџСЂРѕС„РёР»СЊ Р·Р°РіСЂСѓР¶Р°РµС‚СЃСЏ
+                      Профиль загружается
                     </span>
                   ) : null}
                 </div>
 
                 <div className="mt-4 grid gap-4 md:grid-cols-2">
                   <div className="md:col-span-2">
-                    <label className="mb-2 block text-sm font-medium text-slate-200">Email РґР»СЏ РїРѕРєСѓРїРєРё</label>
+                    <label className="mb-2 block text-sm font-medium text-slate-200">Email для покупки</label>
                     <input
                       type="email"
                       value={checkoutForm.purchaseEmail}
@@ -345,14 +345,14 @@ function CheckoutDialog({
                       placeholder="email@example.com"
                     />
                     {hasSavedPurchaseEmail ? (
-                      <p className="mt-2 text-xs text-slate-500">РњРѕР¶РЅРѕ РёР·РјРµРЅРёС‚СЊ email С‚РѕР»СЊРєРѕ РґР»СЏ СЌС‚РѕРіРѕ Р·Р°РєР°Р·Р°.</p>
+                      <p className="mt-2 text-xs text-slate-500">Можно изменить email только для этого заказа.</p>
                     ) : null}
                   </div>
 
                   {isUkraineCheckout ? (
                     <>
                       <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-200">РџР»Р°С‚С„РѕСЂРјР°</label>
+                        <label className="mb-2 block text-sm font-medium text-slate-200">Платформа</label>
                         <select
                           value={checkoutForm.platform}
                           onChange={(event) =>
@@ -363,7 +363,7 @@ function CheckoutDialog({
                           }
                           className="auth-input"
                         >
-                          <option value="">РР· РїСЂРѕС„РёР»СЏ / РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ</option>
+                          <option value="">Из профиля / по умолчанию</option>
                           <option value="PS5">PlayStation 5</option>
                           <option value="PS4">PlayStation 4</option>
                         </select>
@@ -381,24 +381,24 @@ function CheckoutDialog({
                       </div>
 
                       <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-200">PSN РџР°СЂРѕР»СЊ</label>
+                        <label className="mb-2 block text-sm font-medium text-slate-200">PSN Пароль</label>
                         <input
                           type="password"
                           value={checkoutForm.psnPassword}
                           onChange={(event) => onCheckoutFormChange('psnPassword', event.target.value)}
                           className={fieldClassName('psn_password')}
-                          placeholder={hasSavedUaPassword ? 'РћСЃС‚Р°РІСЊС‚Рµ РїСѓСЃС‚С‹Рј, РµСЃР»Рё РїР°СЂРѕР»СЊ СѓР¶Рµ СЃРѕС…СЂР°РЅС‘РЅ' : 'Р’РІРµРґРёС‚Рµ PSN РїР°СЂРѕР»СЊ'}
+                          placeholder={hasSavedUaPassword ? 'Оставьте пустым, если пароль уже сохранён' : 'Введите PSN пароль'}
                         />
                       </div>
 
                       <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-200">Р РµР·РµСЂРІРЅС‹Р№ РєРѕРґ 2FA</label>
+                        <label className="mb-2 block text-sm font-medium text-slate-200">Резервный код 2FA</label>
                         <input
                           type="password"
                           value={checkoutForm.backupCode}
                           onChange={(event) => onCheckoutFormChange('backupCode', event.target.value)}
                           className="auth-input"
-                          placeholder="РћРїС†РёРѕРЅР°Р»СЊРЅРѕ"
+                          placeholder="Опционально"
                         />
                       </div>
                     </>
@@ -410,11 +410,11 @@ function CheckoutDialog({
                 <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-sm text-slate-400">Р’С‹Р±СЂР°РЅРЅС‹Р№ СЂРµРіРёРѕРЅ</p>
+                      <p className="text-sm text-slate-400">Выбранный регион</p>
                       <p className="mt-1 text-lg font-semibold text-white">{selectedPrice.name}</p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm text-slate-400">РћСЂРёРµРЅС‚РёСЂ РїРѕ РєР°С‚Р°Р»РѕРіСѓ</p>
+                      <p className="text-sm text-slate-400">Ориентир по каталогу</p>
                       {selectedPriceDisplay ? (
                         <div className="mt-1">
                           <p className="text-lg font-semibold text-white">{selectedPriceDisplay.primary}</p>
@@ -441,11 +441,11 @@ function CheckoutDialog({
 
               <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
                 <button type="button" className="btn-secondary" onClick={onClose}>
-                  РћС‚РјРµРЅР°
+                  Отмена
                 </button>
                 <button type="button" className="btn-primary" onClick={onCreateOrder} disabled={checkoutLoading || profileLoading}>
                   {checkoutLoading ? <LoaderCircle size={16} className="animate-spin" /> : <CreditCard size={16} />}
-                  {checkoutLoading ? 'РџРѕРґРіРѕС‚РѕРІРєР°...' : profileLoading ? 'Р—Р°РіСЂСѓР¶Р°РµРј РїСЂРѕС„РёР»СЊ...' : 'РџРѕР»СѓС‡РёС‚СЊ СЃСЃС‹Р»РєСѓ РЅР° РѕРїР»Р°С‚Сѓ'}
+                  {checkoutLoading ? 'Подготовка...' : profileLoading ? 'Загружаем профиль...' : 'Получить ссылку на оплату'}
                 </button>
               </div>
             </>
@@ -453,21 +453,21 @@ function CheckoutDialog({
             <>
               <div className="rounded-[24px] border border-emerald-400/15 bg-emerald-500/10 p-4">
                 <div>
-                  <p className="text-sm text-emerald-100/80">РќРѕРјРµСЂ Р·Р°РєР°Р·Р°</p>
+                  <p className="text-sm text-emerald-100/80">Номер заказа</p>
                   <p className="mt-1 text-2xl font-semibold text-white">{checkoutOrder.order_number}</p>
                   <p className="mt-2 text-sm leading-7 text-emerald-50/90">
-                    Р С›РЎвЂљР С”РЎР‚Р С•Р в„–РЎвЂљР Вµ РЎРѓРЎРѓРЎвЂ№Р В»Р С”РЎС“ Р С‘ Р В·Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р С‘РЎвЂљР Вµ Р С•Р С—Р В»Р В°РЎвЂљРЎС“ Р Р…Р В° РЎРѓРЎвЂљР С•РЎР‚Р С•Р Р…Р Вµ Р С—Р В»Р В°РЎвЂљР ВµР В¶Р С”Р С‘. Р СџР С•Р С”РЎС“Р С—Р С”Р В° РЎС“Р В¶Р Вµ РЎРѓР С•РЎвЂ¦РЎР‚Р В°Р Р…Р ВµР Р…Р В° Р Р† Р С—РЎР‚Р С•РЎвЂћР С‘Р В»Р Вµ.
+                    Откройте ссылку и завершите оплату на стороне платежки. Покупка уже сохранена в профиле.
                   </p>
                 </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
-                  <p className="text-sm text-slate-400">Р РµРіРёРѕРЅ</p>
+                  <p className="text-sm text-slate-400">Регион</p>
                   <p className="mt-1 text-lg font-semibold text-white">{checkoutOrder.product_region}</p>
                 </div>
                 <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
-                  <p className="text-sm text-slate-400">РЎС‚РѕРёРјРѕСЃС‚СЊ</p>
+                  <p className="text-sm text-slate-400">Стоимость</p>
                   {orderPriceDisplay ? (
                     <div className="mt-1">
                       <p className="text-lg font-semibold text-white">{orderPriceDisplay.primary}</p>
@@ -491,24 +491,24 @@ function CheckoutDialog({
               <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap">
                 <button type="button" className="btn-primary" onClick={onOpenPayment}>
                   <ExternalLink size={16} />
-                  РџРµСЂРµР№С‚Рё Рє РѕРїР»Р°С‚Рµ
+                  Перейти к оплате
                 </button>
                 <button type="button" className="btn-secondary" onClick={onCopyPaymentLink}>
                   <Copy size={16} />
-                  РЎРєРѕРїРёСЂРѕРІР°С‚СЊ СЃСЃС‹Р»РєСѓ
+                  Скопировать ссылку
                 </button>
               </div>
 
               {checkoutOrder.payment_url ? (
                 <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
-                  <p className="text-sm text-slate-400">РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ</p>
+                  <p className="text-sm text-slate-400">Ссылка на оплату</p>
                   <p className="mt-2 break-all text-sm leading-7 text-white">{checkoutOrder.payment_url}</p>
                 </div>
               ) : null}
 
               <div className="rounded-[24px] border border-white/10 bg-[#0b1522] p-4 text-sm leading-7 text-slate-300">
-                РћРїР»Р°С‚РёС‚Рµ РїРѕ СЌС‚РѕР№ СЃСЃС‹Р»РєРµ, Р° РїРѕСЃР»Рµ РѕРїР»Р°С‚С‹ РѕС‚РїСЂР°РІСЊС‚Рµ РЅСѓР¶РЅС‹Р№ РєРѕРґ РїСЂСЏРјРѕ РІ С‡Р°С‚Рµ РѕРїР»Р°С‚С‹. РЎСЃС‹Р»РєР° Рё РґР°С‚Р° РїРѕРєСѓРїРєРё СѓР¶Рµ
-                СЃРѕС…СЂР°РЅРµРЅС‹ РІ РїСЂРѕС„РёР»Рµ.
+                Оплатите по этой ссылке, а после оплаты отправьте нужный код прямо в чате оплаты. Ссылка и дата покупки уже
+                сохранены в профиле.
               </div>
             </>
           )}
@@ -688,7 +688,7 @@ export function ProductPage() {
     const localMissingFields = getMissingCheckoutFields(checkoutRegion, checkoutForm, checkoutProfile)
     if (localMissingFields.length) {
       setCheckoutMissingFields(localMissingFields)
-      setCheckoutError('Р—Р°РїРѕР»РЅРёС‚Рµ РѕС‚РјРµС‡РµРЅРЅС‹Рµ РїРѕР»СЏ РґР»СЏ РїСЂРѕРґРѕР»Р¶РµРЅРёСЏ РїРѕРєСѓРїРєРё.')
+      setCheckoutError('Заполните отмеченные поля для продолжения покупки.')
       setCheckoutMessage(null)
       return
     }
@@ -710,7 +710,7 @@ export function ProductPage() {
         backup_code: checkoutRegion === 'UA' ? checkoutForm.backupCode.trim() || undefined : undefined,
       })
       setCheckoutOrder(order)
-      setCheckoutMessage('Р—Р°РєР°Р· СЃРѕР·РґР°РЅ. РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ СЃРѕС…СЂР°РЅРµРЅР° Рё Р±СѓРґРµС‚ РґРѕСЃС‚СѓРїРЅР° РІ РїСЂРѕС„РёР»Рµ.')
+      setCheckoutMessage('Заказ создан. Ссылка на оплату сохранена и будет доступна в профиле.')
     } catch (error) {
       const detail = getApiErrorDetail(error)
       if (detail && typeof detail !== 'string' && Array.isArray(detail.missing_fields)) {
@@ -719,9 +719,9 @@ export function ProductPage() {
             field === 'purchase_email' || field === 'psn_email' || field === 'psn_password',
         )
         setCheckoutMissingFields(missingFields)
-        setCheckoutError('Р—Р°РїРѕР»РЅРёС‚Рµ РѕС‚РјРµС‡РµРЅРЅС‹Рµ РїРѕР»СЏ РґР»СЏ РїСЂРѕРґРѕР»Р¶РµРЅРёСЏ РїРѕРєСѓРїРєРё.')
+        setCheckoutError('Заполните отмеченные поля для продолжения покупки.')
       } else {
-        setCheckoutError(getApiErrorMessage(error, 'РќРµ СѓРґР°Р»РѕСЃСЊ РїРѕРґРіРѕС‚РѕРІРёС‚СЊ СЃСЃС‹Р»РєСѓ РЅР° РѕРїР»Р°С‚Сѓ.'))
+        setCheckoutError(getApiErrorMessage(error, 'Не удалось подготовить ссылку на оплату.'))
       }
     } finally {
       setCheckoutLoading(false)
@@ -743,16 +743,16 @@ export function ProductPage() {
 
     try {
       await navigator.clipboard.writeText(checkoutOrder.payment_url)
-      setCheckoutMessage('РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ СЃРєРѕРїРёСЂРѕРІР°РЅР°.')
+      setCheckoutMessage('Ссылка на оплату скопирована.')
     } catch {
-      setCheckoutError('РќРµ СѓРґР°Р»РѕСЃСЊ СЃРєРѕРїРёСЂРѕРІР°С‚СЊ СЃСЃС‹Р»РєСѓ Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё.')
+      setCheckoutError('Не удалось скопировать ссылку автоматически.')
     }
   }
 
   if (!productId) {
     return (
       <div className="container py-12">
-        <div className="panel-soft rounded-[28px] px-6 py-12 text-center text-slate-300">РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ.</div>
+        <div className="panel-soft rounded-[28px] px-6 py-12 text-center text-slate-300">Товар не найден.</div>
       </div>
     )
   }
@@ -765,7 +765,7 @@ export function ProductPage() {
           className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white transition hover:border-brand-300/60 hover:bg-brand-500/10"
         >
           <ArrowLeft size={16} />
-          РќР°Р·Р°Рґ РІ РєР°С‚Р°Р»РѕРі
+          Назад в каталог
         </Link>
       </div>
 
@@ -801,7 +801,7 @@ export function ProductPage() {
                   {product.hasDiscount ? (
                     <span className="pill border-rose-400/20 bg-rose-500/20 text-rose-100">
                       <BadgePercent size={12} />
-                      {product.discountPercent ? `-${product.discountPercent}%` : 'РЎРєРёРґРєР°'}
+                      {product.discountPercent ? `-${product.discountPercent}%` : 'Скидка'}
                     </span>
                   ) : null}
                   {product.hasPsPlus ? (
@@ -828,7 +828,7 @@ export function ProductPage() {
             <div className="space-y-6">
               <div className="space-y-4">
                 <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">
-                  {product.category || 'РљР°С‚Р°Р»РѕРі'} вЂў {source === 'api' ? 'live API' : 'demo preview'}
+                  {product.category || 'Каталог'} • {source === 'api' ? 'live API' : 'demo preview'}
                 </p>
                 <h1 className="text-4xl text-white md:text-5xl">{productTitle}</h1>
 
@@ -850,7 +850,7 @@ export function ProductPage() {
 
                   <button type="button" className="btn-primary shrink-0" onClick={openCheckout}>
                     <CreditCard size={16} />
-                    {isAuthenticated ? 'РљСѓРїРёС‚СЊ' : 'Р’РѕР№С‚Рё Рё РєСѓРїРёС‚СЊ'}
+                    {isAuthenticated ? 'Купить' : 'Войти и купить'}
                   </button>
                 </div>
 
@@ -873,17 +873,17 @@ export function ProductPage() {
 
           <section className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
             <div className="panel-soft rounded-[28px] p-6">
-              <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">РћРїРёСЃР°РЅРёРµ</p>
+              <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Описание</p>
               <p className="mt-4 whitespace-pre-line text-base leading-8 text-slate-300">
-                {product.description || 'РћРїРёСЃР°РЅРёРµ С‚РѕРІР°СЂР° РїРѕРєР° РЅРµРґРѕСЃС‚СѓРїРЅРѕ.'}
+                {product.description || 'Описание товара пока недоступно.'}
               </p>
             </div>
 
             <div className="space-y-6">
               <div className="panel-soft rounded-[28px] p-6">
-                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">РўРµРіРё</p>
+                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Теги</p>
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {(product.tags.length ? product.tags : ['PlayStation', 'Store', 'РљР°С‚Р°Р»РѕРі']).map((tag) => (
+                  {(product.tags.length ? product.tags : ['PlayStation', 'Store', 'Каталог']).map((tag) => (
                     <span key={tag} className="pill bg-white/5 text-slate-200">
                       {tag}
                     </span>
@@ -892,11 +892,11 @@ export function ProductPage() {
               </div>
 
               <div className="panel-soft rounded-[28px] p-6">
-                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">РљРѕРјРїР»РµРєС‚</p>
+                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Комплект</p>
                 <ul className="mt-4 space-y-3 text-sm text-slate-300">
                   {(product.compound.length
                     ? product.compound
-                    : ['РЎРѕСЃС‚Р°РІ РёР·РґР°РЅРёСЏ Рё Р±РѕРЅСѓСЃРѕРІ РїРѕСЏРІРёС‚СЃСЏ Р·РґРµСЃСЊ, РєР°Рє С‚РѕР»СЊРєРѕ API РѕС‚РґР°СЃС‚ РїРѕРґСЂРѕР±РЅРѕСЃС‚Рё.']).map((item) => (
+                    : ['Состав издания и бонусов появится здесь, как только API отдаст подробности.']).map((item) => (
                     <li key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                       {item}
                     </li>
@@ -907,7 +907,7 @@ export function ProductPage() {
           </section>
         </div>
       ) : (
-        <div className="panel-soft rounded-[28px] px-6 py-12 text-center text-slate-300">РўРѕРІР°СЂ РЅРµ РЅР°Р№РґРµРЅ.</div>
+        <div className="panel-soft rounded-[28px] px-6 py-12 text-center text-slate-300">Товар не найден.</div>
       )}
 
       <CheckoutDialog
