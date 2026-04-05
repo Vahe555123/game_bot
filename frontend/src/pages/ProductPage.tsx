@@ -584,7 +584,7 @@ export function ProductPage() {
   const highlights = useMemo(() => (product ? buildHighlights(product) : []), [product])
   const regionalPrices = useMemo(() => (product ? getVisibleRegionalPrices(product).slice(0, 3) : []), [product])
   const favoriteActive = product ? isFavorite(product.id) : false
-  const productTitle = product ? getProductTitle(product) : 'РўРѕРІР°СЂЂ'
+  const productTitle = product ? getProductTitle(product) : 'РўРѕРІР°СЂЂ1'
   const availableCheckoutRegions = useMemo(() => regionalPrices.map((price) => price.region), [regionalPrices])
   const selectedRegionPrice = useMemo(
     () => regionalPrices.find((item) => item.region === checkoutRegion) ?? regionalPrices[0] ?? null,
