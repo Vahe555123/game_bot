@@ -36,7 +36,7 @@ function SelectField({ icon: Icon, label, value, options, onChange }: SelectFiel
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-brand-300/60"
+        className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-brand-300/60 md:rounded-2xl"
       >
         {options.map((option) => (
           <option key={option.value || 'empty'} value={option.value} className="bg-slate-900 text-white">
@@ -60,7 +60,7 @@ export function CatalogFilters({
 
   return (
     <div className={clsx('space-y-4', className)}>
-      <div className="grid gap-3 xl:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <SelectField
           icon={ArrowUpDown}
           label="Сортировка"
@@ -102,7 +102,7 @@ export function CatalogFilters({
         />
       </div>
 
-      <div className="grid gap-3 xl:grid-cols-[minmax(0,160px)_minmax(0,160px)_repeat(3,minmax(0,1fr))_auto]">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <label className="space-y-2">
           <span className="flex items-center gap-2 text-sm font-semibold text-white">
             <BadgePercent size={16} className="text-brand-300" />
@@ -111,10 +111,11 @@ export function CatalogFilters({
           <input
             type="number"
             min="0"
+            inputMode="numeric"
             value={draftFilters.minPrice}
             onChange={(event) => onDraftChange({ minPrice: event.target.value })}
             placeholder="От"
-            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60"
+            className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl"
           />
         </label>
 
@@ -126,14 +127,15 @@ export function CatalogFilters({
           <input
             type="number"
             min="0"
+            inputMode="numeric"
             value={draftFilters.maxPrice}
             onChange={(event) => onDraftChange({ maxPrice: event.target.value })}
             placeholder="До"
-            className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60"
+            className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl"
           />
         </label>
 
-        <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40">
+        <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
           <span className="flex items-center gap-2">
             <BadgePercent size={16} className="text-rose-300" />
             Только со скидкой
@@ -146,7 +148,7 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40">
+        <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
           <span className="flex items-center gap-2">
             <Gamepad2 size={16} className="text-amber-300" />
             Доступно в PS Plus
@@ -159,7 +161,7 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="flex cursor-pointer items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40">
+        <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
           <span className="flex items-center gap-2">
             <Sparkles size={16} className="text-sky-300" />
             Доступно в EA Access
@@ -176,7 +178,7 @@ export function CatalogFilters({
           type="button"
           onClick={onReset}
           className={clsx(
-            'btn-secondary w-full justify-center xl:min-w-[150px]',
+            'btn-secondary min-h-[56px] w-full justify-center sm:col-span-2 lg:col-span-3 xl:col-span-1 xl:min-w-[150px]',
             !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
           )}
         >

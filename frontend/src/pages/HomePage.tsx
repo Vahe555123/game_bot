@@ -183,7 +183,7 @@ export function HomePage() {
           }
         />
 
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:gap-4 xl:grid-cols-4">
           {loading
             ? Array.from({ length: 4 }).map((_, index) => <ProductSkeleton key={index} />)
             : discounts.map((product) => <ProductCard key={`${product.id}-${product.region || 'all'}`} product={product} />)}
@@ -202,7 +202,7 @@ export function HomePage() {
           }
         />
 
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:gap-4 xl:grid-cols-4">
           {loading
             ? Array.from({ length: 4 }).map((_, index) => <ProductSkeleton key={index} />)
             : psPlus.map((product) => <ProductCard key={`${product.id}-${product.region || 'all'}`} product={product} />)}

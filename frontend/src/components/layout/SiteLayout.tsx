@@ -7,10 +7,10 @@ import { AuthModal } from '../auth/AuthModal'
 import { buildAuthModalPath, buildBaseAuthPath, normalizeAuthModalView } from '../auth/authModalState'
 
 const DESKTOP_NAV_LINK_CLASS =
-  'inline-flex items-center gap-2 rounded-full px-3 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/[0.06] hover:text-white'
-const DESKTOP_ACTION_BUTTON_CLASS = 'btn-secondary min-h-[44px] px-4'
+  'inline-flex items-center gap-2 rounded-full px-2.5 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/[0.06] hover:text-white xl:px-3'
+const DESKTOP_ACTION_BUTTON_CLASS = 'btn-secondary min-h-[44px] px-3 xl:px-4'
 const MOBILE_MENU_LINK_CLASS =
-  'flex min-h-[48px] items-center justify-center gap-2 rounded-[20px] border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-sm font-medium text-slate-100 transition hover:border-brand-300/50 hover:bg-brand-500/10'
+  'flex min-h-[48px] items-center justify-start gap-3 rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm font-medium text-slate-100 transition hover:border-brand-300/50 hover:bg-brand-500/10'
 
 const PARTNER_LINKS = [
   { label: 'Турция', href: 'https://romanomak.ru/category/120642' },
@@ -140,19 +140,21 @@ export function SiteLayout() {
   return (
     <div className="relative min-h-screen">
       <header className="sticky top-0 z-40 border-b border-white/8 bg-slate-950/60 backdrop-blur-xl">
-        <div className="container flex min-h-20 items-center gap-4 py-4">
+        <div className="container flex min-h-[72px] items-center gap-3 py-3 md:min-h-20 md:gap-4 md:py-4">
           <Link to="/" className="flex min-w-0 shrink-0 items-center gap-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-300 via-brand-500 to-sky-700 shadow-glow">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-300 via-brand-500 to-sky-700 shadow-glow md:h-12 md:w-12">
               <Sparkles className="h-5 w-5 text-white" />
             </div>
             <div className="min-w-0">
-              <p className="truncate font-display text-lg text-white">PS Store Web</p>
-              <p className="truncate text-xs uppercase tracking-[0.26em] text-brand-200/80">miniapp inspired</p>
+              <p className="truncate font-display text-base text-white sm:text-lg">PS Store Web</p>
+              <p className="hidden truncate text-[10px] uppercase tracking-[0.22em] text-brand-200/80 sm:block md:text-xs md:tracking-[0.26em]">
+                miniapp inspired
+              </p>
             </div>
           </Link>
 
-          <div className="hidden min-w-0 flex-1 items-center justify-between gap-4 lg:flex">
-            <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="hidden min-w-0 flex-1 items-center justify-between gap-3 lg:flex xl:gap-4">
+            <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:gap-1">
               <ActionLink to="/catalog?hasDiscount=true" className={DESKTOP_NAV_LINK_CLASS}>
                 Скидки
               </ActionLink>
@@ -215,7 +217,7 @@ export function SiteLayout() {
 
           <button
             type="button"
-            className="ml-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white lg:hidden"
+            className="ml-auto flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white lg:hidden"
             onClick={() => setIsOpen((value) => !value)}
             aria-label="Открыть меню"
           >
@@ -316,9 +318,9 @@ export function SiteLayout() {
       </main>
 
       {supportLinks.length ? (
-        <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3">
+        <div className="fixed bottom-3 right-3 z-40 flex flex-col items-end gap-2.5 sm:bottom-5 sm:right-5 sm:gap-3">
           {isSupportOpen ? (
-            <div className="w-[220px] rounded-[24px] border border-white/10 bg-slate-950/95 p-3 shadow-card backdrop-blur-xl">
+            <div className="w-[220px] rounded-[22px] border border-white/10 bg-slate-950/95 p-3 shadow-card backdrop-blur-xl sm:rounded-[24px]">
               <p className="px-2 pb-2 text-xs uppercase tracking-[0.24em] text-slate-500">Задать вопрос</p>
               <div className="space-y-2">
                 {supportLinks.map((item) => (
@@ -338,7 +340,7 @@ export function SiteLayout() {
           <button
             type="button"
             onClick={() => setIsSupportOpen((value) => !value)}
-            className="flex min-h-[52px] items-center gap-2 rounded-full border border-brand-300/30 bg-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-glow transition hover:bg-brand-400"
+            className="flex min-h-[48px] items-center gap-2 rounded-full border border-brand-300/30 bg-brand-500 px-4 py-3 text-sm font-semibold text-white shadow-glow transition hover:bg-brand-400 sm:min-h-[52px] sm:px-5"
           >
             <MessageCircle size={18} />
             Задать вопрос

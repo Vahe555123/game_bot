@@ -107,7 +107,7 @@ export function FavoritesPage() {
               </div>
             </div>
 
-            <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-6 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:gap-4 xl:grid-cols-3">
               {isLoading
                 ? Array.from({ length: Math.min(orderedFavorites.length, 6) }).map((_, index) => (
                     <ProductSkeleton key={index} />

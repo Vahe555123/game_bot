@@ -150,6 +150,7 @@ export type CatalogQuery = {
   has_discount?: boolean
   has_ps_plus?: boolean
   has_ea_access?: boolean
+  grouped?: boolean
 }
 
 export type CatalogFilterState = {

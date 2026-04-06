@@ -32,15 +32,19 @@ export function ProductCard({ product }: ProductCardProps) {
   }
 
   return (
-    <article className="group relative h-full overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/80 shadow-card transition duration-300 hover:-translate-y-1 hover:border-brand-300/40 hover:shadow-glow">
-      <Link to={productUrl} aria-label={`Открыть ${productTitle}`} className="absolute inset-0 z-10 rounded-[24px]" />
+    <article className="group relative h-full overflow-hidden rounded-[20px] border border-white/10 bg-slate-950/80 shadow-card transition duration-300 hover:-translate-y-1 hover:border-brand-300/40 hover:shadow-glow md:rounded-[24px]">
+      <Link
+        to={productUrl}
+        aria-label={`Открыть ${productTitle}`}
+        className="absolute inset-0 z-10 rounded-[20px] md:rounded-[24px]"
+      />
 
       <div className="relative aspect-square overflow-hidden bg-gradient-to-br from-brand-500/20 via-slate-950 to-slate-900">
         {imageUrl ? (
           <img
             src={imageUrl}
             alt={productTitle}
-            className="h-full w-full object-contain p-3 transition duration-500 group-hover:scale-[1.02]"
+            className="h-full w-full object-contain p-2.5 transition duration-500 group-hover:scale-[1.02] md:p-3"
             loading="lazy"
           />
         ) : (
@@ -54,36 +58,45 @@ export function ProductCard({ product }: ProductCardProps) {
 
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent" />
 
-        <div className="absolute left-4 top-4 flex flex-wrap gap-2">
+        <div className="absolute left-2.5 top-2.5 flex flex-wrap gap-1.5 md:left-4 md:top-4 md:gap-2">
           {product.hasDiscount ? (
-            <span className="pill border-rose-400/40 bg-rose-500 text-white shadow-lg shadow-rose-950/30">
+            <span className="pill border-rose-400/40 bg-rose-500 px-2.5 py-1 text-[11px] text-white shadow-lg shadow-rose-950/30">
               <BadgePercent size={12} />
               {product.discountPercent ? `-${product.discountPercent}%` : 'Скидка'}
             </span>
           ) : null}
           {product.hasPsPlus ? (
-            <span className="pill border-amber-300/50 bg-amber-400 text-slate-950 shadow-lg shadow-amber-950/20">
+            <span className="pill border-amber-300/50 bg-amber-400 px-2.5 py-1 text-[11px] text-slate-950 shadow-lg shadow-amber-950/20">
               PS Plus
             </span>
           ) : null}
           {product.hasEaAccess ? (
-            <span className="pill border-[#3b82f6] bg-[#2563eb] text-white shadow-lg shadow-blue-950/30">EA PLAY</span>
+            <span className="pill border-[#3b82f6] bg-[#2563eb] px-2.5 py-1 text-[11px] text-white shadow-lg shadow-blue-950/30">
+              EA PLAY
+            </span>
           ) : null}
         </div>
 
-        <FavoriteButton active={favoriteActive} onClick={handleFavoriteClick} className="absolute right-4 top-4 z-20" />
+        <FavoriteButton active={favoriteActive} onClick={handleFavoriteClick} className="absolute right-2.5 top-2.5 z-20 md:right-4 md:top-4" />
 
-        <div className="absolute inset-x-3 bottom-3 flex flex-wrap gap-2">
+        <div className="absolute inset-x-2.5 bottom-2.5 flex flex-wrap gap-1.5 md:inset-x-3 md:bottom-3 md:gap-2">
           {product.platforms ? (
-            <span className="pill border-white/10 bg-slate-950/85 text-slate-100 shadow-lg">{product.platforms}</span>
+            <span className="pill border-white/10 bg-slate-950/85 px-2.5 py-1 text-[11px] text-slate-100 shadow-lg">
+              {product.platforms}
+            </span>
           ) : null}
-          <LocalizationBadge localizationName={product.localizationName} className="shadow-lg backdrop-blur-sm" />
+          <LocalizationBadge
+            localizationName={product.localizationName}
+            className="px-2.5 py-1 text-[11px] shadow-lg backdrop-blur-sm md:text-xs"
+          />
         </div>
       </div>
 
-      <div className="relative z-0 space-y-4 p-4">
-        <div className="space-y-2">
-          <h3 className="line-clamp-2 min-h-[3.5rem] text-xl text-white">{productTitle}</h3>
+      <div className="relative z-0 space-y-3 p-3 md:space-y-4 md:p-4">
+        <div className="space-y-1.5 md:space-y-2">
+          <h3 className="line-clamp-2 min-h-[2.75rem] text-base leading-5 text-white md:min-h-[3.5rem] md:text-xl md:leading-6">
+            {productTitle}
+          </h3>
         </div>
 
         <RegionalPriceList prices={regionalPrices} variant="card" />

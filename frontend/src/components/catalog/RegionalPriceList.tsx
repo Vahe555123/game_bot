@@ -31,14 +31,14 @@ function RegionalPriceRow({
     <div
       className={clsx(
         'rounded-2xl border border-white/10 bg-white/[0.04]',
-        variant === 'card' ? 'px-3 py-2.5' : 'px-4 py-3.5',
+        variant === 'card' ? 'px-2.5 py-2 md:px-3 md:py-2.5' : 'px-4 py-3.5',
       )}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5 md:gap-3">
         <span
           className={clsx(
             'flex shrink-0 items-center justify-center rounded-full border border-white/10 bg-brand-500/15 font-black text-brand-50',
-            variant === 'card' ? 'h-8 min-w-8 text-[11px]' : 'h-10 min-w-10 text-xs',
+            variant === 'card' ? 'h-7 min-w-7 text-[10px] md:h-8 md:min-w-8 md:text-[11px]' : 'h-10 min-w-10 text-xs',
           )}
         >
           {price.label || price.region}
@@ -64,18 +64,18 @@ function RegionalPriceRow({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className={clsx('font-display text-white', variant === 'card' ? 'text-base' : 'text-2xl')}>
+            <span className={clsx('font-display text-white', variant === 'card' ? 'text-sm md:text-base' : 'text-2xl')}>
               {currentPrice.primary}
             </span>
 
             {currentPrice.secondary ? (
-              <span className="text-xs font-medium text-slate-400">{currentPrice.secondary}</span>
+              <span className="text-[11px] font-medium text-slate-400 md:text-xs">{currentPrice.secondary}</span>
             ) : null}
 
-            {oldPrice ? <span className="text-xs text-slate-500 line-through">{oldPrice.primary}</span> : null}
+            {oldPrice ? <span className="text-[11px] text-slate-500 line-through md:text-xs">{oldPrice.primary}</span> : null}
 
             {oldPrice?.secondary ? (
-              <span className="text-xs text-slate-600 line-through">{oldPrice.secondary}</span>
+              <span className="text-[11px] text-slate-600 line-through md:text-xs">{oldPrice.secondary}</span>
             ) : null}
 
             {psPlusPrice ? (

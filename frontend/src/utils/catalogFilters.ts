@@ -7,6 +7,8 @@ export const REGION_OPTIONS = [
   { value: 'en-in', label: 'Индия' },
 ] as const
 
+const REGION_OPTION_VALUES = new Set(REGION_OPTIONS.map((option) => option.value))
+
 export const PLATFORM_OPTIONS = [
   { value: '', label: 'Все платформы' },
   { value: 'PS4_ALL', label: 'PS4' },
@@ -16,17 +18,23 @@ export const PLATFORM_OPTIONS = [
   { value: 'BOTH', label: 'PS4 + PS5' },
 ] as const
 
+const PLATFORM_OPTION_VALUES = new Set(PLATFORM_OPTIONS.map((option) => option.value))
+
 export const PLAYER_OPTIONS = [
   { value: '', label: 'Количество игроков' },
   { value: 'singleplayer', label: 'Одиночная игра' },
   { value: 'coop', label: 'Кооператив' },
 ] as const
 
+const PLAYER_OPTION_VALUES = new Set(PLAYER_OPTIONS.map((option) => option.value))
+
 export const SORT_OPTIONS = [
   { value: 'popular', label: 'Популярность' },
   { value: 'alphabet', label: 'По алфавиту' },
   { value: 'price_asc', label: 'По цене' },
 ] as const
+
+const SORT_OPTION_VALUES = new Set(SORT_OPTIONS.map((option) => option.value))
 
 const REGION_NORMALIZATION_MAP: Record<string, string> = {
   'en-ua': 'UA',
@@ -46,6 +54,47 @@ export function normalizeRegionFilterValue(region?: string | null) {
   }
 
   return REGION_NORMALIZATION_MAP[region.toLowerCase()] || region.toUpperCase()
+}
+
+function sanitizeSelectValue<T extends string>(value: string, allowedValues: ReadonlySet<T>): T | '' {
+  return allowedValues.has(value as T) ? (value as T) : ''
+}
+
+function sanitizePriceValue(value: string) {
+  if (!value) {
+    return ''
+  }
+
+  const normalized = value.replace(',', '.').trim()
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return ''
+  }
+
+  return String(parsed)
+}
+
+export function sanitizeCatalogFilters(filters: CatalogFilterState, categories: string[] = []): CatalogFilterState {
+  const minPrice = sanitizePriceValue(filters.minPrice)
+  const maxPrice = sanitizePriceValue(filters.maxPrice)
+  const parsedMinPrice = minPrice ? Number(minPrice) : null
+  const parsedMaxPrice = maxPrice ? Number(maxPrice) : null
+  const hasInvalidRange =
+    parsedMinPrice !== null && parsedMaxPrice !== null && Number.isFinite(parsedMinPrice) && Number.isFinite(parsedMaxPrice)
+      ? parsedMinPrice > parsedMaxPrice
+      : false
+
+  return {
+    ...filters,
+    sort: sanitizeSelectValue(filters.sort, SORT_OPTION_VALUES) || 'popular',
+    region: sanitizeSelectValue(filters.region, REGION_OPTION_VALUES),
+    platform: sanitizeSelectValue(filters.platform, PLATFORM_OPTION_VALUES),
+    players: sanitizeSelectValue(filters.players, PLAYER_OPTION_VALUES),
+    category: !filters.category || !categories.length || categories.includes(filters.category) ? filters.category : '',
+    minPrice: hasInvalidRange ? '' : minPrice,
+    maxPrice: hasInvalidRange ? '' : maxPrice,
+    search: filters.search.trim(),
+  }
 }
 
 export function hasActiveCatalogFilters(filters: CatalogFilterState) {

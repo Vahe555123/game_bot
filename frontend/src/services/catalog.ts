@@ -4,7 +4,7 @@ import { apiClient } from './api'
 
 function compactParams(params: CatalogQuery) {
   return Object.fromEntries(
-    Object.entries(params).filter(([, value]) => value !== undefined && value !== '' && value !== false),
+    Object.entries(params).filter(([key, value]) => value !== undefined && value !== '' && (value !== false || key === 'grouped')),
   )
 }
 
