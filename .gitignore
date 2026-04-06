@@ -25,3 +25,4 @@ frontend/.env.*
 !frontend/.env.production
 frontend/dist/
 frontend/node_modules/
+products.db
