@@ -62,17 +62,7 @@ export type AuthUserResponse = {
 export type RegisterPayload = {
   email: string
   password: string
-  username?: string
-  first_name?: string
-  last_name?: string
-  telegram_id?: number
-  preferred_region?: string
-  show_ukraine_prices?: boolean
-  show_turkey_prices?: boolean
-  show_india_prices?: boolean
   payment_email?: string
-  platform?: string
-  psn_email?: string
 }
 
 export type VerifyEmailPayload = {

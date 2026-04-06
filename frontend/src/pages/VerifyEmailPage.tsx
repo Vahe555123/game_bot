@@ -159,7 +159,7 @@ export function VerifyEmailPage() {
 
       <div className="mt-6 flex flex-col gap-3 rounded-[24px] border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-300 md:flex-row md:items-center md:justify-between">
         <span>Если аккаунт уже подтверждён, можно сразу войти по email и паролю.</span>
-        <Link to="/login" className="font-semibold text-brand-200 transition hover:text-white">
+        <Link to="/?auth=login" className="font-semibold text-brand-200 transition hover:text-white">
           Перейти ко входу
         </Link>
       </div>

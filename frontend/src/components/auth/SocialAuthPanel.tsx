@@ -14,22 +14,27 @@ declare global {
 
 type SocialAuthPanelProps = {
   nextPath?: string
+  compact?: boolean
 }
 
 function ProviderButton({
   label,
   onClick,
   icon,
+  compact = false,
 }: {
   label: string
   onClick: () => void
   icon: ReactNode
+  compact?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-semibold text-white transition hover:border-brand-300/50 hover:bg-brand-500/10"
+      className={`flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-white transition hover:border-brand-300/50 hover:bg-brand-500/10 ${
+        compact ? 'min-h-[48px] py-3' : 'py-3.5'
+      }`}
     >
       {icon}
       <span>{label}</span>
@@ -37,7 +42,7 @@ function ProviderButton({
   )
 }
 
-export function SocialAuthPanel({ nextPath = '/profile' }: SocialAuthPanelProps) {
+export function SocialAuthPanel({ nextPath = '/profile', compact = false }: SocialAuthPanelProps) {
   const navigate = useNavigate()
   const { setAuthenticatedUser } = useAuth()
   const telegramContainerRef = useRef<HTMLDivElement | null>(null)
@@ -122,7 +127,7 @@ export function SocialAuthPanel({ nextPath = '/profile' }: SocialAuthPanelProps)
       <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-300">
         <div className="flex items-center gap-3">
           <LoaderCircle size={16} className="animate-spin text-brand-200" />
-          <span>Проверяем доступные способы входа...</span>
+          <span>{compact ? 'Проверяем быстрый вход...' : 'Проверяем доступные способы входа...'}</span>
         </div>
       </div>
     )
@@ -136,15 +141,20 @@ export function SocialAuthPanel({ nextPath = '/profile' }: SocialAuthPanelProps)
     <div className="space-y-4 rounded-[26px] border border-white/10 bg-white/[0.03] p-5">
       <div>
         <p className="text-xs uppercase tracking-[0.24em] text-brand-200/80">Быстрый вход</p>
-        <p className="mt-2 text-sm text-slate-300">Можно войти не только по email и паролю, но и через внешние провайдеры.</p>
+        <p className="mt-2 text-sm text-slate-300">
+          {compact
+            ? 'Можно войти через внешние сервисы, без отдельной ручной регистрации.'
+            : 'Можно войти не только по email и паролю, но и через внешние провайдеры.'}
+        </p>
       </div>
 
-      <div className="grid gap-3">
+      <div className={`grid gap-3 ${compact ? 'md:grid-cols-2' : ''}`}>
         {providers.google_enabled ? (
           <ProviderButton
             label="Войти через Google"
             onClick={() => beginProviderLogin('google')}
             icon={<Globe size={18} />}
+            compact={compact}
           />
         ) : null}
 
@@ -153,11 +163,16 @@ export function SocialAuthPanel({ nextPath = '/profile' }: SocialAuthPanelProps)
             label="Войти через VK"
             onClick={() => beginProviderLogin('vk')}
             icon={<span className="text-base font-bold">VK</span>}
+            compact={compact}
           />
         ) : null}
 
         {providers.telegram_enabled ? (
-          <div className="rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4">
+          <div
+            className={`rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 ${
+              compact ? 'md:col-span-2' : ''
+            }`}
+          >
             <div className="mb-3 flex items-center gap-3 text-sm font-semibold text-white">
               <MessageCircleMore size={18} />
               <span>Войти через Telegram</span>

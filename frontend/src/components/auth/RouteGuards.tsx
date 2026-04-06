@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { buildAuthModalPath } from './authModalState'
 
 function AuthLoadingState() {
   return (
@@ -22,7 +23,7 @@ export function RequireAuth() {
 
   if (!isAuthenticated) {
     const redirectTarget = `${location.pathname}${location.search}${location.hash}`
-    return <Navigate to={`/login?next=${encodeURIComponent(redirectTarget)}`} replace />
+    return <Navigate to={buildAuthModalPath({ pathname: '/', search: '', hash: '' }, 'login', redirectTarget)} replace />
   }
 
   return <Outlet />
@@ -50,7 +51,7 @@ export function RequireAdmin() {
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login?next=%2Fadmin" replace />
+    return <Navigate to={buildAuthModalPath({ pathname: '/', search: '', hash: '' }, 'login', '/admin')} replace />
   }
 
   if (!user?.is_admin) {

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { buildAuthModalPath } from '../components/auth/authModalState'
 import { useAuth } from '../context/AuthContext'
 import { useFavorites } from '../context/FavoritesContext'
 import { getProfile, updateProfilePreferences, updateProfilePsnAccount } from '../services/auth'
@@ -309,7 +310,7 @@ export function ProfilePage() {
 
   async function handleLogout() {
     await logoutUser()
-    navigate('/login', { replace: true })
+    navigate(buildAuthModalPath({ pathname: '/', search: '', hash: '' }, 'login'), { replace: true })
   }
 
   function applyProfile(response: SiteProfileResponse) {

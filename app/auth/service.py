@@ -512,6 +512,8 @@ class AuthService:
                 update_fields["email_normalized"] = email_normalized
                 if email_verified:
                     update_fields["email_verified"] = True
+                if provider == "google" and not (user_doc or {}).get("payment_email"):
+                    update_fields["payment_email"] = email_normalized
 
             if provider == "google":
                 update_fields["google_id"] = provider_id

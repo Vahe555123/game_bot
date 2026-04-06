@@ -1,8 +1,10 @@
 import { Heart, Menu, Sparkles, UserRound } from 'lucide-react'
 import { useState } from 'react'
-import { Link, Outlet } from 'react-router-dom'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useFavorites } from '../../context/FavoritesContext'
+import { AuthModal } from '../auth/AuthModal'
+import { buildAuthModalPath, buildBaseAuthPath, normalizeAuthModalView } from '../auth/authModalState'
 
 const DESKTOP_NAV_BUTTON_CLASS = 'btn-secondary min-h-[48px] px-5'
 const MOBILE_NAV_BUTTON_CLASS = 'btn-secondary min-h-[48px] text-center'
@@ -43,7 +45,19 @@ export function SiteLayout() {
   const [isOpen, setIsOpen] = useState(false)
   const { isAuthenticated, user } = useAuth()
   const { favorites } = useFavorites()
+  const location = useLocation()
+  const navigate = useNavigate()
   const telegramUrl = import.meta.env.VITE_TELEGRAM_BOT_URL
+  const authView = normalizeAuthModalView(new URLSearchParams(location.search).get('auth'))
+
+  function openAuthModal() {
+    navigate(buildAuthModalPath(location, 'login', buildBaseAuthPath(location)))
+  }
+
+  function openMobileAuthModal() {
+    setIsOpen(false)
+    openAuthModal()
+  }
 
   return (
     <div className="relative min-h-screen">
@@ -87,16 +101,10 @@ export function SiteLayout() {
                 ) : null}
               </>
             ) : (
-              <Link to="/login" className={DESKTOP_NAV_BUTTON_CLASS}>
-                Войти
-              </Link>
+              <button type="button" onClick={openAuthModal} className={DESKTOP_NAV_BUTTON_CLASS}>
+                Вход
+              </button>
             )}
-
-            {!isAuthenticated ? (
-              <Link to="/register" className={DESKTOP_NAV_BUTTON_CLASS}>
-                Регистрация
-              </Link>
-            ) : null}
 
             <Link to="/catalog" className="btn-primary min-h-[48px] px-6">
               В каталог
@@ -147,14 +155,9 @@ export function SiteLayout() {
                   ) : null}
                 </>
               ) : (
-                <>
-                  <Link to="/login" onClick={() => setIsOpen(false)} className={MOBILE_NAV_BUTTON_CLASS}>
-                    Войти
-                  </Link>
-                  <Link to="/register" onClick={() => setIsOpen(false)} className={MOBILE_NAV_BUTTON_CLASS}>
-                    Регистрация
-                  </Link>
-                </>
+                <button type="button" onClick={openMobileAuthModal} className={MOBILE_NAV_BUTTON_CLASS}>
+                  Вход / Регистрация
+                </button>
               )}
 
               <Link to="/catalog" onClick={() => setIsOpen(false)} className="btn-primary mt-2 min-h-[48px] text-center">
@@ -169,6 +172,7 @@ export function SiteLayout() {
         <Outlet />
       </main>
 
+      {authView ? <AuthModal view={authView} onClose={() => navigate(buildBaseAuthPath(location), { replace: true })} /> : null}
     </div>
   )
 }

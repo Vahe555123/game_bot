@@ -12,7 +12,8 @@
   Star,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { buildAuthModalPath, buildBaseAuthPath } from '../components/auth/authModalState'
 import { FavoriteButton } from '../components/catalog/FavoriteButton'
 import { LocalizationBadge } from '../components/catalog/LocalizationBadge'
 import { RegionalPriceList } from '../components/catalog/RegionalPriceList'
@@ -521,6 +522,7 @@ function CheckoutDialog({
 export function ProductPage() {
   const { productId } = useParams<{ productId: string }>()
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const navigate = useNavigate()
   const requestedRegion = searchParams.get('region') || undefined
 
@@ -645,7 +647,7 @@ export function ProductPage() {
     }
 
     if (!isAuthenticated) {
-      navigate('/login')
+      navigate(buildAuthModalPath(location, 'login', buildBaseAuthPath(location)))
       return
     }
 
