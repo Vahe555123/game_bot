@@ -7,7 +7,7 @@ import {
   fetchAdminProducts,
   updateAdminProduct,
 } from '../../services/admin'
-import type { AdminProduct, AdminProductPayload } from '../../types/admin'
+import type { AdminProduct, AdminProductPayload, AdminProductSortMode } from '../../types/admin'
 import { getApiErrorMessage } from '../../utils/apiErrors'
 import {
   AdminEmptyState,
@@ -265,6 +265,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   const [search, setSearch] = useState('')
   const [regionFilter, setRegionFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [sort, setSort] = useState<AdminProductSortMode>('popular')
   const [isLoading, setIsLoading] = useState(true)
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
   const [selectedProduct, setSelectedProduct] = useState<AdminProduct | null>(null)
@@ -281,6 +282,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
         search: search.trim() || undefined,
         region: regionFilter || undefined,
         category: categoryFilter.trim() || undefined,
+        sort,
       })
       setProducts(response.products)
       setTotal(response.total)
@@ -296,7 +298,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
 
   useEffect(() => {
     loadProducts()
-  }, [page, limit, search, regionFilter, categoryFilter])
+  }, [page, limit, search, regionFilter, categoryFilter, sort])
 
   async function startEdit(product: AdminProduct) {
     setNotice(EMPTY_ADMIN_NOTICE)
@@ -398,7 +400,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     >
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
         <div className="space-y-5">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px]">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px_180px]">
             <input
               value={search}
               onChange={(event) => {
@@ -432,15 +434,28 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
               className="auth-input"
               placeholder="Фильтр по категории"
             />
+
+            <select
+              value={sort}
+              onChange={(event) => {
+                setPage(1)
+                setSort(event.target.value as AdminProductSortMode)
+              }}
+              className="auth-input"
+            >
+              <option value="popular">Популярность</option>
+              <option value="alphabet">По алфавиту</option>
+            </select>
           </div>
 
           <AdminNotice state={notice} />
 
           <AdminTableShell>
-            <div className="hidden grid-cols-[minmax(0,1.3fr)_90px_110px_130px_130px] gap-3 border-b border-white/8 px-5 py-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 lg:grid">
+            <div className="hidden grid-cols-[minmax(0,1.2fr)_90px_110px_90px_130px_130px] gap-3 border-b border-white/8 px-5 py-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 lg:grid">
               <span>Товар</span>
               <span>Регион</span>
               <span>Категория</span>
+              <span>В избр.</span>
               <span>Цена</span>
               <span>Действия</span>
             </div>
@@ -454,13 +469,14 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
             ) : products.length ? (
               <div className="divide-y divide-white/6">
                 {products.map((product) => (
-                  <div key={`${product.id}-${product.region}`} className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1.3fr)_90px_110px_130px_130px] lg:items-center">
+                  <div key={`${product.id}-${product.region}`} className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1.2fr)_90px_110px_90px_130px_130px] lg:items-center">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-white">{product.display_name}</p>
                       <p className="mt-1 truncate text-sm text-slate-400">{product.id}</p>
                     </div>
                     <div className="text-sm text-slate-300">{product.region}</div>
                     <div className="text-sm text-slate-300">{product.category || '—'}</div>
+                    <div className="text-sm text-slate-300">{product.favorites_count}</div>
                     <div className="text-sm text-slate-300">
                       {product.price_try ?? product.price_uah ?? product.price_inr ?? product.price ?? '—'}
                     </div>

@@ -1,5 +1,6 @@
-import { LayoutDashboard, Package2, Shield, ShoppingBag, Users } from 'lucide-react'
+import { FileText, LayoutDashboard, Package2, Shield, ShoppingBag, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { AdminContentSection } from '../components/admin/AdminContentSection'
 import { AdminDashboardSection } from '../components/admin/AdminDashboardSection'
 import { AdminProductsSection } from '../components/admin/AdminProductsSection'
 import { AdminPurchasesSection } from '../components/admin/AdminPurchasesSection'
@@ -11,6 +12,7 @@ import { getApiErrorMessage } from '../utils/apiErrors'
 
 const SECTIONS = [
   { id: 'admin-dashboard', label: 'Дашборд', icon: LayoutDashboard },
+  { id: 'admin-content', label: 'Помощь', icon: FileText },
   { id: 'admin-users', label: 'Пользователи', icon: Users },
   { id: 'admin-products', label: 'Товары', icon: Package2 },
   { id: 'admin-purchases', label: 'Покупки', icon: ShoppingBag },
@@ -58,18 +60,20 @@ export function AdminPage() {
                   Site Admin Control
                 </div>
                 <h1 className="mt-5 max-w-3xl text-4xl leading-tight text-white md:text-5xl">
-                  Полная админка сайта: пользователи, каталог, покупки и дашборд.
+                  Полная админка сайта: контент, пользователи, каталог, покупки и дашборд.
                 </h1>
                 <p className="mt-4 max-w-3xl text-sm leading-8 text-slate-300">
-                  Здесь собран отдельный web-admin слой поверх текущего FastAPI backend: роли, CRUD пользователей,
-                  CRUD товаров, история покупок, ручная выдача заказа и сводка по проекту.
+                  Здесь собран отдельный web-admin слой поверх текущего FastAPI backend: контент страниц, роли,
+                  управление пользователями, каталогом, покупками и общей сводкой по проекту.
                 </p>
               </div>
 
               <div className="rounded-[28px] border border-white/10 bg-slate-950/35 px-5 py-4">
                 <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Текущий админ</p>
                 <p className="mt-2 text-lg font-semibold text-white">{displayName}</p>
-                <p className="mt-1 text-sm text-slate-400">{user?.email || (user?.telegram_id ? `Telegram ${user.telegram_id}` : 'Без email')}</p>
+                <p className="mt-1 text-sm text-slate-400">
+                  {user?.email || (user?.telegram_id ? `Telegram ${user.telegram_id}` : 'Без email')}
+                </p>
               </div>
             </div>
 
@@ -81,6 +85,7 @@ export function AdminPage() {
           </section>
 
           <AdminDashboardSection dashboard={dashboard} isLoading={isDashboardLoading} />
+          <AdminContentSection />
           <AdminUsersSection onDataChanged={loadDashboard} />
           <AdminProductsSection onDataChanged={loadDashboard} />
           <AdminPurchasesSection onDataChanged={loadDashboard} />

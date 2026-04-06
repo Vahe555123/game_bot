@@ -323,6 +323,7 @@ async def get_products(
     has_ea_access: Optional[bool] = Query(None, description="Доступно в EA Access"),
     platform: Optional[str] = Query(None, description="Фильтр по платформе (PS4, PS5, BOTH)"),
     players: Optional[str] = Query(None, description="Фильтр по количеству игроков"),
+    sort: Optional[str] = Query("popular", description="Сортировка (popular, alphabet, price_asc, price_desc)"),
     telegram_id: Optional[int] = Query(None, description="ID пользователя для настроек отображения"),
     grouped: bool = Query(True, description="Группировать товары с ценами из всех регионов"),
     db: Session = Depends(get_db)
@@ -352,7 +353,8 @@ async def get_products(
         has_ps_plus=has_ps_plus,
         has_ea_access=has_ea_access,
         platform=platform,
-        players=players
+        players=players,
+        sort=sort,
     )
     pagination = PaginationParams(page=page, limit=limit)
 

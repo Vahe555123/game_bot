@@ -1,6 +1,7 @@
+from collections import defaultdict
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, func, text
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from app.models import User, Product, UserFavoriteProduct, Localization
 from app.models.currency_rate import CurrencyRate
 from app.api.schemas import UserCreate, UserUpdate, ProductFilter, PaginationParams, CurrencyRateCreate, CurrencyRateUpdate
@@ -50,6 +51,32 @@ class UserCRUD:
         return UserCRUD.create(db, user_data), True
 
 class ProductCRUD:
+    @staticmethod
+    def _normalize_sort_mode(sort_value: Optional[str]) -> str:
+        normalized = (sort_value or '').strip().lower()
+
+        if normalized in {'alphabet', 'alpha', 'name', 'title'}:
+            return 'alphabet'
+
+        if normalized in {'price', 'price_asc', 'cheap', 'asc'}:
+            return 'price_asc'
+
+        if normalized in {'price_desc', 'expensive', 'desc'}:
+            return 'price_desc'
+
+        return 'popular'
+
+    @staticmethod
+    def _get_favorites_count_subquery(db: Session):
+        return (
+            db.query(
+                UserFavoriteProduct.product_id.label('product_id'),
+                func.count(UserFavoriteProduct.id).label('favorites_count'),
+            )
+            .group_by(UserFavoriteProduct.product_id)
+            .subquery()
+        )
+
     @staticmethod
     def _get_region_priority(user: Optional[User] = None, filter_region: Optional[str] = None) -> Dict[str, int]:
         """Вернуть приоритет регионов для выбора базовой записи товара."""
@@ -108,6 +135,162 @@ class ProductCRUD:
             grouped_rows.values(),
             key=lambda item: (ProductCRUD._get_product_sort_name(item[0]), item[0].id),
         )
+
+    @staticmethod
+    def _choose_representative_products(
+        products: List[Product],
+        user: Optional[User] = None,
+        filter_region: Optional[str] = None,
+    ) -> Dict[str, Product]:
+        region_priority = ProductCRUD._get_region_priority(user, filter_region)
+        representatives: Dict[str, Product] = {}
+
+        for product in products:
+            current = representatives.get(product.id)
+            if current is None:
+                representatives[product.id] = product
+                continue
+
+            current_priority = region_priority.get(getattr(current, 'region', None), len(region_priority))
+            next_priority = region_priority.get(getattr(product, 'region', None), len(region_priority))
+
+            if next_priority < current_priority:
+                representatives[product.id] = product
+
+        return representatives
+
+    @staticmethod
+    def _get_localization_name_cached(
+        db: Session,
+        localization_code: Optional[str],
+        localization_cache: Optional[Dict[str, Optional[str]]] = None,
+    ) -> Optional[str]:
+        if not localization_code:
+            return None
+
+        if localization_cache is not None and localization_code in localization_cache:
+            return localization_cache[localization_code]
+
+        localization_name = ProductCRUD.get_localization_name(db, localization_code)
+
+        if localization_cache is not None:
+            localization_cache[localization_code] = localization_name
+
+        return localization_name
+
+    @staticmethod
+    def _collect_regional_price_data(
+        regional_products: List[Product],
+        db: Session,
+        localization_cache: Optional[Dict[str, Optional[str]]] = None,
+    ) -> Dict[str, Any]:
+        region_mapping = {
+            'UA': {
+                'flag': 'рџ‡єрџ‡¦',
+                'name': 'Украина',
+                'code': 'UAH',
+                'price_field': 'price_uah',
+                'old_price_field': 'old_price_uah',
+                'ps_plus_price_field': 'ps_plus_price_uah',
+            },
+            'TR': {
+                'flag': 'рџ‡№рџ‡·',
+                'name': 'Турция',
+                'code': 'TRY',
+                'price_field': 'price_try',
+                'old_price_field': 'old_price_try',
+                'ps_plus_price_field': 'ps_plus_price_try',
+            },
+            'IN': {
+                'flag': 'рџ‡®рџ‡і',
+                'name': 'Индия',
+                'code': 'INR',
+                'price_field': 'price_inr',
+                'old_price_field': 'old_price_inr',
+                'ps_plus_price_field': 'ps_plus_price_inr',
+            },
+        }
+
+        regional_by_code = {
+            (product.region or '').upper(): product
+            for product in regional_products
+            if getattr(product, 'region', None)
+        }
+
+        regional_prices: List[Dict[str, Any]] = []
+        min_price_rub: Optional[float] = None
+        min_old_price_rub: Optional[float] = None
+
+        from app.models.currency_rate import CurrencyRate
+
+        for region_code in ('TR', 'IN', 'UA'):
+            regional_product = regional_by_code.get(region_code)
+            region_info = region_mapping.get(region_code)
+
+            if regional_product is None or region_info is None:
+                continue
+
+            price = getattr(regional_product, region_info['price_field'], None)
+            old_price = getattr(regional_product, region_info['old_price_field'], None)
+            ps_plus_price = getattr(regional_product, region_info['ps_plus_price_field'], None)
+
+            if price is None or price <= 0:
+                continue
+
+            rate = CurrencyRate.get_rate_for_price(db, region_info['code'], price)
+            price_rub = round(price * rate, 2)
+            old_price_rub = round(old_price * rate, 2) if old_price and old_price > 0 else None
+            ps_plus_price_rub = round(ps_plus_price * rate, 2) if ps_plus_price and ps_plus_price > 0 else None
+
+            has_discount = bool(old_price and old_price > price)
+            discount_percent = int(((old_price - price) / old_price) * 100) if has_discount else None
+
+            ps_plus_discount_percent = None
+            if ps_plus_price_rub and old_price_rub and ps_plus_price_rub < old_price_rub:
+                ps_plus_discount_percent = int(((old_price_rub - ps_plus_price_rub) / old_price_rub) * 100)
+
+            localization_code = regional_product.localization
+            localization_name = ProductCRUD._get_localization_name_cached(
+                db,
+                localization_code,
+                localization_cache,
+            )
+
+            regional_prices.append(
+                {
+                    'region': region_code,
+                    'flag': region_info['flag'],
+                    'name': region_info['name'],
+                    'currency_code': region_info['code'],
+                    'price_local': price,
+                    'old_price_local': old_price if old_price and old_price > 0 else None,
+                    'ps_plus_price_local': ps_plus_price if ps_plus_price and ps_plus_price > 0 else None,
+                    'price_rub': price_rub,
+                    'old_price_rub': old_price_rub,
+                    'ps_plus_price_rub': ps_plus_price_rub,
+                    'has_discount': has_discount,
+                    'discount_percent': discount_percent,
+                    'ps_plus_discount_percent': ps_plus_discount_percent,
+                    'localization_code': localization_code,
+                    'localization_name': localization_name,
+                }
+            )
+
+            if min_price_rub is None or price_rub < min_price_rub:
+                min_price_rub = price_rub
+                min_old_price_rub = old_price_rub
+
+        max_discount_percent = None
+        discounts = [price.get('discount_percent') for price in regional_prices if price.get('discount_percent')]
+        if discounts:
+            max_discount_percent = max(discounts)
+
+        return {
+            'regional_prices': regional_prices,
+            'min_price_rub': min_price_rub,
+            'min_old_price_rub': min_old_price_rub,
+            'max_discount_percent': max_discount_percent,
+        }
 
     @staticmethod
     def get_by_id(db: Session, product_id: str, region: Optional[str] = None) -> Optional[Product]:
@@ -341,7 +524,15 @@ class ProductCRUD:
         return product_dict
 
     @staticmethod
-    def prepare_product_with_multi_region_prices(product: Product, db: Session, user: Optional[User] = None, filter_region: Optional[str] = None) -> dict:
+    def prepare_product_with_multi_region_prices(
+        product: Product,
+        db: Session,
+        user: Optional[User] = None,
+        filter_region: Optional[str] = None,
+        regional_products: Optional[List[Product]] = None,
+        localization_cache: Optional[Dict[str, Optional[str]]] = None,
+        favorites_count: int = 0,
+    ) -> dict:
         """
         Подготовить товар с ценами из всех регионов для карточек на главной странице и похожих товаров
 
@@ -359,6 +550,68 @@ class ProductCRUD:
         """
         # Находим ВСЕ варианты ЭТОГО КОНКРЕТНОГО товара (с тем же ID) из разных регионов
         # ID у товаров одинаковый для всех регионов, отличается только поле region
+        regional_products = regional_products or db.query(Product).filter(Product.id == product.id).all()
+        regional_price_data = ProductCRUD._collect_regional_price_data(
+            regional_products,
+            db,
+            localization_cache,
+        )
+        regional_prices = regional_price_data['regional_prices']
+        min_price = regional_price_data['min_price_rub']
+        min_price_old = regional_price_data['min_old_price_rub']
+        localization_name = ProductCRUD._get_localization_name_cached(
+            db,
+            product.localization,
+            localization_cache,
+        )
+
+        product_dict = {
+            'id': product.id,
+            'name': product.name,
+            'main_name': product.get_display_name(),
+            'category': product.category,
+            'type': product.type,
+            'region': product.region,
+            'image': product.image,
+            'publisher': product.publisher,
+            'description': product.description,
+            'rating': product.rating,
+            'edition': product.edition,
+            'platforms': product.platforms,
+            'localization': product.localization,
+            'localization_name': localization_name,
+            'has_discount': any(price['has_discount'] for price in regional_prices),
+            'discount': product.discount,
+            'discount_end': product.discount_end,
+            'discount_percent': regional_price_data['max_discount_percent'],
+            'ps_plus': product.ps_plus,
+            'has_ps_plus': product.has_ps_plus,
+            'ps_price': product.ps_price,
+            'has_ea_access': product.has_ea_access,
+            'ea_access': product.ea_access,
+            'ps_plus_collection': product.ps_plus_collection,
+            'has_ps_plus_extra_deluxe': product.has_ps_plus_extra_deluxe,
+            'favorites_count': int(favorites_count or 0),
+            'compound': product.get_compound_list(),
+            'info': product.get_info_list(),
+            'tags': product.get_tags_list(),
+            'players_min': product.players_min,
+            'players_max': product.players_max,
+            'players_online': bool(product.players_online),
+            'regional_prices': regional_prices,
+            'min_price_rub': min_price,
+            'price_try': product.price_try,
+            'old_price_try': product.old_price_try,
+            'price_inr': product.price_inr,
+            'old_price_inr': product.old_price_inr,
+            'price_uah': product.price_uah,
+            'old_price_uah': product.old_price_uah,
+            'rub_price': min_price,
+            'rub_price_old': min_price_old,
+        }
+
+        return product_dict
+
         regional_products = db.query(Product).filter(Product.id == product.id).all()
 
         # Маппинг регионов
@@ -497,6 +750,9 @@ class ProductCRUD:
             'compound': product.get_compound_list(),
             'info': product.get_info_list(),
             'tags': product.get_tags_list(),
+            'players_min': product.players_min,
+            'players_max': product.players_max,
+            'players_online': bool(product.players_online),
             # Цены из всех регионов
             'regional_prices': regional_prices,
             'min_price_rub': min_price,
@@ -668,6 +924,9 @@ class ProductCRUD:
             'compound': product.get_compound_list(),
             'info': product.get_info_list(),
             'tags': product.get_tags_list(),
+            'players_min': product.players_min,
+            'players_max': product.players_max,
+            'players_online': bool(product.players_online),
             'regional_prices': regional_prices,
             'min_price': min_price,
             'min_price_old': min_price_old
@@ -961,6 +1220,183 @@ class ProductCRUD:
 
         # ОПТИМИЗАЦИЯ: Если есть фильтры по цене - нужно загрузить все товары
         # Если нет - применяем пагинацию на уровне БД (LIMIT/OFFSET)
+        sort_mode = ProductCRUD._normalize_sort_mode(getattr(filters, 'sort', None))
+        favorites_subquery = ProductCRUD._get_favorites_count_subquery(db)
+        has_price_filter = filters.min_price is not None or filters.max_price is not None
+        requires_in_memory_sort = has_price_filter or sort_mode in {'price_asc', 'price_desc'}
+        localization_cache: Dict[str, Optional[str]] = {}
+
+        if requires_in_memory_sort:
+            all_products = query.all()
+            regional_products_by_id: Dict[str, List[Product]] = defaultdict(list)
+            for product in all_products:
+                regional_products_by_id[product.id].append(product)
+
+            favorites_count_rows = (
+                db.query(
+                    favorites_subquery.c.product_id,
+                    favorites_subquery.c.favorites_count,
+                )
+                .filter(favorites_subquery.c.product_id.in_(list(regional_products_by_id.keys())))
+                .all()
+                if regional_products_by_id
+                else []
+            )
+            favorites_count_map = {
+                product_id: int(favorites_count or 0)
+                for product_id, favorites_count in favorites_count_rows
+            }
+
+            representative_map = ProductCRUD._choose_representative_products(
+                all_products,
+                user=user,
+                filter_region=filter_region,
+            )
+
+            grouped_products: List[Dict[str, Any]] = []
+            for product_id, representative in representative_map.items():
+                regional_products = regional_products_by_id.get(product_id, [])
+                price_data = ProductCRUD._collect_regional_price_data(
+                    regional_products,
+                    db,
+                    localization_cache,
+                )
+                min_price_rub = price_data['min_price_rub']
+
+                if filters.min_price is not None and (min_price_rub is None or min_price_rub < filters.min_price):
+                    continue
+                if filters.max_price is not None and (min_price_rub is None or min_price_rub > filters.max_price):
+                    continue
+
+                grouped_products.append(
+                    {
+                        'product': representative,
+                        'regional_products': regional_products,
+                        'favorites_count': favorites_count_map.get(product_id, 0),
+                        'sort_name': ProductCRUD._get_product_sort_name(representative),
+                        'min_price_rub': min_price_rub,
+                    }
+                )
+
+            if sort_mode == 'price_desc':
+                grouped_products.sort(
+                    key=lambda item: (
+                        -(item['min_price_rub'] if item['min_price_rub'] is not None else -1),
+                        item['sort_name'],
+                        item['product'].id,
+                    )
+                )
+            elif sort_mode == 'price_asc':
+                grouped_products.sort(
+                    key=lambda item: (
+                        item['min_price_rub'] if item['min_price_rub'] is not None else float('inf'),
+                        item['sort_name'],
+                        item['product'].id,
+                    )
+                )
+            elif sort_mode == 'alphabet':
+                grouped_products.sort(key=lambda item: (item['sort_name'], item['product'].id))
+            else:
+                grouped_products.sort(
+                    key=lambda item: (
+                        -item['favorites_count'],
+                        item['sort_name'],
+                        item['product'].id,
+                    )
+                )
+
+            total = len(grouped_products)
+            offset = (pagination.page - 1) * pagination.limit
+            paginated_products = grouped_products[offset:offset + pagination.limit]
+
+            result = []
+            for item in paginated_products:
+                result.append(
+                    ProductCRUD.prepare_product_with_multi_region_prices(
+                        item['product'],
+                        db,
+                        user,
+                        filter_region,
+                        regional_products=item['regional_products'],
+                        localization_cache=localization_cache,
+                        favorites_count=item['favorites_count'],
+                    )
+                )
+
+            return result, total
+
+        product_id_column = Product.id.label('product_id')
+        sort_name_column = func.min(func.coalesce(Product.main_name, Product.name, Product.id)).label('sort_name')
+        favorites_count_column = func.coalesce(favorites_subquery.c.favorites_count, 0).label('favorites_count')
+
+        grouped_query = (
+            query.outerjoin(favorites_subquery, favorites_subquery.c.product_id == Product.id)
+            .with_entities(
+                product_id_column,
+                sort_name_column,
+                favorites_count_column,
+            )
+            .group_by(Product.id, favorites_subquery.c.favorites_count)
+        )
+
+        total = db.query(func.count()).select_from(grouped_query.order_by(None).subquery()).scalar() or 0
+
+        if sort_mode == 'alphabet':
+            grouped_query = grouped_query.order_by(sort_name_column.asc(), product_id_column.asc())
+        else:
+            grouped_query = grouped_query.order_by(
+                favorites_count_column.desc(),
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            )
+
+        page_rows = (
+            grouped_query
+            .offset(max(pagination.page - 1, 0) * pagination.limit)
+            .limit(pagination.limit)
+            .all()
+        )
+
+        page_ids = [row.product_id for row in page_rows]
+        if not page_ids:
+            return [], total
+
+        page_favorites_map = {
+            row.product_id: int(row.favorites_count or 0)
+            for row in page_rows
+        }
+
+        page_products = query.filter(Product.id.in_(page_ids)).all()
+        regional_products_by_id: Dict[str, List[Product]] = defaultdict(list)
+        for product in page_products:
+            regional_products_by_id[product.id].append(product)
+
+        representative_map = ProductCRUD._choose_representative_products(
+            page_products,
+            user=user,
+            filter_region=filter_region,
+        )
+
+        result = []
+        for product_id in page_ids:
+            representative = representative_map.get(product_id)
+            if representative is None:
+                continue
+
+            result.append(
+                ProductCRUD.prepare_product_with_multi_region_prices(
+                    representative,
+                    db,
+                    user,
+                    filter_region,
+                    regional_products=regional_products_by_id.get(product_id, [representative]),
+                    localization_cache=localization_cache,
+                    favorites_count=page_favorites_map.get(product_id, 0),
+                )
+            )
+
+        return result, total
+
         has_price_filter = filters.min_price is not None or filters.max_price is not None
 
         if has_price_filter:

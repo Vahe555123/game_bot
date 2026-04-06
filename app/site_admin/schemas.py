@@ -54,6 +54,87 @@ def normalize_optional_bool_flag(value: Optional[bool]) -> Optional[bool]:
     return bool(value)
 
 
+def normalize_required_text(value: str, *, field_name: str) -> str:
+    cleaned = normalize_optional_text(value)
+    if not cleaned:
+        raise ValueError(f"Укажите {field_name}")
+    return cleaned
+
+
+class HelpContentSection(BaseModel):
+    title: str = Field(..., max_length=160)
+    body: str = Field(..., max_length=4000)
+
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="заголовок блока")
+
+    @field_validator("body")
+    @classmethod
+    def validate_body(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="описание блока")
+
+
+class HelpContentFaqItem(BaseModel):
+    question: str = Field(..., max_length=240)
+    answer: str = Field(..., max_length=4000)
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="вопрос")
+
+    @field_validator("answer")
+    @classmethod
+    def validate_answer(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="ответ")
+
+
+class HelpContentBase(BaseModel):
+    eyebrow: str = Field("Помощь", max_length=40)
+    title: str = Field(..., max_length=160)
+    subtitle: str = Field(..., max_length=1200)
+    support_title: str = Field(..., max_length=120)
+    support_description: str = Field(..., max_length=1000)
+    support_button_label: str = Field(..., max_length=80)
+    support_button_url: Optional[str] = Field(None, max_length=500)
+    purchases_title: str = Field(..., max_length=120)
+    purchases_description: str = Field(..., max_length=1000)
+    purchases_button_label: str = Field(..., max_length=80)
+    purchases_button_url: Optional[str] = Field(None, max_length=500)
+    sections: list[HelpContentSection] = Field(default_factory=list, max_length=12)
+    faq_items: list[HelpContentFaqItem] = Field(default_factory=list, max_length=24)
+
+    @field_validator(
+        "eyebrow",
+        "title",
+        "subtitle",
+        "support_title",
+        "support_description",
+        "support_button_label",
+        "purchases_title",
+        "purchases_description",
+        "purchases_button_label",
+    )
+    @classmethod
+    def validate_required_text_fields(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="текст")
+
+    @field_validator("support_button_url", "purchases_button_url")
+    @classmethod
+    def validate_optional_url_fields(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value)
+
+
+class AdminHelpContentUpdateRequest(HelpContentBase):
+    pass
+
+
+class AdminHelpContentResponse(HelpContentBase):
+    updated_at: Optional[datetime] = None
+
+
 class AdminUserRecord(SiteUserPublic):
     is_env_admin: bool = False
     purchase_count: int = 0
@@ -176,6 +257,7 @@ class AdminProductRecord(BaseModel):
     id: str
     region: str
     display_name: str
+    favorites_count: int = 0
     name: Optional[str] = None
     main_name: Optional[str] = None
     category: Optional[str] = None

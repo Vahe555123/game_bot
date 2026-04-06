@@ -1,5 +1,7 @@
 import type {
   AdminDashboard,
+  AdminHelpContent,
+  AdminHelpContentPayload,
   AdminProduct,
   AdminProductListResponse,
   AdminProductPayload,
@@ -15,6 +17,16 @@ import { apiClient } from './api'
 
 export async function fetchAdminDashboard() {
   const response = await apiClient.get<AdminDashboard>('/site/admin/dashboard')
+  return response.data
+}
+
+export async function fetchAdminHelpContent() {
+  const response = await apiClient.get<AdminHelpContent>('/site/admin/content/help')
+  return response.data
+}
+
+export async function updateAdminHelpContent(payload: AdminHelpContentPayload) {
+  const response = await apiClient.put<AdminHelpContent>('/site/admin/content/help', payload)
   return response.data
 }
 
@@ -50,6 +62,7 @@ export async function fetchAdminProducts(params: {
   search?: string
   region?: string
   category?: string
+  sort?: string
 }) {
   const response = await apiClient.get<AdminProductListResponse>('/site/admin/products', { params })
   return response.data

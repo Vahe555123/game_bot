@@ -7,7 +7,7 @@ const REGION_SORT_ORDER: Record<string, number> = {
   UA: 2,
 }
 
-type LocalizationStatus = 'supported' | 'unsupported' | 'unknown'
+type LocalizationStatus = 'full' | 'partial' | 'unsupported' | 'unknown'
 
 export type LocalizationPresentation = {
   status: LocalizationStatus
@@ -101,6 +101,8 @@ export function getLocalizationPresentation(localizationName?: string | null): L
   const hasRussianMarker = /рус|russian/.test(normalized)
   const explicitNoRussian = /нет русского языка|без русского языка|no russian/.test(normalized)
   const englishOnly = /english only|английский язык/.test(normalized)
+  const fullRussian = /полностью на русском|full russian|russian audio|русская озвучка/.test(normalized)
+  const partialRussian = /русские субтитры|русский интерфейс|russian subtitles|russian interface/.test(normalized)
 
   if (explicitNoRussian || (englishOnly && !hasRussianMarker)) {
     return {
@@ -110,10 +112,18 @@ export function getLocalizationPresentation(localizationName?: string | null): L
     }
   }
 
-  if (hasRussianMarker) {
+  if (fullRussian) {
     return {
-      status: 'supported',
-      shortLabel: 'Русский язык',
+      status: 'full',
+      shortLabel: 'Полностью на русском',
+      fullLabel: source,
+    }
+  }
+
+  if (partialRussian || hasRussianMarker) {
+    return {
+      status: 'partial',
+      shortLabel: 'Русские субтитры',
       fullLabel: source,
     }
   }

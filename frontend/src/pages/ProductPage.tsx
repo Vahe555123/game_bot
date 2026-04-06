@@ -39,7 +39,6 @@ import {
   getVisibleRegionalPrices,
 } from '../utils/productPresentation'
 
-type SourceMode = 'api' | 'mock'
 type CheckoutFieldName = 'purchase_email' | 'psn_email' | 'psn_password'
 
 type CheckoutFormState = {
@@ -126,6 +125,59 @@ function buildHighlights(product: CatalogProduct) {
       icon: Languages,
     },
   ]
+}
+
+function getPlayerWord(value: number) {
+  const absoluteValue = Math.abs(value) % 100
+  const lastDigit = absoluteValue % 10
+
+  if (absoluteValue >= 11 && absoluteValue <= 14) {
+    return 'игроков'
+  }
+
+  if (lastDigit === 1) {
+    return 'игрок'
+  }
+
+  if (lastDigit >= 2 && lastDigit <= 4) {
+    return 'игрока'
+  }
+
+  return 'игроков'
+}
+
+function resolvePlayersLabel(product: CatalogProduct) {
+  const minPlayers = typeof product.playersMin === 'number' ? product.playersMin : null
+  const maxPlayers = typeof product.playersMax === 'number' ? product.playersMax : null
+
+  if (minPlayers !== null && maxPlayers !== null) {
+    if (minPlayers === maxPlayers) {
+      return `${minPlayers} ${getPlayerWord(minPlayers)}${product.playersOnline ? ' + онлайн' : ''}`
+    }
+
+    return `${minPlayers}-${maxPlayers} игроков${product.playersOnline ? ' + онлайн' : ''}`
+  }
+
+  if (minPlayers !== null) {
+    return `${minPlayers} ${getPlayerWord(minPlayers)}${product.playersOnline ? ' + онлайн' : ''}`
+  }
+
+  const infoPlayers = product.info.find((item) => /игрок/i.test(item))
+  if (!infoPlayers) {
+    return null
+  }
+
+  return infoPlayers.replace(/^\s*Игроки\s*:\s*/i, '').trim() || infoPlayers.trim()
+}
+
+function buildInfoItems(product: CatalogProduct) {
+  const infoItems = product.info.filter((item) => Boolean(item) && !/игрок/i.test(item))
+  const hasGenreInfo = infoItems.some((item) => /жанр/i.test(item))
+
+  return [
+    !hasGenreInfo && product.category ? `Жанр: ${product.category}` : null,
+    ...infoItems,
+  ].filter((item): item is string => Boolean(item))
 }
 
 function getCheckoutPriceDisplay(price: ProductRegionPrice, usePsPlus = false) {
@@ -531,7 +583,6 @@ export function ProductPage() {
 
   const [product, setProduct] = useState<CatalogProduct | null>(null)
   const [loading, setLoading] = useState(true)
-  const [source, setSource] = useState<SourceMode>('api')
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false)
   const [checkoutRegion, setCheckoutRegion] = useState('TR')
   const [usePsPlusCheckout, setUsePsPlusCheckout] = useState(false)
@@ -557,7 +608,6 @@ export function ProductPage() {
         const response = await fetchProduct(productId, requestedRegion)
         if (!ignore) {
           setProduct(response)
-          setSource('api')
         }
       } catch {
         if (!ignore) {
@@ -567,7 +617,6 @@ export function ProductPage() {
             mockProducts[0]
 
           setProduct(fallback)
-          setSource('mock')
         }
       } finally {
         if (!ignore) {
@@ -586,7 +635,9 @@ export function ProductPage() {
   const highlights = useMemo(() => (product ? buildHighlights(product) : []), [product])
   const regionalPrices = useMemo(() => (product ? getVisibleRegionalPrices(product).slice(0, 3) : []), [product])
   const favoriteActive = product ? isFavorite(product.id) : false
-  const productTitle = product ? getProductTitle(product) : 'РўРѕРІР°СЂЂ1'
+  const productTitle = product ? getProductTitle(product) : 'Товар'
+  const playersLabel = useMemo(() => (product ? resolvePlayersLabel(product) : null), [product])
+  const infoItems = useMemo(() => (product ? buildInfoItems(product) : []), [product])
   const availableCheckoutRegions = useMemo(() => regionalPrices.map((price) => price.region), [regionalPrices])
   const selectedRegionPrice = useMemo(
     () => regionalPrices.find((item) => item.region === checkoutRegion) ?? regionalPrices[0] ?? null,
@@ -773,7 +824,7 @@ export function ProductPage() {
 
       {loading ? (
         <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="aspect-[16/10] animate-pulse rounded-[32px] bg-white/10" />
+          <div className="aspect-square animate-pulse rounded-[32px] bg-white/10" />
           <div className="space-y-4">
             <div className="h-10 animate-pulse rounded-2xl bg-white/10" />
             <div className="h-48 animate-pulse rounded-[28px] bg-white/10" />
@@ -786,9 +837,9 @@ export function ProductPage() {
             <div className="panel overflow-hidden">
               <div className="relative">
                 {coverUrl ? (
-                  <img src={coverUrl} alt={productTitle} className="aspect-[16/10] w-full object-cover" />
+                  <img src={coverUrl} alt={productTitle} className="aspect-square w-full object-cover" />
                 ) : (
-                  <div className="mesh-bg flex aspect-[16/10] items-center justify-center">
+                  <div className="mesh-bg flex aspect-square items-center justify-center">
                     <div className="text-center">
                       <Gamepad2 className="mx-auto h-14 w-14 text-brand-200/70" />
                       <p className="mt-4 text-lg font-semibold text-white">{productTitle}</p>
@@ -829,14 +880,15 @@ export function ProductPage() {
 
             <div className="space-y-6">
               <div className="space-y-4">
-                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">
-                  {product.category || 'Каталог'} • {source === 'api' ? 'live API' : 'demo preview'}
-                </p>
+                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Карточка товара</p>
                 <h1 className="text-4xl text-white md:text-5xl">{productTitle}</h1>
 
                 <div className="flex flex-wrap gap-2">
                   {product.platforms ? (
                     <span className="pill border-white/10 bg-white/5 text-slate-200">{product.platforms}</span>
+                  ) : null}
+                  {playersLabel ? (
+                    <span className="pill border-white/10 bg-white/5 text-slate-200">Игроки: {playersLabel}</span>
                   ) : null}
                   <LocalizationBadge localizationName={product.localizationName} />
                   {product.hasEaAccess ? (
@@ -846,17 +898,12 @@ export function ProductPage() {
               </div>
 
               <div className="panel-soft rounded-[28px] p-6">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                  </div>
-
-                  <button type="button" className="btn-primary shrink-0" onClick={openCheckout}>
-                    <CreditCard size={16} />
-                    {isAuthenticated ? 'Купить' : 'Войти и купить'}
-                  </button>
-                </div>
-
-                <RegionalPriceList prices={regionalPrices} variant="detail" className="mt-6" />
+                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Цены</p>
+                <RegionalPriceList prices={regionalPrices} variant="detail" className="mt-4" />
+                <button type="button" className="btn-primary mt-6 w-full sm:w-auto" onClick={openCheckout}>
+                  <CreditCard size={16} />
+                  {isAuthenticated ? 'Купить' : 'Войти и купить'}
+                </button>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-3">
@@ -883,14 +930,16 @@ export function ProductPage() {
 
             <div className="space-y-6">
               <div className="panel-soft rounded-[28px] p-6">
-                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Теги</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {(product.tags.length ? product.tags : ['PlayStation', 'Store', 'Каталог']).map((tag) => (
-                    <span key={tag} className="pill bg-white/5 text-slate-200">
-                      {tag}
-                    </span>
+                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Инфо</p>
+                <ul className="mt-4 space-y-3 text-sm text-slate-300">
+                  {(infoItems.length
+                    ? infoItems
+                    : ['Подробная информация из Telegram появится здесь, как только товар вернёт расширенные данные.']).map((item) => (
+                    <li key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                      {item}
+                    </li>
                   ))}
-                </div>
+                </ul>
               </div>
 
               <div className="panel-soft rounded-[28px] p-6">

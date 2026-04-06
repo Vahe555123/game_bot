@@ -1,4 +1,5 @@
 import type { SiteUser } from './auth'
+import type { HelpContent, HelpContentPayload } from './help'
 import type { PurchaseDelivery, PurchaseDeliveryItem } from './purchase'
 
 export type AdminUser = SiteUser & {
@@ -34,6 +35,7 @@ export type AdminProduct = {
   id: string
   region: 'UA' | 'TR' | 'IN'
   display_name: string
+  favorites_count: number
   name?: string | null
   main_name?: string | null
   category?: string | null
@@ -82,6 +84,8 @@ export type AdminProductListResponse = {
   page: number
   limit: number
 }
+
+export type AdminProductSortMode = 'popular' | 'alphabet'
 
 export type AdminProductPayload = {
   id?: string
@@ -203,3 +207,6 @@ export type AdminDashboard = {
   recent_users: AdminUser[]
   recent_orders: AdminPurchase[]
 }
+
+export type AdminHelpContent = HelpContent
+export type AdminHelpContentPayload = HelpContentPayload

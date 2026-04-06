@@ -71,6 +71,10 @@ def get_auth_sessions_collection() -> Collection:
     return get_mongo_database()[settings.MONGODB_AUTH_SESSIONS_COLLECTION]
 
 
+def get_site_content_collection() -> Collection:
+    return get_mongo_database()[settings.MONGODB_SITE_CONTENT_COLLECTION]
+
+
 def init_mongo_indexes() -> bool:
     try:
         db = get_mongo_database()

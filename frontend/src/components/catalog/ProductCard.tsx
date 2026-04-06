@@ -3,7 +3,7 @@ import type { MouseEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useFavorites } from '../../context/FavoritesContext'
 import type { CatalogProduct } from '../../types/catalog'
-import { normalizeImageUrl, resolveRegionPresentation } from '../../utils/format'
+import { normalizeImageUrl } from '../../utils/format'
 import { getProductTitle, getVisibleRegionalPrices } from '../../utils/productPresentation'
 import { FavoriteButton } from './FavoriteButton'
 import { LocalizationBadge } from './LocalizationBadge'
@@ -17,7 +17,6 @@ export function ProductCard({ product }: ProductCardProps) {
   const { isFavorite, toggleFavorite } = useFavorites()
 
   const imageUrl = normalizeImageUrl(product.image)
-  const region = resolveRegionPresentation(product.routeRegion || product.region, product.regionInfo?.name)
   const productUrl = `/catalog/${product.id}${product.routeRegion ? `?region=${encodeURIComponent(product.routeRegion)}` : ''}`
   const regionalPrices = getVisibleRegionalPrices(product).slice(0, 3)
   const favoriteActive = isFavorite(product.id)
@@ -34,18 +33,14 @@ export function ProductCard({ product }: ProductCardProps) {
 
   return (
     <article className="group relative h-full overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/80 shadow-card transition duration-300 hover:-translate-y-1 hover:border-brand-300/40 hover:shadow-glow">
-      <Link
-        to={productUrl}
-        aria-label={`Открыть ${productTitle}`}
-        className="absolute inset-0 z-10 rounded-[24px]"
-      />
+      <Link to={productUrl} aria-label={`Открыть ${productTitle}`} className="absolute inset-0 z-10 rounded-[24px]" />
 
-      <div className="relative aspect-[16/10] overflow-hidden bg-gradient-to-br from-brand-500/25 via-slate-950 to-slate-900">
+      <div className="relative aspect-square overflow-hidden bg-gradient-to-br from-brand-500/20 via-slate-950 to-slate-900">
         {imageUrl ? (
           <img
             src={imageUrl}
             alt={productTitle}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+            className="h-full w-full object-contain p-3 transition duration-500 group-hover:scale-[1.02]"
             loading="lazy"
           />
         ) : (
@@ -60,35 +55,35 @@ export function ProductCard({ product }: ProductCardProps) {
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent" />
 
         <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-          <span className="pill bg-slate-950/70 text-brand-50">{region.label}</span>
           {product.hasDiscount ? (
-            <span className="pill border-rose-400/20 bg-rose-500/20 text-rose-100">
+            <span className="pill border-rose-400/40 bg-rose-500 text-white shadow-lg shadow-rose-950/30">
               <BadgePercent size={12} />
               {product.discountPercent ? `-${product.discountPercent}%` : 'Скидка'}
             </span>
           ) : null}
           {product.hasPsPlus ? (
-            <span className="pill border-amber-300/20 bg-amber-400/20 text-amber-50">PS Plus</span>
+            <span className="pill border-amber-300/50 bg-amber-400 text-slate-950 shadow-lg shadow-amber-950/20">
+              PS Plus
+            </span>
+          ) : null}
+          {product.hasEaAccess ? (
+            <span className="pill border-[#3b82f6] bg-[#2563eb] text-white shadow-lg shadow-blue-950/30">EA PLAY</span>
           ) : null}
         </div>
 
-        <FavoriteButton
-          active={favoriteActive}
-          onClick={handleFavoriteClick}
-          className="absolute right-4 top-4 z-20"
-        />
+        <FavoriteButton active={favoriteActive} onClick={handleFavoriteClick} className="absolute right-4 top-4 z-20" />
+
+        <div className="absolute inset-x-3 bottom-3 flex flex-wrap gap-2">
+          {product.platforms ? (
+            <span className="pill border-white/10 bg-slate-950/85 text-slate-100 shadow-lg">{product.platforms}</span>
+          ) : null}
+          <LocalizationBadge localizationName={product.localizationName} className="shadow-lg backdrop-blur-sm" />
+        </div>
       </div>
 
       <div className="relative z-0 space-y-4 p-4">
-        <div className="space-y-3">
+        <div className="space-y-2">
           <h3 className="line-clamp-2 min-h-[3.5rem] text-xl text-white">{productTitle}</h3>
-
-          <div className="flex flex-wrap gap-2">
-            {product.platforms ? (
-              <span className="pill border-white/10 bg-white/5 text-slate-200">{product.platforms}</span>
-            ) : null}
-            <LocalizationBadge localizationName={product.localizationName} />
-          </div>
         </div>
 
         <RegionalPriceList prices={regionalPrices} variant="card" />

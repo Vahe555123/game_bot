@@ -125,6 +125,7 @@ class Product(ProductBase):
     region_info: Optional[Dict[str, str]] = Field(None, description="Информация о регионе")
     current_price: Optional[float] = Field(None, description="Лучшая текущая цена")
     price_with_currency: Optional[str] = Field(None, description="Цена с валютой")
+    favorites_count: int = Field(0, description="Количество добавлений в избранное")
 
     class Config:
         from_attributes = True
@@ -234,6 +235,7 @@ class ProductFilter(BaseModel):
     search: Optional[str] = None
     platform: Optional[str] = Field(None, description="Платформа (PS4, PS5, или обе)")
     players: Optional[str] = Field(None, description="Количество игроков (singleplayer, multiplayer, coop)")
+    sort: Optional[str] = Field(None, description="Сортировка (popular, alphabet, price_asc, price_desc)")
 
 class PaginationParams(BaseModel):
     page: int = Field(1, ge=1, description="Номер страницы")

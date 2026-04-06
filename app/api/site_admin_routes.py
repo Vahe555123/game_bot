@@ -11,6 +11,8 @@ from app.database.connection import get_db
 from app.site_admin.schemas import (
     AdminActionResponse,
     AdminDashboardResponse,
+    AdminHelpContentResponse,
+    AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
     AdminProductListResponse,
     AdminProductRecord,
@@ -22,6 +24,7 @@ from app.site_admin.schemas import (
     AdminUserCreateRequest,
     AdminUserListResponse,
     AdminUserRecord,
+    AdminUserUpdateRequest,
 )
 from app.site_admin.service import get_site_admin_service
 from app.site_orders.email_service import send_purchase_fulfilled_email
@@ -35,7 +38,7 @@ def _raise_http_auth_error(error: AuthServiceError) -> None:
     raise HTTPException(status_code=error.status_code, detail=detail)
 
 
-@router.get("/dashboard", response_model=AdminDashboardResponse, summary="Дашборд админки сайта")
+@router.get("/dashboard", response_model=AdminDashboardResponse, summary="Site admin dashboard")
 def get_site_admin_dashboard(
     db: Session = Depends(get_db),
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
@@ -47,7 +50,30 @@ def get_site_admin_dashboard(
         _raise_http_auth_error(error)
 
 
-@router.get("/users", response_model=AdminUserListResponse, summary="Список пользователей сайта")
+@router.get("/content/help", response_model=AdminHelpContentResponse, summary="Help page content")
+def get_site_admin_help_content(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.get_help_content()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.put("/content/help", response_model=AdminHelpContentResponse, summary="Update help page content")
+def update_site_admin_help_content(
+    payload: AdminHelpContentUpdateRequest,
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.update_help_content(payload)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.get("/users", response_model=AdminUserListResponse, summary="List site users")
 def list_site_admin_users(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -71,7 +97,7 @@ def list_site_admin_users(
         _raise_http_auth_error(error)
 
 
-@router.post("/users", response_model=AdminUserRecord, summary="Создать пользователя сайта")
+@router.post("/users", response_model=AdminUserRecord, summary="Create site user")
 def create_site_admin_user(
     payload: AdminUserCreateRequest,
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
@@ -83,7 +109,7 @@ def create_site_admin_user(
         _raise_http_auth_error(error)
 
 
-@router.put("/users/{user_id}", response_model=AdminUserRecord, summary="Обновить пользователя сайта")
+@router.put("/users/{user_id}", response_model=AdminUserRecord, summary="Update site user")
 def update_site_admin_user(
     user_id: str,
     payload: AdminUserUpdateRequest,
@@ -96,7 +122,7 @@ def update_site_admin_user(
         _raise_http_auth_error(error)
 
 
-@router.delete("/users/{user_id}", response_model=AdminActionResponse, summary="Удалить пользователя сайта")
+@router.delete("/users/{user_id}", response_model=AdminActionResponse, summary="Delete site user")
 def delete_site_admin_user(
     user_id: str,
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
@@ -109,13 +135,14 @@ def delete_site_admin_user(
     return AdminActionResponse(message="Пользователь удалён.")
 
 
-@router.get("/products", response_model=AdminProductListResponse, summary="Список товаров для админки")
+@router.get("/products", response_model=AdminProductListResponse, summary="List products")
 def list_site_admin_products(
     page: int = Query(1, ge=1),
     limit: int = Query(24, ge=1, le=100),
     search: str | None = Query(None),
     region: str | None = Query(None),
     category: str | None = Query(None),
+    sort: str | None = Query("popular"),
     db: Session = Depends(get_db),
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
 ):
@@ -128,12 +155,13 @@ def list_site_admin_products(
             search=search,
             region=region,
             category=category,
+            sort=sort,
         )
     except AuthServiceError as error:
         _raise_http_auth_error(error)
 
 
-@router.get("/products/{product_id}", response_model=AdminProductRecord, summary="Карточка товара для админки")
+@router.get("/products/{product_id}", response_model=AdminProductRecord, summary="Product details")
 def get_site_admin_product(
     product_id: str,
     region: str = Query(...),
@@ -147,7 +175,7 @@ def get_site_admin_product(
         _raise_http_auth_error(error)
 
 
-@router.post("/products", response_model=AdminProductRecord, summary="Создать товар")
+@router.post("/products", response_model=AdminProductRecord, summary="Create product")
 def create_site_admin_product(
     payload: AdminProductCreateRequest,
     db: Session = Depends(get_db),
@@ -160,7 +188,7 @@ def create_site_admin_product(
         _raise_http_auth_error(error)
 
 
-@router.put("/products/{product_id}", response_model=AdminProductRecord, summary="Обновить товар")
+@router.put("/products/{product_id}", response_model=AdminProductRecord, summary="Update product")
 def update_site_admin_product(
     product_id: str,
     region: str = Query(...),
@@ -175,7 +203,7 @@ def update_site_admin_product(
         _raise_http_auth_error(error)
 
 
-@router.delete("/products/{product_id}", response_model=AdminActionResponse, summary="Удалить товар")
+@router.delete("/products/{product_id}", response_model=AdminActionResponse, summary="Delete product")
 def delete_site_admin_product(
     product_id: str,
     region: str = Query(...),
@@ -190,7 +218,7 @@ def delete_site_admin_product(
     return AdminActionResponse(message="Товар удалён.")
 
 
-@router.get("/purchases", response_model=AdminPurchaseListResponse, summary="Все покупки сайта")
+@router.get("/purchases", response_model=AdminPurchaseListResponse, summary="List site purchases")
 def list_site_admin_purchases(
     page: int = Query(1, ge=1),
     limit: int = Query(30, ge=1, le=100),
@@ -206,7 +234,7 @@ def list_site_admin_purchases(
         _raise_http_auth_error(error)
 
 
-@router.get("/purchases/{order_number}", response_model=AdminPurchaseRecord, summary="Детали покупки")
+@router.get("/purchases/{order_number}", response_model=AdminPurchaseRecord, summary="Purchase details")
 def get_site_admin_purchase(
     order_number: str,
     db: Session = Depends(get_db),
@@ -219,7 +247,7 @@ def get_site_admin_purchase(
         _raise_http_auth_error(error)
 
 
-@router.patch("/purchases/{order_number}", response_model=AdminPurchaseRecord, summary="Обновить статус покупки")
+@router.patch("/purchases/{order_number}", response_model=AdminPurchaseRecord, summary="Update purchase")
 def update_site_admin_purchase(
     order_number: str,
     payload: AdminPurchaseUpdateRequest,
@@ -233,7 +261,7 @@ def update_site_admin_purchase(
         _raise_http_auth_error(error)
 
 
-@router.post("/purchases/{order_number}/fulfill", response_model=AdminPurchaseRecord, summary="Выдать заказ")
+@router.post("/purchases/{order_number}/fulfill", response_model=AdminPurchaseRecord, summary="Fulfill purchase")
 def fulfill_site_admin_purchase(
     order_number: str,
     payload: AdminPurchaseFulfillRequest,
@@ -257,7 +285,7 @@ def fulfill_site_admin_purchase(
     return order
 
 
-@router.delete("/purchases/{order_number}", response_model=AdminActionResponse, summary="Удалить заказ")
+@router.delete("/purchases/{order_number}", response_model=AdminActionResponse, summary="Delete purchase")
 def delete_site_admin_purchase(
     order_number: str,
     db: Session = Depends(get_db),

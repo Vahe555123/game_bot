@@ -1,7 +1,7 @@
 export function ProductSkeleton() {
   return (
     <div className="overflow-hidden rounded-[28px] border border-white/10 bg-slate-950/65">
-      <div className="aspect-[16/10] animate-pulse bg-gradient-to-br from-white/10 to-transparent" />
+      <div className="aspect-square animate-pulse bg-gradient-to-br from-white/10 to-transparent" />
       <div className="space-y-4 p-5">
         <div className="space-y-2">
           <div className="h-3 w-1/3 animate-pulse rounded-full bg-white/10" />

@@ -72,9 +72,7 @@ function RegionalPriceRow({
               <span className="text-xs font-medium text-slate-400">{currentPrice.secondary}</span>
             ) : null}
 
-            {oldPrice ? (
-              <span className="text-xs text-slate-500 line-through">{oldPrice.primary}</span>
-            ) : null}
+            {oldPrice ? <span className="text-xs text-slate-500 line-through">{oldPrice.primary}</span> : null}
 
             {oldPrice?.secondary ? (
               <span className="text-xs text-slate-600 line-through">{oldPrice.secondary}</span>
@@ -83,7 +81,7 @@ function RegionalPriceRow({
             {psPlusPrice ? (
               <span className="text-xs font-medium text-amber-200">
                 PS Plus {psPlusPrice.primary}
-                {psPlusPrice.secondary ? <span className="ml-1 text-amber-100/80">• {psPlusPrice.secondary}</span> : null}
+                {psPlusPrice.secondary ? <span className="ml-1 text-amber-100/80">/ {psPlusPrice.secondary}</span> : null}
               </span>
             ) : null}
           </div>
@@ -100,7 +98,12 @@ export function RegionalPriceList({
 }: RegionalPriceListProps) {
   if (!prices.length) {
     return (
-      <div className={clsx('rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400', className)}>
+      <div
+        className={clsx(
+          'rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-5 text-sm text-slate-400',
+          className,
+        )}
+      >
         Цены обновляются. Попробуй открыть товар чуть позже.
       </div>
     )

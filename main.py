@@ -10,6 +10,7 @@ from app.api.admin_routes import router as admin_router
 from app.api.routes import router as api_router
 from app.api.site_admin_routes import router as site_admin_router
 from app.api.site_auth_routes import router as site_auth_router
+from app.api.site_content_routes import router as site_content_router
 from app.api.site_purchase_routes import router as site_purchase_router
 from app.auth.mongo import init_mongo_indexes
 from app.bot.main import setup_bot, shutdown_bot
@@ -86,6 +87,7 @@ app.include_router(api_router, prefix="/api")
 app.include_router(admin_router, prefix="/api")
 app.include_router(site_auth_router, prefix="/api")
 app.include_router(site_admin_router, prefix="/api")
+app.include_router(site_content_router, prefix="/api")
 app.include_router(site_purchase_router, prefix="/api")
 app.include_router(webapp_router, prefix="", tags=["WebApp"])
 

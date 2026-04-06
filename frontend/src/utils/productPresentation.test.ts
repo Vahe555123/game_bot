@@ -62,8 +62,18 @@ describe('getProductTitle', () => {
 })
 
 describe('getLocalizationPresentation', () => {
-  it('marks Russian localization as supported', () => {
-    expect(getLocalizationPresentation('Русская озвучка').status).toBe('supported')
+  it('marks full Russian localization correctly', () => {
+    const localization = getLocalizationPresentation('Полностью на русском')
+
+    expect(localization.status).toBe('full')
+    expect(localization.shortLabel).toBe('Полностью на русском')
+  })
+
+  it('marks partial Russian localization correctly', () => {
+    const localization = getLocalizationPresentation('Русский интерфейс')
+
+    expect(localization.status).toBe('partial')
+    expect(localization.shortLabel).toBe('Русские субтитры')
   })
 
   it('marks missing Russian localization as unsupported', () => {
@@ -146,6 +156,7 @@ function buildProduct(overrides: Partial<CatalogProduct>): CatalogProduct {
     hasPsPlusExtraDeluxe: false,
     psPlusCollection: null,
     regionInfo: null,
+    favoritesCount: 0,
     priceRub: null,
     oldPriceRub: null,
     displayPrice: 'Цена по запросу',

@@ -131,6 +131,7 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     hasPsPlusExtraDeluxe: Boolean(raw.has_ps_plus_extra_deluxe),
     psPlusCollection: raw.ps_plus_collection ?? null,
     regionInfo,
+    favoritesCount: raw.favorites_count ?? 0,
     priceRub: price.priceRub,
     oldPriceRub: price.oldPriceRub,
     displayPrice: price.displayPrice,
@@ -139,6 +140,9 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     tags: ensureStringArray(raw.tags),
     compound: ensureStringArray(raw.compound),
     info: ensureStringArray(raw.info),
+    playersMin: raw.players_min ?? null,
+    playersMax: raw.players_max ?? null,
+    playersOnline: Boolean(raw.players_online),
   }
 }
 

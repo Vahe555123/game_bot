@@ -39,17 +39,15 @@ export function getDualCurrencyPriceDisplay(
     normalizedCurrency !== null &&
     normalizedCurrency !== 'RUB'
 
-  if (hasDedicatedLocalPrice) {
+  if (rubValue !== null && rubValue !== undefined) {
     return {
-      primary: formatCurrency(localValue, normalizedCurrency),
-      secondary: rubValue !== null && rubValue !== undefined ? formatCurrency(rubValue, 'RUB') : null,
+      primary: formatCurrency(rubValue, 'RUB'),
+      secondary: hasDedicatedLocalPrice ? formatCurrency(localValue, normalizedCurrency) : null,
     }
   }
 
-  const primaryValue = rubValue ?? localValue
-
   return {
-    primary: formatCurrency(primaryValue, rubValue !== null && rubValue !== undefined ? 'RUB' : normalizedCurrency || 'RUB'),
+    primary: formatCurrency(localValue, normalizedCurrency || 'RUB'),
     secondary: null,
   }
 }

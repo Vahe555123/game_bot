@@ -2,24 +2,30 @@ import type { CatalogFilterState, CatalogProduct } from '../types/catalog'
 
 export const REGION_OPTIONS = [
   { value: '', label: 'Все регионы' },
-  { value: 'en-ua', label: '🇺🇦 Украина' },
-  { value: 'en-tr', label: '🇹🇷 Турция' },
-  { value: 'en-in', label: '🇮🇳 Индия' },
+  { value: 'en-ua', label: 'Украина' },
+  { value: 'en-tr', label: 'Турция' },
+  { value: 'en-in', label: 'Индия' },
 ] as const
 
 export const PLATFORM_OPTIONS = [
   { value: '', label: 'Все платформы' },
-  { value: 'PS4_ALL', label: '🎮 PS4' },
-  { value: 'PS5_ALL', label: '🎮 PS5' },
-  { value: 'PS4_ONLY', label: '🎮 Только PS4' },
-  { value: 'PS5_ONLY', label: '🎮 Только PS5' },
-  { value: 'BOTH', label: '🎮 PS4 + PS5' },
+  { value: 'PS4_ALL', label: 'PS4' },
+  { value: 'PS5_ALL', label: 'PS5' },
+  { value: 'PS4_ONLY', label: 'Только PS4' },
+  { value: 'PS5_ONLY', label: 'Только PS5' },
+  { value: 'BOTH', label: 'PS4 + PS5' },
 ] as const
 
 export const PLAYER_OPTIONS = [
   { value: '', label: 'Количество игроков' },
-  { value: 'singleplayer', label: '👤 Одиночная игра' },
-  { value: 'coop', label: '🤝 Кооператив' },
+  { value: 'singleplayer', label: 'Одиночная игра' },
+  { value: 'coop', label: 'Кооператив' },
+] as const
+
+export const SORT_OPTIONS = [
+  { value: 'popular', label: 'Популярность' },
+  { value: 'alphabet', label: 'По алфавиту' },
+  { value: 'price_asc', label: 'По цене' },
 ] as const
 
 const REGION_NORMALIZATION_MAP: Record<string, string> = {
@@ -88,21 +94,15 @@ export function matchesPlayersFilter(product: CatalogProduct, playersFilter: str
     return true
   }
 
-  const infoText = product.info.join(' ').toLowerCase()
+  const minPlayers = product.playersMin ?? null
+  const maxPlayers = product.playersMax ?? null
 
   if (playersFilter === 'singleplayer') {
-    const hasSinglePlayer = infoText.includes('1 игрок')
-    const hasCoopPattern = infoText.includes('игроки:')
-    return hasSinglePlayer && !hasCoopPattern
+    return minPlayers === 1 && (maxPlayers === null || maxPlayers === 1)
   }
 
   if (playersFilter === 'coop') {
-    return (
-      infoText.includes('игроки: 1 - 2') ||
-      infoText.includes('игроки: 2 - 4') ||
-      infoText.includes('игроки: 1 - 4') ||
-      infoText.includes('игроки: 2 - 8')
-    )
+    return typeof maxPlayers === 'number' ? maxPlayers > 1 : Boolean(product.playersOnline)
   }
 
   return true

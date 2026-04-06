@@ -50,10 +50,14 @@ export type RawCatalogProduct = {
   rub_price?: number | null
   rub_price_old?: number | null
   min_price_rub?: number | null
+  favorites_count?: number | null
   regional_prices?: RawRegionalPrice[] | null
   tags?: string[] | null
   compound?: string[] | null
   info?: string[] | null
+  players_min?: number | null
+  players_max?: number | null
+  players_online?: boolean | null
   localization?: string | null
   localization_name?: string | null
   ps_plus_collection?: string | null
@@ -102,6 +106,7 @@ export type CatalogProduct = {
   hasPsPlusExtraDeluxe: boolean
   psPlusCollection: string | null
   regionInfo: RegionInfo | null
+  favoritesCount: number
   priceRub: number | null
   oldPriceRub: number | null
   displayPrice: string
@@ -110,6 +115,9 @@ export type CatalogProduct = {
   tags: string[]
   compound: string[]
   info: string[]
+  playersMin?: number | null
+  playersMax?: number | null
+  playersOnline?: boolean
 }
 
 export type RawCatalogListResponse = {
@@ -131,6 +139,7 @@ export type CatalogListResponse = {
 export type CatalogQuery = {
   page?: number
   limit?: number
+  sort?: string
   search?: string
   category?: string
   region?: string
@@ -146,6 +155,7 @@ export type CatalogQuery = {
 export type CatalogFilterState = {
   page: number
   limit: number
+  sort: string
   search: string
   category: string
   region: string

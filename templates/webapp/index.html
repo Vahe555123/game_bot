@@ -416,6 +416,11 @@
     <!-- Filters Dropdown -->
     <div class="filters-dropdown" id="filtersDropdown">
         <div class="filter-row">
+            <select class="filter-select" id="sortFilter">
+                <option value="popular">Популярность</option>
+                <option value="alphabet">По алфавиту</option>
+                <option value="price_asc">По цене</option>
+            </select>
             <select class="filter-select" id="categoryFilter">
                 <option value="">Все категории</option>
             </select>
@@ -515,6 +520,7 @@
             </button>
             <div class="discount-badge" style="display: none;"></div>
             <img class="ps-plus-badge" src="/static/images/psplussub.png" alt="PS Plus" style="display: none;">
+            <div class="ea-play-badge" style="display: none;">EA PLAY</div>
         </div>
         <div class="product-info">
             <h3 class="product-title"></h3>
@@ -830,13 +836,14 @@ class ModernProductCatalog {
     setupEventListeners() {
         // Search
         const searchInput = document.getElementById('searchInput');
+        const sortFilter = document.getElementById('sortFilter');
 
         searchInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.search();
         });
 
         // Debounced search on input
-        searchInput.addEventListener('input', this.debounce(() => this.search(), 500));
+        searchInput.addEventListener('input', this.debounce(() => this.search(), 1000));
 
         // Filter toggle
         const filterToggleBtn = document.getElementById('filterToggleBtn');
@@ -877,6 +884,9 @@ class ModernProductCatalog {
         });
         document.getElementById('platformFilter').addEventListener('change', () => this.updateFilterState());
         document.getElementById('playersFilter').addEventListener('change', () => this.updateFilterState());
+        if (sortFilter) {
+            sortFilter.addEventListener('change', () => this.search());
+        }
         document.getElementById('minPrice').addEventListener('input', () => this.updateFilterState());
         document.getElementById('maxPrice').addEventListener('input', () => this.updateFilterState());
         document.getElementById('discountOnly').addEventListener('change', () => this.updateFilterState());
@@ -1067,6 +1077,9 @@ class ModernProductCatalog {
             const players = document.getElementById('playersFilter').value;
             if (players) params.append('players', players);
 
+            const sort = document.getElementById('sortFilter').value;
+            if (sort && sort !== 'popular') params.append('sort', sort);
+
             const minPrice = document.getElementById('minPrice').value;
             if (minPrice) params.append('min_price', minPrice);
 
@@ -1115,17 +1128,10 @@ class ModernProductCatalog {
         const container = document.getElementById('productsContainer');
         const template = document.getElementById('productTemplate');
 
-        // Сортируем товары по английскому алфавиту (без учета регистра)
-        const sortedProducts = [...products].sort((a, b) => {
-            const nameA = (a.name || '').toLowerCase();
-            const nameB = (b.name || '').toLowerCase();
-            return nameA.localeCompare(nameB, 'en', { sensitivity: 'base' });
-        });
-
         // ОПТИМИЗАЦИЯ: Используем DocumentFragment для быстрой вставки
         const fragment = document.createDocumentFragment();
 
-        sortedProducts.forEach(product => {
+        products.forEach(product => {
             const productCard = this.createProductCard(product, template);
             fragment.appendChild(productCard);
         });
@@ -1198,6 +1204,21 @@ class ModernProductCatalog {
             psPlusBadge.style.display = 'block';
         }
 
+        const eaPlayBadge = card.querySelector('.ea-play-badge');
+        if (product.has_ea_access || product.ea_access) {
+            eaPlayBadge.style.display = 'block';
+            eaPlayBadge.style.position = 'absolute';
+            eaPlayBadge.style.left = '12px';
+            eaPlayBadge.style.bottom = '12px';
+            eaPlayBadge.style.padding = '4px 8px';
+            eaPlayBadge.style.borderRadius = '6px';
+            eaPlayBadge.style.background = '#2563eb';
+            eaPlayBadge.style.color = '#fff';
+            eaPlayBadge.style.fontSize = '11px';
+            eaPlayBadge.style.fontWeight = '700';
+            eaPlayBadge.style.letterSpacing = '0.02em';
+        }
+
         // Отладка - выводим первые 3 товара с ps_plus_collection
         if (isInPsPlusCollection) {
             window.psPlusDebugCount = (window.psPlusDebugCount || 0) + 1;
@@ -1260,7 +1281,7 @@ class ModernProductCatalog {
         // Определяем локализацию из поля localization_name (как в product_detail.html)
         let languageText = '';
         if (product.localization_name) {
-            languageText = product.localization_name;
+            languageText = this.normalizeLocalizationLabel(product.localization_name);
         }
 
         // Показываем локализацию, если есть
@@ -1373,6 +1394,28 @@ class ModernProductCatalog {
             priceRow.appendChild(pricesDiv);
             container.appendChild(priceRow);
         }
+    }
+
+    normalizeLocalizationLabel(localizationName) {
+        const source = (localizationName || '').trim();
+        if (!source) {
+            return '';
+        }
+
+        const normalized = source.toLowerCase();
+        if (normalized.includes('полностью на русском')) {
+            return 'Полностью на русском';
+        }
+
+        if (normalized.includes('русские субтитры') || normalized.includes('русский интерфейс')) {
+            return 'Русские субтитры';
+        }
+
+        if (normalized.includes('нет русского') || normalized.includes('без русского') || normalized.includes('английский')) {
+            return 'Без русского';
+        }
+
+        return source;
     }
 
     async toggleFavorite(productId, favoriteBtn) {
@@ -1625,13 +1668,14 @@ class ModernProductCatalog {
         const region = document.getElementById('regionSelect').value;
         const platform = document.getElementById('platformFilter').value;
         const players = document.getElementById('playersFilter').value;
+        const sort = document.getElementById('sortFilter').value;
         const minPrice = document.getElementById('minPrice').value;
         const maxPrice = document.getElementById('maxPrice').value;
         const discountOnly = document.getElementById('discountOnly').checked;
         const psPlusOnly = document.getElementById('psPlusOnly').checked;
         const eaAccessOnly = document.getElementById('eaAccessOnly').checked;
 
-        return !!(category || region || platform || players || minPrice || maxPrice || discountOnly || psPlusOnly || eaAccessOnly);
+        return !!(category || region || platform || players || minPrice || maxPrice || discountOnly || psPlusOnly || eaAccessOnly || (sort && sort !== 'popular'));
     }
 
     restoreSelectedRegion() {
@@ -1662,6 +1706,7 @@ class ModernProductCatalog {
     saveSearchState() {
         const searchState = {
             searchText: document.getElementById('searchInput').value,
+            sort: document.getElementById('sortFilter').value,
             category: document.getElementById('categoryFilter').value,
             region: document.getElementById('regionSelect').value,
             platform: document.getElementById('platformFilter').value,
@@ -1699,6 +1744,7 @@ class ModernProductCatalog {
 
             // Восстанавливаем значения полей
             document.getElementById('searchInput').value = state.searchText || '';
+            document.getElementById('sortFilter').value = state.sort || 'popular';
             document.getElementById('categoryFilter').value = state.category || '';
             document.getElementById('regionSelect').value = state.region || '';
             document.getElementById('platformFilter').value = this.normalizePlatformFilterValue(state.platform);
@@ -1804,6 +1850,7 @@ class ModernProductCatalog {
     }
 
     clearFilters() {
+        document.getElementById('sortFilter').value = 'popular';
         document.getElementById('categoryFilter').value = '';
         document.getElementById('regionSelect').value = '';
         document.getElementById('platformFilter').value = '';

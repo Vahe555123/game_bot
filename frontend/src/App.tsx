@@ -6,6 +6,7 @@ import { FavoritesProvider } from './context/FavoritesContext'
 import { AdminPage } from './pages/AdminPage'
 import { CatalogPage } from './pages/CatalogPage'
 import { FavoritesPage } from './pages/FavoritesPage'
+import { HelpPage } from './pages/HelpPage'
 import { LoginPage } from './pages/LoginPage'
 import { ProductPage } from './pages/ProductPage'
 import { ProfilePage } from './pages/ProfilePage'
@@ -23,6 +24,7 @@ function App() {
               <Route path="/catalog" element={<CatalogPage />} />
               <Route path="/catalog/:productId" element={<ProductPage />} />
               <Route path="/favorites" element={<FavoritesPage />} />
+              <Route path="/help" element={<HelpPage />} />
 
               <Route element={<GuestOnly />}>
                 <Route path="/login" element={<LoginPage />} />

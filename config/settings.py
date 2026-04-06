@@ -16,6 +16,7 @@ class Settings:
     MONGODB_AUTH_USERS_COLLECTION: str = os.getenv("MONGODB_AUTH_USERS_COLLECTION", "site_users")
     MONGODB_AUTH_CODES_COLLECTION: str = os.getenv("MONGODB_AUTH_CODES_COLLECTION", "email_verifications")
     MONGODB_AUTH_SESSIONS_COLLECTION: str = os.getenv("MONGODB_AUTH_SESSIONS_COLLECTION", "site_sessions")
+    MONGODB_SITE_CONTENT_COLLECTION: str = os.getenv("MONGODB_SITE_CONTENT_COLLECTION", "site_content")
     
     # Настройки Telegram
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")

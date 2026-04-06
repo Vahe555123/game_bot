@@ -32,6 +32,7 @@ const baseProduct: CatalogProduct = {
   hasPsPlusExtraDeluxe: false,
   psPlusCollection: null,
   regionInfo: null,
+  favoritesCount: 0,
   priceRub: 1500,
   oldPriceRub: null,
   displayPrice: '1 500 ₽',
@@ -40,6 +41,9 @@ const baseProduct: CatalogProduct = {
   tags: [],
   compound: [],
   info: [],
+  playersMin: 1,
+  playersMax: 1,
+  playersOnline: false,
 }
 
 describe('catalog filter helpers', () => {
@@ -57,14 +61,18 @@ describe('catalog filter helpers', () => {
     expect(matchesPlatformFilter(baseProduct, 'PS5_ONLY')).toBe(false)
   })
 
-  it('detects coop and singleplayer from product info', () => {
+  it('detects coop and singleplayer from normalized player fields', () => {
     const coopProduct = {
       ...baseProduct,
-      info: ['Игроки: 1 - 4', 'Сетевая игра'],
+      playersMin: 1,
+      playersMax: 4,
+      playersOnline: true,
     }
     const soloProduct = {
       ...baseProduct,
-      info: ['1 игрок', 'Приключение'],
+      playersMin: 1,
+      playersMax: 1,
+      playersOnline: false,
     }
 
     expect(matchesPlayersFilter(coopProduct, 'coop')).toBe(true)

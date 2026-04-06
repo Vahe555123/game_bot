@@ -15,6 +15,7 @@ from app.auth.exceptions import AuthServiceError
 from app.auth.mongo import (
     get_auth_codes_collection,
     get_auth_sessions_collection,
+    get_site_content_collection,
     get_auth_users_collection,
 )
 from app.auth.schemas import SiteUserPublic
@@ -29,6 +30,7 @@ from app.auth.service import (
     resolve_user_identifier,
     utcnow,
 )
+from app.models import UserFavoriteProduct
 from app.models.product import Product
 from app.models.purchase_order import SitePurchaseOrder
 from app.site_orders.service import build_status_label, serialize_purchase_order
@@ -36,6 +38,8 @@ from config.settings import settings
 
 from .schemas import (
     AdminDashboardResponse,
+    AdminHelpContentResponse,
+    AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
     AdminProductListResponse,
     AdminProductRecord,
@@ -51,6 +55,86 @@ from .schemas import (
     AdminUserRecord,
     AdminUserSummary,
 )
+
+HELP_CONTENT_DOCUMENT_ID = "help_page"
+
+
+def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
+    return {
+        "eyebrow": "Помощь",
+        "title": "Помощь по покупкам и доступу к заказам",
+        "subtitle": (
+            "Здесь собраны основные ответы по оплате, истории покупок и связи с менеджером. "
+            "Если ситуация нестандартная, откройте поддержку и напишите нам напрямую."
+        ),
+        "support_title": "Нужна живая помощь?",
+        "support_description": (
+            "Менеджер поможет с выбором региона, подпиской, ошибкой после оплаты или доступом к заказу."
+        ),
+        "support_button_label": "Написать менеджеру",
+        "support_button_url": settings.MANAGER_TELEGRAM_URL or None,
+        "purchases_title": "Где посмотреть покупки",
+        "purchases_description": (
+            "История заказов и переписка по ним доступны на oplata.info. "
+            "Используйте тот же email, который указан как email для покупок."
+        ),
+        "purchases_button_label": "Открыть oplata.info",
+        "purchases_button_url": "https://oplata.info",
+        "sections": [
+            {
+                "title": "Как оформить заказ",
+                "body": (
+                    "Выберите товар, проверьте регион и завершите оплату. "
+                    "После оплаты все дальнейшие уведомления и покупки будут привязаны к email для покупок."
+                ),
+            },
+            {
+                "title": "Как найти уже оплаченный заказ",
+                "body": (
+                    "Если страница после оплаты закрылась, откройте oplata.info и войдите по email для покупок. "
+                    "Там можно найти историю заказов и перейти к нужной покупке."
+                ),
+            },
+            {
+                "title": "Когда писать в поддержку",
+                "body": (
+                    "Если не пришёл код, не открывается доступ или нужен совет по Турции, Индии, Украине, Польше "
+                    "или подпискам, сразу напишите менеджеру и приложите номер заказа."
+                ),
+            },
+        ],
+        "faq_items": [
+            {
+                "question": "Где посмотреть мои покупки?",
+                "answer": (
+                    "Откройте раздел «Мои покупки» или перейдите на oplata.info. "
+                    "Используйте email для покупок, чтобы увидеть историю заказов."
+                ),
+            },
+            {
+                "question": "Что делать, если после оплаты появилась ошибка?",
+                "answer": (
+                    "Сначала проверьте почту и папку спам, затем зайдите на oplata.info по email для покупок. "
+                    "Если заказ всё ещё недоступен, свяжитесь с менеджером."
+                ),
+            },
+            {
+                "question": "Какой email использовать для заказов?",
+                "answer": (
+                    "Указывайте рабочий email для покупок. К нему привязываются все новые покупки, уведомления и "
+                    "возможность позже найти заказ."
+                ),
+            },
+            {
+                "question": "Можно ли уточнить регион перед оплатой?",
+                "answer": (
+                    "Да. Если не уверены, какой регион или тип подписки выбрать, сначала напишите менеджеру "
+                    "и получите рекомендацию до оплаты."
+                ),
+            },
+        ],
+        "updated_at": updated_at,
+    }
 
 
 def _safe_object_id(value: Any) -> Any:
@@ -96,11 +180,12 @@ def build_admin_user_record(
     return AdminUserRecord(**payload)
 
 
-def build_admin_product_record(product: Product) -> AdminProductRecord:
+def build_admin_product_record(product: Product, *, favorites_count: int = 0) -> AdminProductRecord:
     return AdminProductRecord(
         id=product.id,
         region=(product.region or "").upper(),
         display_name=product.name or product.get_display_name(),
+        favorites_count=int(favorites_count or 0),
         name=product.name,
         main_name=product.main_name,
         category=product.category,
@@ -159,11 +244,13 @@ class SiteAdminService:
         users: Optional[Collection] = None,
         codes: Optional[Collection] = None,
         sessions: Optional[Collection] = None,
+        content: Optional[Collection] = None,
         now_provider=utcnow,
     ) -> None:
         self.users = users or get_auth_users_collection()
         self.codes = codes or get_auth_codes_collection()
         self.sessions = sessions or get_auth_sessions_collection()
+        self.content = content or get_site_content_collection()
         self.now_provider = now_provider
 
     def get_dashboard(self, db: Session) -> AdminDashboardResponse:
@@ -200,6 +287,34 @@ class SiteAdminService:
             recent_users=recent_users,
             recent_orders=recent_orders,
         )
+
+    def get_help_content(self) -> AdminHelpContentResponse:
+        try:
+            content_doc = self.content.find_one({"_id": HELP_CONTENT_DOCUMENT_ID})
+        except PyMongoError as error:
+            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+
+        return self._serialize_help_content(content_doc)
+
+    def update_help_content(self, payload: AdminHelpContentUpdateRequest) -> AdminHelpContentResponse:
+        current_time = self.now_provider()
+        next_payload = payload.model_dump()
+        next_payload["updated_at"] = current_time
+
+        try:
+            self.content.update_one(
+                {"_id": HELP_CONTENT_DOCUMENT_ID},
+                {
+                    "$set": next_payload,
+                    "$setOnInsert": {"created_at": current_time},
+                },
+                upsert=True,
+            )
+            content_doc = self.content.find_one({"_id": HELP_CONTENT_DOCUMENT_ID})
+        except PyMongoError as error:
+            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+
+        return self._serialize_help_content(content_doc)
 
     def list_users(
         self,
@@ -392,8 +507,21 @@ class SiteAdminService:
         search: Optional[str] = None,
         region: Optional[str] = None,
         category: Optional[str] = None,
+        sort: Optional[str] = None,
     ) -> AdminProductListResponse:
-        query = db.query(Product)
+        favorites_subquery = (
+            db.query(
+                UserFavoriteProduct.product_id.label("product_id"),
+                func.count(UserFavoriteProduct.id).label("favorites_count"),
+            )
+            .group_by(UserFavoriteProduct.product_id)
+            .subquery()
+        )
+
+        query = db.query(Product, func.coalesce(favorites_subquery.c.favorites_count, 0).label("favorites_count")).outerjoin(
+            favorites_subquery,
+            favorites_subquery.c.product_id == Product.id,
+        )
         if search:
             pattern = f"%{search.strip()}%"
             query = query.filter(
@@ -409,15 +537,29 @@ class SiteAdminService:
             query = query.filter(Product.category == category.strip())
 
         total = query.count()
-        products = (
-            query.order_by(Product.main_name.asc(), Product.name.asc(), Product.region.asc())
+        normalized_sort = (sort or "popular").strip().lower()
+        if normalized_sort == "alphabet":
+            query = query.order_by(Product.main_name.asc(), Product.name.asc(), Product.region.asc())
+        else:
+            query = query.order_by(
+                func.coalesce(favorites_subquery.c.favorites_count, 0).desc(),
+                Product.main_name.asc(),
+                Product.name.asc(),
+                Product.region.asc(),
+            )
+
+        product_rows = (
+            query
             .offset(max(page - 1, 0) * limit)
             .limit(limit)
             .all()
         )
 
         return AdminProductListResponse(
-            products=[build_admin_product_record(product) for product in products],
+            products=[
+                build_admin_product_record(product, favorites_count=favorites_count)
+                for product, favorites_count in product_rows
+            ],
             total=total,
             page=page,
             limit=limit,
@@ -425,7 +567,13 @@ class SiteAdminService:
 
     def get_product(self, db: Session, *, product_id: str, region: str) -> AdminProductRecord:
         product = self._get_product_or_error(db, product_id=product_id, region=region)
-        return build_admin_product_record(product)
+        favorites_count = (
+            db.query(func.count(UserFavoriteProduct.id))
+            .filter(UserFavoriteProduct.product_id == product.id)
+            .scalar()
+            or 0
+        )
+        return build_admin_product_record(product, favorites_count=favorites_count)
 
     def create_product(self, db: Session, payload: AdminProductCreateRequest) -> AdminProductRecord:
         existing = (
@@ -441,7 +589,7 @@ class SiteAdminService:
         db.add(product)
         db.commit()
         db.refresh(product)
-        return build_admin_product_record(product)
+        return build_admin_product_record(product, favorites_count=0)
 
     def update_product(
         self,
@@ -456,7 +604,13 @@ class SiteAdminService:
         db.add(product)
         db.commit()
         db.refresh(product)
-        return build_admin_product_record(product)
+        favorites_count = (
+            db.query(func.count(UserFavoriteProduct.id))
+            .filter(UserFavoriteProduct.product_id == product.id)
+            .scalar()
+            or 0
+        )
+        return build_admin_product_record(product, favorites_count=favorites_count)
 
     def delete_product(self, db: Session, *, product_id: str, region: str) -> None:
         product = self._get_product_or_error(db, product_id=product_id, region=region)
@@ -564,6 +718,33 @@ class SiteAdminService:
         order = self._get_order_or_error(db, order_number=order_number)
         db.delete(order)
         db.commit()
+
+    def _serialize_help_content(self, content_doc: Optional[dict[str, Any]]) -> AdminHelpContentResponse:
+        if not content_doc:
+            return AdminHelpContentResponse(**build_default_help_content())
+
+        payload = build_default_help_content(updated_at=content_doc.get("updated_at"))
+
+        for field_name in (
+            "eyebrow",
+            "title",
+            "subtitle",
+            "support_title",
+            "support_description",
+            "support_button_label",
+            "support_button_url",
+            "purchases_title",
+            "purchases_description",
+            "purchases_button_label",
+            "purchases_button_url",
+            "sections",
+            "faq_items",
+            "updated_at",
+        ):
+            if field_name in content_doc:
+                payload[field_name] = content_doc[field_name]
+
+        return AdminHelpContentResponse(**payload)
 
     def _build_user_query(
         self,
