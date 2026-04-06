@@ -20,7 +20,7 @@ from app.auth.service import resolve_user_identifier
 from app.models.currency_rate import CurrencyRate
 from app.models.product import Product
 from app.models.purchase_order import SitePurchaseOrder
-from app.utils.encryption import decrypt_password
+from app.utils.encryption import decrypt_password, encrypt_password
 from config.settings import settings
 
 from .schemas import PurchaseOrderResponse
@@ -158,7 +158,7 @@ def build_checkout_profile_context(
     platform = current_overrides.platform or region_account.get("platform") or user_doc.get("platform") or "PS5"
     psn_email = current_overrides.psn_email or (region_account.get("psn_email") or user_doc.get("psn_email") or "").strip().lower()
     psn_password = current_overrides.psn_password or _decrypt_region_secret(region_account, "psn_password_hash", "psn_password_salt")
-    backup_code = current_overrides.backup_code or _decrypt_region_secret(region_account, "backup_code_hash", "backup_code_salt")
+    backup_code = current_overrides.backup_code or ""
 
     if not psn_email:
         missing_fields.append("psn_email")
@@ -292,6 +292,19 @@ class SitePurchaseService:
                 backup_code=backup_code,
             ),
         )
+        self._persist_checkout_profile(
+            site_user_id=site_user_id,
+            user_doc=user_doc,
+            region=normalized_region,
+            profile_context=profile_context,
+            overrides=CheckoutInputOverrides(
+                purchase_email=purchase_email,
+                platform=platform,
+                psn_email=psn_email,
+                psn_password=psn_password,
+                backup_code=backup_code,
+            ),
+        )
         current_price = resolve_product_price(product, region=normalized_region, use_ps_plus=use_ps_plus)
         region_info = product.get_region_info()
         rate = CurrencyRate.get_rate_for_price(db, region_info["code"], current_price)
@@ -336,6 +349,65 @@ class SitePurchaseService:
         db.commit()
         db.refresh(order)
         return serialize_purchase_order(order)
+
+    def _persist_checkout_profile(
+        self,
+        *,
+        site_user_id: str,
+        user_doc: dict[str, Any],
+        region: str,
+        profile_context: CheckoutProfileContext,
+        overrides: CheckoutInputOverrides,
+    ) -> None:
+        current_time = self.now_provider()
+        resolved_user_id = resolve_user_identifier(site_user_id)
+        update_fields: dict[str, Any] = {}
+
+        if profile_context.payment_email and profile_context.payment_email != user_doc.get("payment_email"):
+            update_fields["payment_email"] = profile_context.payment_email
+
+        if region == "UA":
+            existing_accounts = dict(user_doc.get("psn_accounts") or {})
+            region_account = _resolve_psn_account(user_doc, region)
+            account_changed = False
+
+            if profile_context.platform and region_account.get("platform") != profile_context.platform:
+                region_account["platform"] = profile_context.platform
+                update_fields["platform"] = profile_context.platform
+                account_changed = True
+
+            if profile_context.psn_email and region_account.get("psn_email") != profile_context.psn_email:
+                region_account["psn_email"] = profile_context.psn_email
+                update_fields["psn_email"] = profile_context.psn_email
+                account_changed = True
+
+            if overrides.psn_password:
+                encoded_password, password_salt = encrypt_password(overrides.psn_password)
+                region_account["psn_password_hash"] = encoded_password
+                region_account["psn_password_salt"] = password_salt
+                account_changed = True
+
+            if "backup_code_hash" in region_account:
+                region_account.pop("backup_code_hash", None)
+                account_changed = True
+            if "backup_code_salt" in region_account:
+                region_account.pop("backup_code_salt", None)
+                account_changed = True
+
+            if account_changed:
+                region_account["updated_at"] = current_time
+                existing_accounts[region] = region_account
+                update_fields["psn_accounts"] = existing_accounts
+
+        if not update_fields:
+            return
+
+        update_fields["updated_at"] = current_time
+
+        try:
+            self.users_collection.update_one({"_id": resolved_user_id}, {"$set": update_fields})
+        except PyMongoError as error:
+            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
 
     def list_user_orders(
         self,
@@ -473,8 +545,8 @@ class SitePurchaseService:
                     product_name=game_name,
                     platform=profile_context.platform,
                     psn_email="",
-                    price=current_price,
-                    price_rub=price_rub,
+                    price=float(purchase_info.total_value),
+                    price_rub=float(card_price_rub or price_rub),
                     currency=region_info["code"],
                     region=region,
                     payment_metadata=payment_metadata,
@@ -489,6 +561,7 @@ class SitePurchaseService:
                     twofa_code=profile_context.backup_code,
                 )
                 card_price_rub = await ukraine_payment_api.get_payment_price_rub_from_url(payment_url)
+                direct_card_url = ukraine_payment_api.get_direct_payment_url(profile_context.payment_email)
                 payment_metadata = {
                     "ukraine_payment": True,
                     "topup_info": {
@@ -498,6 +571,7 @@ class SitePurchaseService:
                         "remaining_balance": payment_info.remaining_balance,
                         "message_ru": payment_info.get_description_ru(),
                         "message_en": payment_info.get_description_en(),
+                        "direct_card_url": direct_card_url,
                     },
                 }
                 return PaymentGenerationResult(
@@ -507,8 +581,8 @@ class SitePurchaseService:
                     product_name=game_name,
                     platform=profile_context.platform,
                     psn_email=profile_context.psn_email,
-                    price=current_price,
-                    price_rub=price_rub,
+                    price=float(payment_info.topup_amount),
+                    price_rub=float(card_price_rub or price_rub),
                     currency=region_info["code"],
                     region=region,
                     payment_metadata=payment_metadata,
@@ -548,8 +622,8 @@ class SitePurchaseService:
                     product_name=game_name,
                     platform=profile_context.platform,
                     psn_email="",
-                    price=current_price,
-                    price_rub=price_rub,
+                    price=float(purchase_info.total_value),
+                    price_rub=float(card_price_rub or price_rub),
                     currency=region_info["code"],
                     region=region,
                     payment_metadata=payment_metadata,

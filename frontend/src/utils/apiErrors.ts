@@ -5,7 +5,13 @@ type ApiErrorDetail = {
   [key: string]: unknown
 }
 
-export function getApiErrorDetail(error: unknown): string | ApiErrorDetail | null {
+type ApiValidationDetail = {
+  loc?: Array<string | number>
+  msg?: string
+  [key: string]: unknown
+}
+
+export function getApiErrorDetail(error: unknown): string | ApiErrorDetail | ApiValidationDetail[] | null {
   if (!axios.isAxiosError(error)) {
     return null
   }
@@ -16,6 +22,10 @@ export function getApiErrorDetail(error: unknown): string | ApiErrorDetail | nul
   }
 
   if (detail && typeof detail === 'object') {
+    if (Array.isArray(detail)) {
+      return detail as ApiValidationDetail[]
+    }
+
     return detail as ApiErrorDetail
   }
 
@@ -29,7 +39,14 @@ export function getApiErrorMessage(error: unknown, fallback = 'Не удалос
     return detail
   }
 
-  if (detail && typeof detail.message === 'string') {
+  if (Array.isArray(detail)) {
+    const firstMessage = detail.find((item) => item && typeof item.msg === 'string')
+    if (firstMessage && typeof firstMessage.msg === 'string') {
+      return firstMessage.msg
+    }
+  }
+
+  if (detail && !Array.isArray(detail) && typeof detail.message === 'string') {
     return detail.message
   }
 
@@ -42,7 +59,7 @@ export function getApiErrorMessage(error: unknown, fallback = 'Не удалос
 
 export function getApiErrorNumber(error: unknown, key: string) {
   const detail = getApiErrorDetail(error)
-  if (!detail || typeof detail === 'string') {
+  if (!detail || typeof detail === 'string' || Array.isArray(detail)) {
     return null
   }
 

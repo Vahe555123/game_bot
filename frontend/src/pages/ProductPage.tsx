@@ -2,7 +2,6 @@
   AlertCircle,
   ArrowLeft,
   BadgePercent,
-  Copy,
   CreditCard,
   ExternalLink,
   Gamepad2,
@@ -28,6 +27,7 @@ import type { SiteProfileResponse } from '../types/auth'
 import type { PurchaseOrder } from '../types/purchase'
 import { getApiErrorDetail, getApiErrorMessage } from '../utils/apiErrors'
 import {
+  formatDualCurrencyInline,
   formatRating,
   getDualCurrencyPriceDisplay,
   normalizeImageUrl,
@@ -47,6 +47,18 @@ type CheckoutFormState = {
   psnEmail: string
   psnPassword: string
   backupCode: string
+}
+
+type CheckoutPaymentSummary = {
+  kind: 'default' | 'card' | 'ukraine'
+  currencyCode: string | null
+  priceLocal: number | null
+  priceRub: number | null
+  gamePrice: number | null
+  payableAmount: number | null
+  remainingBalance: number | null
+  message: string | null
+  directCardUrl: string | null
 }
 
 const EMPTY_CHECKOUT_FORM: CheckoutFormState = {
@@ -187,23 +199,71 @@ function getCheckoutPriceDisplay(price: ProductRegionPrice, usePsPlus = false) {
   return getDualCurrencyPriceDisplay(localValue, price.currencyCode, rubValue)
 }
 
-function extractPaymentMessage(order: PurchaseOrder | null) {
+function isPaymentMetadataRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getPaymentMetadataNumber(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function getPaymentMetadataString(record: Record<string, unknown>, key: string) {
+  const value = record[key]
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function buildCheckoutPaymentSummary(order: PurchaseOrder | null): CheckoutPaymentSummary | null {
   if (!order) {
     return null
   }
 
   const metadata = order.payment_metadata || {}
   const cardInfo = metadata.card_info
-  if (cardInfo && typeof cardInfo === 'object' && 'message_ru' in cardInfo && typeof cardInfo.message_ru === 'string') {
-    return cardInfo.message_ru
+  if (isPaymentMetadataRecord(cardInfo)) {
+    return {
+      kind: 'card',
+      currencyCode: order.currency_code,
+      priceLocal: getPaymentMetadataNumber(cardInfo, 'total_value') ?? order.local_price,
+      priceRub: getPaymentMetadataNumber(cardInfo, 'card_price_rub') ?? order.price_rub,
+      gamePrice: getPaymentMetadataNumber(cardInfo, 'game_price'),
+      payableAmount: getPaymentMetadataNumber(cardInfo, 'total_value') ?? order.local_price,
+      remainingBalance: getPaymentMetadataNumber(cardInfo, 'remaining_balance'),
+      message: getPaymentMetadataString(cardInfo, 'message_ru'),
+      directCardUrl: getPaymentMetadataString(cardInfo, 'direct_card_url'),
+    }
   }
 
   const topupInfo = metadata.topup_info
-  if (topupInfo && typeof topupInfo === 'object' && 'message_ru' in topupInfo && typeof topupInfo.message_ru === 'string') {
-    return topupInfo.message_ru
+  if (isPaymentMetadataRecord(topupInfo)) {
+    return {
+      kind: 'ukraine',
+      currencyCode: order.currency_code,
+      priceLocal: getPaymentMetadataNumber(topupInfo, 'topup_amount') ?? order.local_price,
+      priceRub: getPaymentMetadataNumber(topupInfo, 'card_price_rub') ?? order.price_rub,
+      gamePrice: getPaymentMetadataNumber(topupInfo, 'game_price'),
+      payableAmount: getPaymentMetadataNumber(topupInfo, 'topup_amount') ?? order.local_price,
+      remainingBalance: getPaymentMetadataNumber(topupInfo, 'remaining_balance'),
+      message: getPaymentMetadataString(topupInfo, 'message_ru'),
+      directCardUrl: getPaymentMetadataString(topupInfo, 'direct_card_url'),
+    }
   }
 
-  return null
+  return {
+    kind: 'default',
+    currencyCode: order.currency_code,
+    priceLocal: order.local_price,
+    priceRub: order.price_rub,
+    gamePrice: null,
+    payableAmount: order.local_price,
+    remainingBalance: null,
+    message: null,
+    directCardUrl: null,
+  }
+}
+
+function isValidEmailAddress(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
 function getPreferredCheckoutRegion(
@@ -245,7 +305,6 @@ function CheckoutDialog({
   checkoutError,
   onCreateOrder,
   onOpenPayment,
-  onCopyPaymentLink,
 }: {
   open: boolean
   onClose: () => void
@@ -267,7 +326,6 @@ function CheckoutDialog({
   checkoutError: string | null
   onCreateOrder: () => Promise<void>
   onOpenPayment: () => void
-  onCopyPaymentLink: () => Promise<void>
 }) {
   useEffect(() => {
     if (!open || typeof document === 'undefined') {
@@ -287,12 +345,21 @@ function CheckoutDialog({
   }
 
   const selectedPrice = availablePrices.find((item) => item.region === selectedRegion) ?? availablePrices[0]
-  const paymentMessage = extractPaymentMessage(checkoutOrder)
+  const paymentSummary = buildCheckoutPaymentSummary(checkoutOrder)
+  const paymentMessage = paymentSummary?.message
   const isUkraineCheckout = selectedRegion === 'UA'
   const selectedPriceDisplay = selectedPrice ? getCheckoutPriceDisplay(selectedPrice, usePsPlus) : null
-  const orderPriceDisplay = checkoutOrder
-    ? getDualCurrencyPriceDisplay(checkoutOrder.local_price, checkoutOrder.currency_code, checkoutOrder.price_rub)
+  const orderPriceDisplay = paymentSummary
+    ? getDualCurrencyPriceDisplay(paymentSummary.priceLocal, paymentSummary.currencyCode, paymentSummary.priceRub)
     : null
+  const orderPriceLabel =
+    paymentSummary?.kind === 'card' ? 'Стоимость карты' : paymentSummary?.kind === 'ukraine' ? 'Сумма к оплате' : 'Стоимость'
+  const paymentGamePrice = paymentSummary?.gamePrice ?? null
+  const paymentRemainingBalance = paymentSummary?.remainingBalance ?? null
+  const paymentPayableAmount = paymentSummary?.payableAmount ?? null
+  const paymentCurrencyCode = paymentSummary?.currencyCode ?? checkoutOrder?.currency_code ?? null
+  const paymentDirectCardUrl = paymentSummary?.directCardUrl ?? null
+  const hasGamePrice = paymentGamePrice !== null
   const fieldClassName = (fieldName: CheckoutFieldName) =>
     `auth-input ${missingFields.includes(fieldName) ? 'border-rose-400/40 bg-rose-500/10' : ''}`
 
@@ -398,7 +465,7 @@ function CheckoutDialog({
                       placeholder="email@example.com"
                     />
                     {hasSavedPurchaseEmail ? (
-                      <p className="mt-2 text-xs text-slate-500">Можно изменить email только для этого заказа.</p>
+                      <p className="mt-2 text-xs text-slate-500">Если изменить email и продолжить, он обновится и в профиле.</p>
                     ) : null}
                   </div>
 
@@ -451,8 +518,13 @@ function CheckoutDialog({
                           value={checkoutForm.backupCode}
                           onChange={(event) => onCheckoutFormChange('backupCode', event.target.value)}
                           className="auth-input"
-                          placeholder="Опционально"
+                          placeholder="Введите код для этой покупки"
                         />
+                      </div>
+
+                      <div className="md:col-span-2 rounded-[20px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-7 text-slate-400">
+                        Email для покупки, PSN email, платформа и пароль сохранятся в профиле после продолжения покупки.
+                        Резервный код используется только для текущего заказа и не сохраняется.
                       </div>
                     </>
                   ) : null}
@@ -498,7 +570,7 @@ function CheckoutDialog({
                 </button>
                 <button type="button" className="btn-primary" onClick={onCreateOrder} disabled={checkoutLoading || profileLoading}>
                   {checkoutLoading ? <LoaderCircle size={16} className="animate-spin" /> : <CreditCard size={16} />}
-                  {checkoutLoading ? 'Подготовка...' : profileLoading ? 'Загружаем профиль...' : 'Получить ссылку на оплату'}
+                  {checkoutLoading ? 'Подготовка...' : profileLoading ? 'Загружаем профиль...' : 'Продолжить'}
                 </button>
               </div>
             </>
@@ -509,7 +581,7 @@ function CheckoutDialog({
                   <p className="text-sm text-emerald-100/80">Номер заказа</p>
                   <p className="mt-1 text-2xl font-semibold text-white">{checkoutOrder.order_number}</p>
                   <p className="mt-2 text-sm leading-7 text-emerald-50/90">
-                    Откройте ссылку и завершите оплату на стороне платежки. Покупка уже сохранена в профиле.
+                    Откройте страницу оплаты и завершите покупку. Данные для заказа уже сохранены в профиле.
                   </p>
                 </div>
               </div>
@@ -520,7 +592,7 @@ function CheckoutDialog({
                   <p className="mt-1 text-lg font-semibold text-white">{checkoutOrder.product_region}</p>
                 </div>
                 <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
-                  <p className="text-sm text-slate-400">Стоимость</p>
+                  <p className="text-sm text-slate-400">{orderPriceLabel}</p>
                   {orderPriceDisplay ? (
                     <div className="mt-1">
                       <p className="text-lg font-semibold text-white">{orderPriceDisplay.primary}</p>
@@ -532,10 +604,93 @@ function CheckoutDialog({
                 </div>
               </div>
 
-              {paymentMessage ? (
-                <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4 text-sm leading-7 text-slate-200">
-                  {paymentMessage}
+              {hasGamePrice ? (
+                <div
+                  className={`grid gap-4 ${
+                    typeof paymentRemainingBalance === 'number' && paymentRemainingBalance > 0 ? 'md:grid-cols-2' : ''
+                  }`}
+                >
+                  <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
+                    <p className="text-sm text-slate-400">Цена игры</p>
+                    <p className="mt-1 text-lg font-semibold text-white">
+                      {formatDualCurrencyInline(paymentGamePrice, paymentCurrencyCode, null)}
+                    </p>
+                  </div>
+                  {typeof paymentRemainingBalance === 'number' && paymentRemainingBalance > 0 ? (
+                    <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
+                      <p className="text-sm text-slate-400">Останется в кошельке</p>
+                      <p className="mt-1 text-lg font-semibold text-white">
+                        {formatDualCurrencyInline(paymentRemainingBalance, paymentCurrencyCode, null)}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
+              ) : null}
+
+              {paymentSummary?.kind !== 'ukraine' && paymentMessage ? (
+                <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4 text-sm leading-7 text-slate-200">
+                  <p>{paymentMessage}</p>
+                  {paymentDirectCardUrl ? (
+                    <p className="mt-3 text-slate-300">
+                      Либо карту на нужную сумму можно купить{' '}
+                      <a href={paymentDirectCardUrl} className="font-semibold text-brand-200 underline underline-offset-4">
+                        отдельно
+                      </a>
+                      .
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {paymentSummary?.kind === 'ukraine' ? (
+                <>
+                  {paymentDirectCardUrl && typeof paymentRemainingBalance === 'number' && paymentRemainingBalance > 0 ? (
+                    <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4 text-sm leading-7 text-slate-200">
+                      Игра стоит меньше минимальной суммы пополнения, поэтому к оплате будет{' '}
+                      {formatDualCurrencyInline(paymentPayableAmount, paymentCurrencyCode, null)}. Либо пополнение
+                      на эту сумму можно купить{' '}
+                      <a href={paymentDirectCardUrl} className="font-semibold text-brand-200 underline underline-offset-4">
+                        отдельно
+                      </a>
+                      .
+                    </div>
+                  ) : null}
+
+                  <div className="rounded-[24px] border border-white/10 bg-[#0b1522] p-4 text-sm leading-7 text-slate-300">
+                    <p>
+                      После оплаты Вы попадете на страницу, где сверху будет указан "уникальный код", скопируйте его. Затем
+                      опуститесь в самый низ этой страницы до "Чата переписки с продавцом", вставьте туда скопированный уникальный
+                      код и отправьте.
+                    </p>
+                    <p className="mt-3">
+                      Подробнее можно посмотреть в этом видеогайде{' '}
+                      <a
+                        href="https://youtu.be/-ApyE29u69I"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-brand-200 underline underline-offset-4"
+                      >
+                        с 6:04
+                      </a>{' '}
+                      или{' '}
+                      <a
+                        href="https://vkvideo.ru/video-85844500_456240978?list=ln-qW4ZU3syiRhSZ1IKe5"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-semibold text-brand-200 underline underline-offset-4"
+                      >
+                        здесь
+                      </a>
+                      .
+                    </p>
+                    <p className="mt-3">
+                      После того, как отправите его, в порядке очереди поступления заказов (обычно от 15 минут до часа) с Вами
+                      свяжется там продавец, выполнит заказ и Вам на почту придет уведомление. Время работы менеджера с 11 до 21 по
+                      МСК. Если заказ был сделан в нерабочее время, то на выполнение может потребоваться больше времени, так как
+                      могла скопиться очередь из заказов.
+                    </p>
+                  </div>
+                </>
               ) : null}
 
               {checkoutError ? <div className="auth-alert auth-alert-error">{checkoutError}</div> : null}
@@ -546,22 +701,12 @@ function CheckoutDialog({
                   <ExternalLink size={16} />
                   Перейти к оплате
                 </button>
-                <button type="button" className="btn-secondary" onClick={onCopyPaymentLink}>
-                  <Copy size={16} />
-                  Скопировать ссылку
-                </button>
-              </div>
-
-              {checkoutOrder.payment_url ? (
-                <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
-                  <p className="text-sm text-slate-400">Ссылка на оплату</p>
-                  <p className="mt-2 break-all text-sm leading-7 text-white">{checkoutOrder.payment_url}</p>
-                </div>
-              ) : null}
-
-              <div className="rounded-[24px] border border-white/10 bg-[#0b1522] p-4 text-sm leading-7 text-slate-300">
-                Оплатите по этой ссылке, а после оплаты отправьте нужный код прямо в чате оплаты. Ссылка и дата покупки уже
-                сохранены в профиле.
+                {paymentDirectCardUrl ? (
+                  <a href={paymentDirectCardUrl} className="btn-secondary">
+                    <CreditCard size={16} />
+                    {paymentSummary?.kind === 'ukraine' ? 'Купить пополнение отдельно' : 'Купить карту отдельно'}
+                  </a>
+                ) : null}
               </div>
             </>
           )}
@@ -578,7 +723,7 @@ export function ProductPage() {
   const navigate = useNavigate()
   const requestedRegion = searchParams.get('region') || undefined
 
-  const { user, isAuthenticated } = useAuth()
+  const { user, isAuthenticated, refreshUser } = useAuth()
   const { isFavorite, toggleFavorite } = useFavorites()
 
   const [product, setProduct] = useState<CatalogProduct | null>(null)
@@ -594,6 +739,17 @@ export function ProductPage() {
   const [checkoutMissingFields, setCheckoutMissingFields] = useState<CheckoutFieldName[]>([])
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
+
+  function applyCheckoutProfile(profileResponse: SiteProfileResponse | null) {
+    setCheckoutProfile(profileResponse)
+    setCheckoutForm(
+      buildCheckoutForm(profileResponse, {
+        payment_email: user?.payment_email,
+        platform: user?.platform,
+        psn_email: user?.psn_email,
+      }),
+    )
+  }
 
   useEffect(() => {
     let ignore = false
@@ -706,28 +862,15 @@ export function ProductPage() {
     setCheckoutMessage(null)
     setCheckoutError(null)
     setCheckoutMissingFields([])
-    setCheckoutForm(
-      buildCheckoutForm(checkoutProfile, {
-        payment_email: user?.payment_email,
-        platform: user?.platform,
-        psn_email: user?.psn_email,
-      }),
-    )
+    applyCheckoutProfile(checkoutProfile)
     setIsCheckoutOpen(true)
 
     setCheckoutProfileLoading(true)
     try {
       const profileResponse = await getProfile()
-      setCheckoutProfile(profileResponse)
-      setCheckoutForm(
-        buildCheckoutForm(profileResponse, {
-          payment_email: user?.payment_email,
-          platform: user?.platform,
-          psn_email: user?.psn_email,
-        }),
-      )
+      applyCheckoutProfile(profileResponse)
     } catch {
-      setCheckoutProfile(null)
+      applyCheckoutProfile(null)
     } finally {
       setCheckoutProfileLoading(false)
     }
@@ -738,10 +881,32 @@ export function ProductPage() {
       return
     }
 
+    const purchaseEmail = checkoutForm.purchaseEmail.trim()
+    const psnEmail = checkoutForm.psnEmail.trim()
     const localMissingFields = getMissingCheckoutFields(checkoutRegion, checkoutForm, checkoutProfile)
     if (localMissingFields.length) {
       setCheckoutMissingFields(localMissingFields)
       setCheckoutError('Заполните отмеченные поля для продолжения покупки.')
+      setCheckoutMessage(null)
+      return
+    }
+
+    const invalidFields: CheckoutFieldName[] = []
+    if (purchaseEmail && !isValidEmailAddress(purchaseEmail)) {
+      invalidFields.push('purchase_email')
+    }
+    if (checkoutRegion === 'UA' && psnEmail && !isValidEmailAddress(psnEmail)) {
+      invalidFields.push('psn_email')
+    }
+    if (invalidFields.length) {
+      setCheckoutMissingFields(invalidFields)
+      setCheckoutError(
+        invalidFields.includes('purchase_email') && invalidFields.includes('psn_email')
+          ? 'Проверьте корректность email в отмеченных полях.'
+          : invalidFields.includes('purchase_email')
+            ? 'Введите корректный Email для покупок.'
+            : 'Введите корректный PSN Email.',
+      )
       setCheckoutMessage(null)
       return
     }
@@ -756,23 +921,52 @@ export function ProductPage() {
         product_id: product.id,
         region: checkoutRegion,
         use_ps_plus: usePsPlusCheckout && canUsePsPlus,
-        purchase_email: checkoutForm.purchaseEmail.trim() || undefined,
+        purchase_email: purchaseEmail || undefined,
         platform: checkoutRegion === 'UA' ? checkoutForm.platform || undefined : undefined,
-        psn_email: checkoutRegion === 'UA' ? checkoutForm.psnEmail.trim() || undefined : undefined,
+        psn_email: checkoutRegion === 'UA' ? psnEmail || undefined : undefined,
         psn_password: checkoutRegion === 'UA' ? checkoutForm.psnPassword.trim() || undefined : undefined,
         backup_code: checkoutRegion === 'UA' ? checkoutForm.backupCode.trim() || undefined : undefined,
       })
       setCheckoutOrder(order)
-      setCheckoutMessage('Заказ создан. Ссылка на оплату сохранена и будет доступна в профиле.')
+      setCheckoutMessage('Заказ создан. Данные для покупки сохранены в профиле.')
+
+      const [profileResponse] = await Promise.all([
+        getProfile().catch(() => null),
+        refreshUser().catch(() => null),
+      ])
+      if (profileResponse) {
+        applyCheckoutProfile(profileResponse)
+      }
     } catch (error) {
       const detail = getApiErrorDetail(error)
-      if (detail && typeof detail !== 'string' && Array.isArray(detail.missing_fields)) {
+      if (detail && !Array.isArray(detail) && typeof detail !== 'string' && Array.isArray(detail.missing_fields)) {
         const missingFields = detail.missing_fields.filter(
           (field): field is CheckoutFieldName =>
             field === 'purchase_email' || field === 'psn_email' || field === 'psn_password',
         )
         setCheckoutMissingFields(missingFields)
         setCheckoutError('Заполните отмеченные поля для продолжения покупки.')
+      } else if (Array.isArray(detail)) {
+        const invalidEmailField = detail.find(
+          (item) =>
+            item &&
+            typeof item === 'object' &&
+            'loc' in item &&
+            Array.isArray(item.loc) &&
+            (item.loc.includes('purchase_email') || item.loc.includes('psn_email')),
+        )
+        if (invalidEmailField && Array.isArray(invalidEmailField.loc)) {
+          const invalidFieldNames = invalidEmailField.loc.filter(
+            (field): field is CheckoutFieldName =>
+              field === 'purchase_email' || field === 'psn_email' || field === 'psn_password',
+          )
+          setCheckoutMissingFields(invalidFieldNames)
+          setCheckoutError(
+            invalidFieldNames.includes('purchase_email') ? 'Введите корректный Email для покупок.' : 'Введите корректный PSN Email.',
+          )
+        } else {
+          setCheckoutError(getApiErrorMessage(error, 'Не удалось подготовить ссылку на оплату.'))
+        }
       } else {
         setCheckoutError(getApiErrorMessage(error, 'Не удалось подготовить ссылку на оплату.'))
       }
@@ -786,20 +980,7 @@ export function ProductPage() {
       return
     }
 
-    window.open(checkoutOrder.payment_url, '_blank', 'noopener,noreferrer')
-  }
-
-  async function handleCopyPaymentLink() {
-    if (!checkoutOrder?.payment_url) {
-      return
-    }
-
-    try {
-      await navigator.clipboard.writeText(checkoutOrder.payment_url)
-      setCheckoutMessage('Ссылка на оплату скопирована.')
-    } catch {
-      setCheckoutError('Не удалось скопировать ссылку автоматически.')
-    }
+    window.location.assign(checkoutOrder.payment_url)
   }
 
   if (!productId) {
@@ -994,7 +1175,6 @@ export function ProductPage() {
         checkoutError={checkoutError}
         onCreateOrder={handleCreateCheckout}
         onOpenPayment={handleOpenPayment}
-        onCopyPaymentLink={handleCopyPaymentLink}
       />
     </div>
   )

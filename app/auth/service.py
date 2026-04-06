@@ -171,7 +171,7 @@ def build_public_psn_account(region: str, account_doc: Optional[dict[str, Any]] 
         platform=current_account.get("platform"),
         psn_email=current_account.get("psn_email"),
         has_password=bool(current_account.get("psn_password_hash")),
-        has_backup_code=bool(current_account.get("backup_code_hash")),
+        has_backup_code=False,
         updated_at=current_account.get("updated_at"),
     )
 
@@ -697,10 +697,8 @@ class AuthService:
                 region_account["psn_password_hash"] = encoded_password
                 region_account["psn_password_salt"] = password_salt
 
-            if payload.backup_code:
-                encoded_backup, backup_salt = encrypt_password(payload.backup_code)
-                region_account["backup_code_hash"] = encoded_backup
-                region_account["backup_code_salt"] = backup_salt
+            region_account.pop("backup_code_hash", None)
+            region_account.pop("backup_code_salt", None)
 
             if not region_account.get("psn_email"):
                 raise AuthServiceError(422, "Введите PSN Email.")

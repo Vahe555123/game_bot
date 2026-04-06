@@ -52,7 +52,6 @@ export type ProfilePSNAccountPayload = {
   platform?: 'PS4' | 'PS5' | null
   psn_email?: string | null
   psn_password?: string | null
-  backup_code?: string | null
 }
 
 export type AuthUserResponse = {

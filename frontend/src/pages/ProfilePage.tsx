@@ -38,7 +38,6 @@ type PsnDraft = {
   platform: '' | 'PS4' | 'PS5'
   psn_email: string
   psn_password: string
-  backup_code: string
 }
 
 type PurchaseDayFilterValue = 'all' | '7' | '30' | '90'
@@ -100,7 +99,6 @@ function buildPsnDraft(account: SitePSNAccount | undefined): PsnDraft {
     platform: account?.platform ?? '',
     psn_email: account?.psn_email ?? '',
     psn_password: '',
-    backup_code: '',
   }
 }
 
@@ -199,7 +197,7 @@ function PurchaseCard({
           <p className="mt-3 break-all text-sm leading-7 text-white">{order.payment_url}</p>
 
           <div className="mt-4 flex flex-wrap gap-3">
-            <a href={order.payment_url} target="_blank" rel="noreferrer" className="btn-primary">
+            <a href={order.payment_url} className="btn-primary">
               <ExternalLink size={16} />
               Открыть ссылку
             </a>
@@ -324,13 +322,11 @@ export function ProfilePage() {
         platform: nextProfile.psn_accounts.UA.platform ?? current.UA.platform,
         psn_email: nextProfile.psn_accounts.UA.psn_email ?? current.UA.psn_email,
         psn_password: '',
-        backup_code: '',
       },
       TR: {
         platform: nextProfile.psn_accounts.TR.platform ?? current.TR.platform,
         psn_email: nextProfile.psn_accounts.TR.psn_email ?? current.TR.psn_email,
         psn_password: '',
-        backup_code: '',
       },
     }))
   }
@@ -399,7 +395,6 @@ export function ProfilePage() {
       platform: draft.platform || null,
       psn_email: draft.psn_email.trim() || null,
       psn_password: draft.psn_password.trim() || null,
-      backup_code: draft.backup_code.trim() || null,
     }
 
     setPsnSaveState({ loading: true, message: null, error: false })
@@ -671,28 +666,11 @@ export function ProfilePage() {
                   />
                 </div>
 
-                <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-200">Резервный код (опционально)</label>
-                  <input
-                    type="password"
-                    value={currentDraft.backup_code}
-                    onChange={(event) =>
-                      updatePsnDraft(activePsnRegion, {
-                        backup_code: event.target.value,
-                      })
-                    }
-                    className="auth-input"
-                    placeholder={currentAccount.has_backup_code ? 'Код уже сохранен' : 'Введите резервный код'}
-                  />
-                </div>
               </div>
 
               <div className="flex flex-wrap gap-2">
                 {currentAccount.has_password ? (
                   <span className="pill border-emerald-400/20 bg-emerald-500/12 text-emerald-100">Пароль сохранен</span>
-                ) : null}
-                {currentAccount.has_backup_code ? (
-                  <span className="pill border-emerald-400/20 bg-emerald-500/12 text-emerald-100">Резервный код сохранен</span>
                 ) : null}
                 {currentAccount.updated_at ? (
                   <span className="pill bg-white/5 text-slate-300">
