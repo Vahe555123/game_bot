@@ -73,6 +73,12 @@ export type ResendCodePayload = {
   email: string
 }
 
+export type PasswordResetConfirmPayload = {
+  email: string
+  code: string
+  new_password: string
+}
+
 export type LoginPayload = {
   email: string
   password: string

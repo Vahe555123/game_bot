@@ -1,5 +1,6 @@
-import { Heart, Menu, MessageCircle, Shield, Sparkles, UserRound, type LucideIcon } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import clsx from 'clsx'
+import { ChevronDown, Globe2, Heart, Menu, MessageCircle, Shield, Sparkles, UserRound, type LucideIcon } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useFavorites } from '../../context/FavoritesContext'
@@ -12,13 +13,20 @@ const DESKTOP_ACTION_BUTTON_CLASS = 'btn-secondary min-h-[44px] px-3 xl:px-4'
 const MOBILE_MENU_LINK_CLASS =
   'flex min-h-[48px] items-center justify-start gap-3 rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm font-medium text-slate-100 transition hover:border-brand-300/50 hover:bg-brand-500/10'
 
-const PARTNER_LINKS = [
-  { label: 'Турция', href: 'https://romanomak.ru/category/120642' },
-  { label: 'Индия', href: 'https://romanomak.ru/category/143863' },
-  { label: 'Украина', href: 'https://romanomak.ru/category/101787' },
-  { label: 'Польша', href: 'https://romanomak.ru/category/120397' },
-  { label: 'Подписки', href: 'https://romanomak.ru/category/139773' },
+const COUNTRY_PARTNER_LINKS = [
+  { label: 'Турция', code: 'TR', href: 'https://romanomak.ru/category/120642' },
+  { label: 'Индия', code: 'IN', href: 'https://romanomak.ru/category/143863' },
+  { label: 'Украина', code: 'UA', href: 'https://romanomak.ru/category/101787' },
+  { label: 'Польша', code: 'PL', href: 'https://romanomak.ru/category/120397' },
 ] as const
+
+const SUBSCRIPTIONS_PARTNER_LINK = {
+  label: 'Подписки',
+  href: 'https://romanomak.ru/category/139773',
+} as const
+
+const DESKTOP_DROPDOWN_ITEM_CLASS =
+  'flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-slate-300 transition hover:bg-brand-500/12 hover:text-white'
 
 type ActionLinkProps = {
   href?: string
@@ -106,8 +114,89 @@ function IconLink({ href, to, external, className, icon: Icon, iconNode, label, 
   )
 }
 
+function DesktopCountriesDropdown() {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    function onPointerDown(event: MouseEvent | PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [open])
+
+  return (
+    <div className="relative shrink-0" ref={rootRef}>
+      <button
+        type="button"
+        className={clsx(
+          DESKTOP_NAV_LINK_CLASS,
+          open && 'bg-white/[0.08] text-white ring-1 ring-brand-400/25',
+        )}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Globe2 size={16} className="shrink-0 text-brand-200/90" aria-hidden />
+        <span>Страны</span>
+        <ChevronDown
+          size={16}
+          className={clsx('shrink-0 opacity-70 transition-transform duration-200', open && 'rotate-180')}
+          aria-hidden
+        />
+      </button>
+
+      {open ? (
+        <div
+          className="absolute left-0 top-[calc(100%+0.5rem)] z-[60] min-w-[min(100vw-2rem,240px)] rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-card backdrop-blur-xl ring-1 ring-white/[0.04]"
+          role="menu"
+        >
+          <p className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Магазин по региону</p>
+          <div className="flex flex-col gap-0.5">
+            {COUNTRY_PARTNER_LINKS.map((item) => (
+              <a
+                key={item.label}
+                href={item.href}
+                target="_blank"
+                rel="noreferrer"
+                role="menuitem"
+                className={DESKTOP_DROPDOWN_ITEM_CLASS}
+                onClick={() => setOpen(false)}
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-[10px] font-bold tracking-wide text-brand-200">
+                  {item.code}
+                </span>
+                {item.label}
+              </a>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export function SiteLayout() {
   const [isOpen, setIsOpen] = useState(false)
+  const [mobileCountriesOpen, setMobileCountriesOpen] = useState(false)
   const [isSupportOpen, setIsSupportOpen] = useState(false)
   const { isAuthenticated, user } = useAuth()
   const { favorites } = useFavorites()
@@ -126,6 +215,7 @@ export function SiteLayout() {
 
   function closeMobileMenu() {
     setIsOpen(false)
+    setMobileCountriesOpen(false)
   }
 
   function openAuthModal() {
@@ -154,24 +244,30 @@ export function SiteLayout() {
           </Link>
 
           <div className="hidden min-w-0 flex-1 items-center justify-between gap-3 lg:flex xl:gap-4">
-            <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:gap-1">
-              <ActionLink to="/catalog?hasDiscount=true" className={DESKTOP_NAV_LINK_CLASS}>
-                Скидки
-              </ActionLink>
-              <ActionLink to="/catalog?hasPsPlus=true" className={DESKTOP_NAV_LINK_CLASS}>
-                <PsPlusMark />
-                <span>PS PLUS</span>
-              </ActionLink>
-
-              {PARTNER_LINKS.map((item) => (
-                <ActionLink key={item.label} href={item.href} external className={DESKTOP_NAV_LINK_CLASS}>
-                  {item.label}
+            <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-visible xl:gap-1">
+              <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:gap-1">
+                <ActionLink to="/catalog?hasDiscount=true" className={DESKTOP_NAV_LINK_CLASS}>
+                  Скидки
                 </ActionLink>
-              ))}
+                <ActionLink to="/catalog?hasPsPlus=true" className={DESKTOP_NAV_LINK_CLASS}>
+                  <PsPlusMark />
+                  <span>PS PLUS</span>
+                </ActionLink>
+              </div>
 
-              <ActionLink to="/help" className={DESKTOP_NAV_LINK_CLASS}>
-                Помощь
-              </ActionLink>
+              <div className="shrink-0">
+                <DesktopCountriesDropdown />
+              </div>
+
+              <div className="flex shrink-0 items-center gap-0.5 xl:gap-1">
+                <ActionLink href={SUBSCRIPTIONS_PARTNER_LINK.href} external className={DESKTOP_NAV_LINK_CLASS}>
+                  {SUBSCRIPTIONS_PARTNER_LINK.label}
+                </ActionLink>
+
+                <ActionLink to="/help" className={DESKTOP_NAV_LINK_CLASS}>
+                  Помощь
+                </ActionLink>
+              </div>
             </nav>
 
             <div className="flex shrink-0 items-center gap-2">
@@ -237,17 +333,49 @@ export function SiteLayout() {
                 <span>PS PLUS</span>
               </ActionLink>
 
-              {PARTNER_LINKS.map((item) => (
-                <ActionLink
-                  key={item.label}
-                  href={item.href}
-                  external
-                  className={MOBILE_MENU_LINK_CLASS}
-                  onClick={closeMobileMenu}
+              <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.02]">
+                <button
+                  type="button"
+                  className="flex min-h-[48px] w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-slate-100 transition hover:bg-white/[0.04]"
+                  aria-expanded={mobileCountriesOpen}
+                  onClick={() => setMobileCountriesOpen((value) => !value)}
                 >
-                  {item.label}
-                </ActionLink>
-              ))}
+                  <Globe2 size={18} className="shrink-0 text-brand-200/90" aria-hidden />
+                  <span className="min-w-0 flex-1">Страны</span>
+                  <ChevronDown
+                    size={18}
+                    className={clsx('shrink-0 text-slate-400 transition-transform', mobileCountriesOpen && 'rotate-180')}
+                    aria-hidden
+                  />
+                </button>
+                {mobileCountriesOpen ? (
+                  <div className="space-y-1 border-t border-white/8 px-2 pb-2 pt-2">
+                    {COUNTRY_PARTNER_LINKS.map((item) => (
+                      <ActionLink
+                        key={item.label}
+                        href={item.href}
+                        external
+                        className="flex min-h-[44px] items-center gap-3 rounded-xl border border-transparent bg-white/[0.03] px-3 py-2.5 text-sm font-medium text-slate-200 transition hover:border-brand-300/40 hover:bg-brand-500/10 hover:text-white"
+                        onClick={closeMobileMenu}
+                      >
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-[10px] font-bold tracking-wide text-brand-200">
+                          {item.code}
+                        </span>
+                        {item.label}
+                      </ActionLink>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <ActionLink
+                href={SUBSCRIPTIONS_PARTNER_LINK.href}
+                external
+                className={MOBILE_MENU_LINK_CLASS}
+                onClick={closeMobileMenu}
+              >
+                {SUBSCRIPTIONS_PARTNER_LINK.label}
+              </ActionLink>
 
               <ActionLink to="/help" className={MOBILE_MENU_LINK_CLASS} onClick={closeMobileMenu}>
                 Помощь

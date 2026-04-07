@@ -22,17 +22,24 @@ def email_is_configured() -> bool:
     )
 
 
-def send_verification_email(email: str, code: str) -> None:
+def send_verification_email(email: str, code: str, *, purpose: str = "register") -> None:
     if not email_is_configured():
         raise EmailDeliveryError("SMTP не настроен. Укажите SMTP_USERNAME и SMTP_APP_PASSWORD.")
 
+    if purpose == "password_reset":
+        subject = "Код для восстановления пароля"
+        title = "Ваш код для восстановления доступа к PlayStation Store"
+    else:
+        subject = "Код подтверждения регистрации"
+        title = "Ваш код подтверждения для PlayStation Store"
+
     message = EmailMessage()
-    message["Subject"] = "Код подтверждения регистрации"
+    message["Subject"] = subject
     message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
     message["To"] = email
     message.set_content(
         (
-            "Ваш код подтверждения для PlayStation Store\n\n"
+            f"{title}\n\n"
             f"Код: {code}\n"
             f"Срок действия: {settings.AUTH_EMAIL_CODE_TTL_MINUTES} минут\n\n"
             "Если вы не запрашивали этот код, просто проигнорируйте письмо."

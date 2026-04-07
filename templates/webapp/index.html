@@ -562,6 +562,24 @@ console.log('⚡ SSR данные загружены:', window.__INITIAL_PRODUCT
 </script>
 
 <script>
+function webappFormatPriceInRegionCurrency(regionPrice) {
+    if (!regionPrice) return '';
+    const code = (regionPrice.currency_code || '').toUpperCase();
+    const local = regionPrice.price_local;
+    if (local == null || !(local > 0) || !code || code === 'RUB') return '';
+    try {
+        return new Intl.NumberFormat('ru-RU', { style: 'currency', currency: code, maximumFractionDigits: 0 }).format(local);
+    } catch (e) {
+        return `${Math.round(local)} ${code}`;
+    }
+}
+
+const WEBAPP_FLAG_BY_REGION = {
+    TR: '/static/images/flags/turkey.png',
+    UA: '/static/images/flags/ukraine.png',
+    IN: '/static/images/flags/India.png',
+};
+
 class ModernProductCatalog {
     constructor() {
         console.log('🏗️ Creating ModernProductCatalog...');
@@ -1319,7 +1337,7 @@ class ModernProductCatalog {
                 // Флаг региона
                 const flagImg = document.createElement('img');
                 flagImg.className = 'region-flag-img';
-                flagImg.src = flagMapping[regionPrice.flag] || regionPrice.flag;
+                flagImg.src = flagMapping[regionPrice.flag] || WEBAPP_FLAG_BY_REGION[regionPrice.region] || regionPrice.flag;
                 flagImg.alt = regionPrice.name;
                 flagImg.onerror = function() { this.style.display = 'none'; };
                 priceRow.appendChild(flagImg);
@@ -1336,6 +1354,14 @@ class ModernProductCatalog {
                     currentPrice.className = 'price-current';
                     currentPrice.textContent = `${Math.round(regionPrice.price_rub)}₽`;
                     priceWrapper.appendChild(currentPrice);
+
+                    const localLabel = webappFormatPriceInRegionCurrency(regionPrice);
+                    if (localLabel) {
+                        const localEl = document.createElement('span');
+                        localEl.className = 'price-local-currency';
+                        localEl.textContent = localLabel;
+                        priceWrapper.appendChild(localEl);
+                    }
 
                     // Показываем старую цену если есть скидка
                     if (regionPrice.old_price_rub && regionPrice.old_price_rub > regionPrice.price_rub) {
@@ -1364,8 +1390,8 @@ class ModernProductCatalog {
             const pricesDiv = document.createElement('div');
             pricesDiv.className = 'price-values';
 
-            const minPrice = product.min_price_rub || product.rub_price;
-            const oldPrice = product.rub_price_old;
+            const minPrice = product.min_price_rub || product.rub_price || product.min_price;
+            const oldPrice = product.rub_price_old || product.min_price_old;
 
             if (minPrice && minPrice > 0) {
                 const priceWrapper = document.createElement('div');

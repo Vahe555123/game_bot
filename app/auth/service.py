@@ -42,6 +42,7 @@ from .security import (
 )
 
 REGISTER_PURPOSE = "register"
+RESET_PASSWORD_PURPOSE = "password_reset"
 SITE_ROLE_CLIENT = "client"
 SITE_ROLE_ADMIN = "admin"
 OPTIONAL_IDENTITY_FIELDS = {"telegram_id", "google_id", "vk_id"}
@@ -216,7 +217,7 @@ class AuthService:
         users: Optional[Collection] = None,
         codes: Optional[Collection] = None,
         sessions: Optional[Collection] = None,
-        email_sender: Optional[Callable[[str, str], None]] = None,
+        email_sender: Optional[Callable[..., None]] = None,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
         self.users = users or get_auth_users_collection()
@@ -328,6 +329,82 @@ class AuthService:
 
         return AuthActionResponse(
             message="Новый код подтверждения отправлен на email.",
+            resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS,
+        )
+
+    def start_password_reset(self, email: str) -> AuthActionResponse:
+        current_time = self.clock()
+
+        try:
+            user_doc = self._get_password_reset_user(email)
+            existing_verification = self.codes.find_one(
+                {"email_normalized": email, "purpose": RESET_PASSWORD_PURPOSE}
+            )
+            resend_in = seconds_until_resend(existing_verification, now=current_time)
+            if resend_in > 0:
+                raise AuthServiceError(
+                    429,
+                    "Код уже отправлен. Попробуйте чуть позже.",
+                    extra={"resend_available_in": resend_in},
+                )
+
+            code, verification_doc = create_verification_document(
+                user_id=user_doc["_id"],
+                email_normalized=email,
+                purpose=RESET_PASSWORD_PURPOSE,
+                now=current_time,
+            )
+            self._save_verification_and_send_email(
+                email=email,
+                verification_doc=verification_doc,
+                code=code,
+                previous_doc=existing_verification,
+            )
+        except AuthServiceError:
+            raise
+        except PyMongoError as error:
+            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+
+        return AuthActionResponse(
+            message="Код для восстановления пароля отправлен на email.",
+            resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS,
+        )
+
+    def resend_password_reset_code(self, email: str) -> AuthActionResponse:
+        current_time = self.clock()
+
+        try:
+            user_doc = self._get_password_reset_user(email)
+            existing_verification = self.codes.find_one(
+                {"email_normalized": email, "purpose": RESET_PASSWORD_PURPOSE}
+            )
+            resend_in = seconds_until_resend(existing_verification, now=current_time)
+            if resend_in > 0:
+                raise AuthServiceError(
+                    429,
+                    "Повторная отправка пока недоступна.",
+                    extra={"resend_available_in": resend_in},
+                )
+
+            code, verification_doc = create_verification_document(
+                user_id=user_doc["_id"],
+                email_normalized=email,
+                purpose=RESET_PASSWORD_PURPOSE,
+                now=current_time,
+            )
+            self._save_verification_and_send_email(
+                email=email,
+                verification_doc=verification_doc,
+                code=code,
+                previous_doc=existing_verification,
+            )
+        except AuthServiceError:
+            raise
+        except PyMongoError as error:
+            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+
+        return AuthActionResponse(
+            message="Новый код для восстановления пароля отправлен на email.",
             resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS,
         )
 
@@ -444,6 +521,91 @@ class AuthService:
             updated_user = self.users.find_one({"_id": user_doc["_id"]})
             if not updated_user:
                 raise AuthServiceError(404, "Пользователь не найден.")
+
+            session_token = self._create_session(
+                user_id=updated_user["_id"],
+                user_agent=user_agent,
+                ip_address=ip_address,
+                current_time=current_time,
+            )
+        except AuthServiceError:
+            raise
+        except PyMongoError as error:
+            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+
+        return build_public_user(updated_user), session_token
+
+    def confirm_password_reset(
+        self,
+        *,
+        email: str,
+        code: str,
+        new_password: str,
+        user_agent: Optional[str] = None,
+        ip_address: Optional[str] = None,
+    ) -> tuple[SiteUserPublic, str]:
+        current_time = self.clock()
+        filter_query = {"email_normalized": email, "purpose": RESET_PASSWORD_PURPOSE}
+
+        if len(new_password) < settings.AUTH_PASSWORD_MIN_LENGTH:
+            raise AuthServiceError(
+                422,
+                f"Пароль должен быть не короче {settings.AUTH_PASSWORD_MIN_LENGTH} символов.",
+            )
+
+        try:
+            user_doc = self._get_password_reset_user(email)
+            verification_doc = self.codes.find_one(filter_query)
+            if not verification_doc:
+                raise AuthServiceError(400, "Сначала запросите код для восстановления пароля.")
+
+            if verification_doc.get("expires_at") and verification_doc["expires_at"] <= current_time:
+                self.codes.delete_one(filter_query)
+                raise AuthServiceError(400, "Срок действия кода истек. Запросите новый код.")
+
+            max_attempts = int(verification_doc.get("max_attempts", settings.AUTH_EMAIL_MAX_ATTEMPTS))
+            attempts = int(verification_doc.get("attempts", 0))
+            if attempts >= max_attempts:
+                self.codes.delete_one(filter_query)
+                raise AuthServiceError(429, "Лимит попыток исчерпан. Запросите новый код.")
+
+            if not verify_verification_code(
+                code,
+                verification_doc["salt"],
+                verification_doc["code_hash"],
+            ):
+                attempts += 1
+                self.codes.update_one(
+                    filter_query,
+                    {"$set": {"attempts": attempts, "updated_at": current_time}},
+                )
+                if attempts >= max_attempts:
+                    self.codes.delete_one(filter_query)
+                    raise AuthServiceError(429, "Лимит попыток исчерпан. Запросите новый код.")
+
+                raise AuthServiceError(
+                    400,
+                    "Неверный код подтверждения.",
+                    extra={"attempts_left": max_attempts - attempts},
+                )
+
+            self.users.update_one(
+                {"_id": user_doc["_id"]},
+                {
+                    "$set": {
+                        "password_hash": hash_password(new_password),
+                        "email_verified": True,
+                        "is_active": True,
+                        "updated_at": current_time,
+                        "last_login_at": current_time,
+                    }
+                },
+            )
+            self.codes.delete_one(filter_query)
+
+            updated_user = self.users.find_one({"_id": user_doc["_id"]})
+            if not updated_user:
+                raise AuthServiceError(404, "Пользователь не найден после восстановления пароля.")
 
             session_token = self._create_session(
                 user_id=updated_user["_id"],
@@ -799,13 +961,21 @@ class AuthService:
         self.codes.replace_one(filter_query, verification_doc, upsert=True)
 
         try:
-            self.email_sender(email, code)
+            self.email_sender(email, code, purpose=verification_doc["purpose"])
         except EmailDeliveryError as error:
             if previous_doc is not None:
                 self.codes.replace_one(filter_query, previous_doc, upsert=True)
             else:
                 self.codes.delete_one(filter_query)
             raise AuthServiceError(503, str(error)) from error
+
+    def _get_password_reset_user(self, email: str) -> dict[str, Any]:
+        user_doc = self.users.find_one({"email_normalized": email})
+        if not user_doc:
+            raise AuthServiceError(404, "Аккаунт с таким email не найден.")
+        if not user_doc.get("is_active", True):
+            raise AuthServiceError(403, "Аккаунт отключен.")
+        return user_doc
 
     def _find_social_user(
         self,

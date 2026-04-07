@@ -1,4 +1,4 @@
-export type AuthModalView = 'login' | 'register'
+export type AuthModalView = 'login' | 'register' | 'recover'
 
 type LocationShape = {
   pathname: string
@@ -20,7 +20,7 @@ function buildSearch(searchParams: URLSearchParams) {
 }
 
 export function normalizeAuthModalView(value: string | null | undefined): AuthModalView | null {
-  return value === 'login' || value === 'register' ? value : null
+  return value === 'login' || value === 'register' || value === 'recover' ? value : null
 }
 
 export function buildAuthModalPath(

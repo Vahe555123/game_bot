@@ -3272,6 +3272,42 @@ endblock %} {% block header_actions %}
 </script>
 
 <script>
+  function webappNormalizeRegionCode(region) {
+    if (region === undefined || region === null) return "";
+    const r = String(region).trim().toUpperCase();
+    const map = {
+      "EN-TR": "TR",
+      "EN-UA": "UA",
+      "EN-IN": "IN",
+      "RU-TR": "TR",
+      "RU-UA": "UA",
+      "RU-IN": "IN",
+    };
+    return map[r] || r;
+  }
+
+  function webappFormatPriceInRegionCurrency(regionPrice) {
+    if (!regionPrice) return "";
+    const code = (regionPrice.currency_code || "").toUpperCase();
+    const local = regionPrice.price_local;
+    if (local == null || !(local > 0) || !code || code === "RUB") return "";
+    try {
+      return new Intl.NumberFormat("ru-RU", {
+        style: "currency",
+        currency: code,
+        maximumFractionDigits: 0,
+      }).format(local);
+    } catch (e) {
+      return `${Math.round(local)} ${code}`;
+    }
+  }
+
+  const WEBAPP_FLAG_BY_REGION = {
+    TR: "/static/images/flags/turkey.png",
+    UA: "/static/images/flags/ukraine.png",
+    IN: "/static/images/flags/India.png",
+  };
+
   class ProductDetailPage {
     constructor() {
       this.productId = null;
@@ -3660,7 +3696,9 @@ endblock %} {% block header_actions %}
         this.product.regional_prices.length > 0
       ) {
         const regionData = this.product.regional_prices.find(
-          (r) => r.region === productRegion,
+          (r) =>
+            webappNormalizeRegionCode(r.region) ===
+            webappNormalizeRegionCode(productRegion),
         );
 
         if (
@@ -3743,6 +3781,7 @@ endblock %} {% block header_actions %}
                              ${Math.round(priceInfo.current_price)} ₽
                              ${hasDiscount ? `<span class="regional-price-discount-pill">-${discountPercent}%</span>` : ""}
                         </span>
+                        ${priceInfo.price_local_formatted ? `<div class="regional-local-price">${priceInfo.price_local_formatted}</div>` : ""}
                         ${hasDiscount ? `<div style="font-size: 0.75rem; text-decoration: line-through; opacity: 0.5;">${Math.round(priceInfo.old_price)} ₽</div>` : ""}
                     </div>
                 </div>
@@ -3775,6 +3814,7 @@ endblock %} {% block header_actions %}
           name: regionPrice.name,
           current_price: regionPrice.price_rub,
           old_price: regionPrice.old_price_rub,
+          price_local_formatted: webappFormatPriceInRegionCurrency(regionPrice),
           localization_code: regionPrice.localization_code,
           localization_name: regionPrice.localization_name,
         }));
@@ -3800,7 +3840,9 @@ endblock %} {% block header_actions %}
       ) {
         // Ищем цену для региона ЭТОГО товара
         const regionData = this.product.regional_prices.find(
-          (r) => r.region === productRegion,
+          (r) =>
+            webappNormalizeRegionCode(r.region) ===
+            webappNormalizeRegionCode(productRegion),
         );
 
         if (regionData) {
@@ -4469,7 +4511,10 @@ endblock %} {% block header_actions %}
           // Флаг региона
           const flagImg = document.createElement("img");
           flagImg.className = "region-flag-img";
-          flagImg.src = flagMapping[regionPrice.flag] || regionPrice.flag;
+          flagImg.src =
+            flagMapping[regionPrice.flag] ||
+            WEBAPP_FLAG_BY_REGION[regionPrice.region] ||
+            regionPrice.flag;
           flagImg.alt = regionPrice.name;
           flagImg.onerror = function () {
             this.style.display = "none";
@@ -4488,6 +4533,14 @@ endblock %} {% block header_actions %}
             currentPrice.className = "price-current";
             currentPrice.textContent = `${Math.round(regionPrice.price_rub)}₽`;
             priceWrapper.appendChild(currentPrice);
+
+            const localLbl = webappFormatPriceInRegionCurrency(regionPrice);
+            if (localLbl) {
+              const localSpan = document.createElement("span");
+              localSpan.className = "price-local-currency";
+              localSpan.textContent = localLbl;
+              priceWrapper.appendChild(localSpan);
+            }
 
             // Показываем старую цену если есть скидка
             if (
@@ -4519,8 +4572,9 @@ endblock %} {% block header_actions %}
         const pricesDiv = document.createElement("div");
         pricesDiv.className = "price-values";
 
-        const minPrice = product.min_price_rub || product.rub_price;
-        const oldPrice = product.rub_price_old;
+        const minPrice =
+          product.min_price_rub || product.rub_price || product.min_price;
+        const oldPrice = product.rub_price_old || product.min_price_old;
 
         if (minPrice && minPrice > 0) {
           const priceWrapper = document.createElement("div");
@@ -4965,12 +5019,14 @@ endblock %} {% block header_actions %}
           region: region.region,
           name: region.name,
           flag: region.flag,
-          flag_image: flagMapping[region.flag] || "",
+          flag_image:
+            flagMapping[region.flag] || WEBAPP_FLAG_BY_REGION[region.region] || "",
           price_rub: region.price_rub,
           old_price_rub: region.old_price_rub,
           ps_plus_price_rub: region.ps_plus_price_rub,
           discount_percent: region.discount_percent || 0,
           ps_plus_discount_percent: region.ps_plus_discount_percent || 0,
+          price_local_label: webappFormatPriceInRegionCurrency(region),
         }))
         .sort((a, b) => {
           // Сортируем по порядку регионов: Турция, Индия, Украина
@@ -5023,6 +5079,7 @@ endblock %} {% block header_actions %}
                     <div class="region-info">
                         <div class="region-name">${regionData.name}</div>
                         <div class="region-price">${Math.round(displayPrice)}₽</div>
+                        ${regionData.price_local_label ? `<div class="region-price-local">${regionData.price_local_label}</div>` : ""}
                         ${priceDetailsHtml}
                     </div>
                     <div class="region-check">
@@ -5066,7 +5123,9 @@ endblock %} {% block header_actions %}
 
       if (selectedRegion) {
         const regionData = availableRegions.find(
-          (r) => r.region === selectedRegion,
+          (r) =>
+            webappNormalizeRegionCode(r.region) ===
+            webappNormalizeRegionCode(selectedRegion),
         );
         if (
           regionData &&

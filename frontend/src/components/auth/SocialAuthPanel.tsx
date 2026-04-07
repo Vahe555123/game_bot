@@ -1,5 +1,5 @@
 import { Globe, LoaderCircle, MessageCircleMore } from 'lucide-react'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { getAuthProviders, getOAuthStartUrl, telegramLogin } from '../../services/auth'
@@ -33,7 +33,7 @@ function ProviderButton({
       type="button"
       onClick={onClick}
       className={`flex w-full items-center justify-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.04] px-4 text-sm font-semibold text-white transition hover:border-brand-300/50 hover:bg-brand-500/10 ${
-        compact ? 'min-h-[48px] py-3' : 'py-3.5'
+        compact ? 'min-h-[52px] py-3' : 'py-3.5'
       }`}
     >
       {icon}
@@ -104,8 +104,8 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
     script.src = 'https://telegram.org/js/telegram-widget.js?22'
     script.async = true
     script.setAttribute('data-telegram-login', providers.telegram_bot_username)
-    script.setAttribute('data-size', 'large')
-    script.setAttribute('data-radius', '18')
+    script.setAttribute('data-size', compact ? 'medium' : 'large')
+    script.setAttribute('data-radius', compact ? '16' : '18')
     script.setAttribute('data-userpic', 'false')
     script.setAttribute('data-request-access', 'write')
     script.setAttribute('data-onauth', `${callbackName}(user)`)
@@ -116,11 +116,19 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
       delete window[callbackName]
       container.innerHTML = ''
     }
-  }, [navigate, nextPath, providers, setAuthenticatedUser])
+  }, [compact, navigate, nextPath, providers, setAuthenticatedUser])
 
   function beginProviderLogin(provider: 'google' | 'vk') {
     window.location.href = getOAuthStartUrl(provider, nextPath)
   }
+
+  const enabledProvidersCount = useMemo(() => {
+    if (!providers) {
+      return 0
+    }
+
+    return [providers.google_enabled, providers.vk_enabled, providers.telegram_enabled].filter(Boolean).length
+  }, [providers])
 
   if (isLoading) {
     return (
@@ -137,6 +145,12 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
     return null
   }
 
+  const gridClass = compact
+    ? enabledProvidersCount >= 3
+      ? 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3'
+      : 'grid gap-3 sm:grid-cols-2'
+    : 'grid gap-3 md:grid-cols-2'
+
   return (
     <div className="space-y-4 rounded-[26px] border border-white/10 bg-white/[0.03] p-5">
       <div>
@@ -148,7 +162,7 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
         </p>
       </div>
 
-      <div className={`grid gap-3 ${compact ? 'md:grid-cols-2' : ''}`}>
+      <div className={gridClass}>
         {providers.google_enabled ? (
           <ProviderButton
             label="Войти через Google"
@@ -169,15 +183,24 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
 
         {providers.telegram_enabled ? (
           <div
-            className={`rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-4 ${
-              compact ? 'md:col-span-2' : ''
+            className={`rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 ${
+              compact ? '' : 'md:col-span-2'
             }`}
           >
-            <div className="mb-3 flex items-center gap-3 text-sm font-semibold text-white">
-              <MessageCircleMore size={18} />
-              <span>Войти через Telegram</span>
-            </div>
-            <div ref={telegramContainerRef} className="min-h-[52px]" />
+            {compact ? (
+              <div className="mb-2 flex items-center justify-center gap-2 text-sm font-semibold text-white">
+                <MessageCircleMore size={16} />
+                <span>Telegram</span>
+              </div>
+            ) : (
+              <div className="mb-3 flex items-center gap-3 text-sm font-semibold text-white">
+                <MessageCircleMore size={18} />
+                <span>Войти через Telegram</span>
+              </div>
+            )}
+
+            <div ref={telegramContainerRef} className="flex min-h-[52px] items-center justify-center overflow-hidden" />
+
             {isTelegramLoading ? (
               <div className="mt-3 flex items-center gap-2 text-sm text-slate-300">
                 <LoaderCircle size={16} className="animate-spin text-brand-200" />

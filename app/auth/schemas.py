@@ -128,6 +128,29 @@ class ResendCodeRequest(BaseModel):
         return normalize_email(value)
 
 
+class PasswordResetConfirmRequest(BaseModel):
+    email: str = Field(..., description="Email пользователя")
+    code: str = Field(..., min_length=6, max_length=6, description="Код подтверждения")
+    new_password: str = Field(
+        ...,
+        min_length=settings.AUTH_PASSWORD_MIN_LENGTH,
+        description="Новый пароль пользователя",
+    )
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        return normalize_email(value)
+
+    @field_validator("code")
+    @classmethod
+    def validate_code(cls, value: str) -> str:
+        code = value.strip()
+        if not code.isdigit():
+            raise ValueError("Код должен состоять из 6 цифр")
+        return code
+
+
 class LoginRequest(BaseModel):
     email: str = Field(..., description="Email пользователя")
     password: str = Field(..., min_length=1, description="Пароль пользователя")

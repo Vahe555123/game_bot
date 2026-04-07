@@ -377,6 +377,29 @@ main.main-content {
     white-space: nowrap;
 }
 
+.price-local-currency {
+    color: var(--tg-theme-hint-color, #8e8e93);
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.regional-local-price {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--tg-theme-hint-color, #8e8e93);
+}
+
+.region-price-local {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--tg-theme-hint-color, #8e8e93);
+    margin-top: 2px;
+}
+
 .price-old {
     text-decoration: line-through;
     color: var(--tg-theme-hint-color);

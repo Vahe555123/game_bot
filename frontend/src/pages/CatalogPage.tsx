@@ -470,7 +470,6 @@ export function CatalogPage() {
           className={isMobileFiltersOpen ? 'mt-4 block' : 'mt-4 hidden xl:block'}
         />
 
-        <p className="mt-3 text-xs text-slate-500">Поиск и фильтры применяются автоматически примерно через 1 секунду.</p>
       </section>
 
       {catalogNotice ? (

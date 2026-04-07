@@ -16,6 +16,7 @@ from app.auth.schemas import (
     AuthProvidersResponse,
     AuthUserResponse,
     LoginRequest,
+    PasswordResetConfirmRequest,
     RegisterRequest,
     ResendCodeRequest,
     SiteProfilePreferencesUpdateRequest,
@@ -100,7 +101,7 @@ async def register(
         _raise_http_auth_error(error)
 
 
-@router.post("/resend-code", response_model=AuthActionResponse, summary="Повторная отправка кода")
+@router.post("/resend-code", response_model=AuthActionResponse, summary="Повторная отправка кода регистрации")
 async def resend_code(
     payload: ResendCodeRequest,
     auth_service: AuthService = Depends(get_auth_service),
@@ -109,6 +110,51 @@ async def resend_code(
         return await run_in_threadpool(auth_service.resend_registration_code, payload.email)
     except AuthServiceError as error:
         _raise_http_auth_error(error)
+
+
+@router.post("/password-reset/request", response_model=AuthActionResponse, summary="Запросить код для восстановления пароля")
+async def request_password_reset(
+    payload: ResendCodeRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    try:
+        return await run_in_threadpool(auth_service.start_password_reset, payload.email)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/password-reset/resend", response_model=AuthActionResponse, summary="Повторно отправить код для восстановления пароля")
+async def resend_password_reset_code(
+    payload: ResendCodeRequest,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    try:
+        return await run_in_threadpool(auth_service.resend_password_reset_code, payload.email)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/password-reset/confirm", response_model=AuthUserResponse, summary="Подтвердить код и сохранить новый пароль")
+async def confirm_password_reset(
+    payload: PasswordResetConfirmRequest,
+    request: Request,
+    response: Response,
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    try:
+        user, session_token = await run_in_threadpool(
+            auth_service.confirm_password_reset,
+            email=payload.email,
+            code=payload.code,
+            new_password=payload.new_password,
+            user_agent=request.headers.get("user-agent"),
+            ip_address=_get_client_ip(request),
+        )
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+    _set_session_cookie(response, session_token)
+    return AuthUserResponse(user=user)
 
 
 @router.post("/verify-email", response_model=AuthUserResponse, summary="Подтвердить email кодом")
@@ -300,7 +346,7 @@ async def get_profile(
         _raise_http_auth_error(error)
 
 
-@router.put("/profile/preferences", response_model=SiteProfileResponse, summary="Обновить регион и email покупки")
+@router.put("/profile/preferences", response_model=SiteProfileResponse, summary="Обновить регион и email покупок")
 async def update_profile_preferences(
     payload: SiteProfilePreferencesUpdateRequest,
     current_user: SiteUserPublic = Depends(get_current_site_user),

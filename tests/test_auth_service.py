@@ -31,8 +31,8 @@ class EmailSenderSpy:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, email: str, code: str) -> None:
-        self.calls.append((email, code))
+    def __call__(self, email: str, code: str, *, purpose: str = "register") -> None:
+        self.calls.append((email, code, purpose))
 
 
 class InMemoryCollection:
@@ -159,6 +159,7 @@ class AuthServiceTests(unittest.TestCase):
         self.assertEqual(len(self.email_sender.calls), 1)
         self.assertEqual(self.email_sender.calls[0][0], "user@test.com")
         self.assertEqual(len(self.email_sender.calls[0][1]), settings.AUTH_EMAIL_CODE_LENGTH)
+        self.assertEqual(self.email_sender.calls[0][2], "register")
 
         stored_user = self.users.find_one({"email_normalized": "user@test.com"})
         self.assertIsNotNone(stored_user)
@@ -191,6 +192,51 @@ class AuthServiceTests(unittest.TestCase):
 
         self.assertEqual(response.message, "Новый код подтверждения отправлен на email.")
         self.assertEqual(len(self.email_sender.calls), 2)
+
+    def test_password_reset_flow_updates_password_and_logs_user_in(self):
+        self.service.start_registration(self._register_payload())
+        verification_code = self.email_sender.calls[-1][1]
+        self.service.verify_registration_code(email="user@test.com", code=verification_code)
+
+        response = self.service.start_password_reset("user@test.com")
+        self.assertEqual(response.message, "Код для восстановления пароля отправлен на email.")
+        self.assertEqual(self.email_sender.calls[-1][2], "password_reset")
+
+        reset_code = self.email_sender.calls[-1][1]
+        user, session_token = self.service.confirm_password_reset(
+            email="user@test.com",
+            code=reset_code,
+            new_password="brandnewsecret123",
+            user_agent="pytest-reset",
+            ip_address="127.0.0.1",
+        )
+
+        self.assertEqual(user.email, "user@test.com")
+        self.assertTrue(session_token)
+        self.assertIsNotNone(
+            self.sessions.find_one({"token_hash": hash_session_token(session_token)})
+        )
+
+        login_user, _ = self.service.login(email="user@test.com", password="brandnewsecret123")
+        self.assertEqual(login_user.email, "user@test.com")
+
+    def test_password_reset_resend_respects_cooldown(self):
+        self.service.start_registration(self._register_payload())
+        verification_code = self.email_sender.calls[-1][1]
+        self.service.verify_registration_code(email="user@test.com", code=verification_code)
+        self.service.start_password_reset("user@test.com")
+
+        with self.assertRaises(AuthServiceError) as error_context:
+            self.service.resend_password_reset_code("user@test.com")
+
+        self.assertEqual(error_context.exception.status_code, 429)
+        self.assertGreater(error_context.exception.extra["resend_available_in"], 0)
+
+        self.clock.advance(seconds=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS)
+        response = self.service.resend_password_reset_code("user@test.com")
+
+        self.assertEqual(response.message, "Новый код для восстановления пароля отправлен на email.")
+        self.assertEqual(self.email_sender.calls[-1][2], "password_reset")
 
     def test_verify_confirms_email_and_creates_session(self):
         self.service.start_registration(self._register_payload())
@@ -327,7 +373,7 @@ class AuthServiceTests(unittest.TestCase):
         self.assertEqual(profile.psn_accounts["UA"].platform, "PS5")
         self.assertEqual(profile.psn_accounts["UA"].psn_email, "ua-psn@test.com")
         self.assertTrue(profile.psn_accounts["UA"].has_password)
-        self.assertTrue(profile.psn_accounts["UA"].has_backup_code)
+        self.assertFalse(profile.psn_accounts["UA"].has_backup_code)
         self.assertFalse(profile.psn_accounts["TR"].has_password)
 
     def test_profile_methods_accept_object_id_as_public_string(self):

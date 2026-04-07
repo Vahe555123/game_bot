@@ -5,6 +5,7 @@ import type {
   ProfilePSNAccountPayload,
   AuthUserResponse,
   LoginPayload,
+  PasswordResetConfirmPayload,
   RegisterPayload,
   ResendCodePayload,
   SiteProfileResponse,
@@ -25,6 +26,21 @@ export async function resendCode(payload: ResendCodePayload) {
 
 export async function verifyEmail(payload: VerifyEmailPayload) {
   const response = await apiClient.post<AuthUserResponse>('/auth/verify-email', payload)
+  return response.data
+}
+
+export async function requestPasswordReset(payload: ResendCodePayload) {
+  const response = await apiClient.post<AuthActionResponse>('/auth/password-reset/request', payload)
+  return response.data
+}
+
+export async function resendPasswordReset(payload: ResendCodePayload) {
+  const response = await apiClient.post<AuthActionResponse>('/auth/password-reset/resend', payload)
+  return response.data
+}
+
+export async function confirmPasswordReset(payload: PasswordResetConfirmPayload) {
+  const response = await apiClient.post<AuthUserResponse>('/auth/password-reset/confirm', payload)
   return response.data
 }
 

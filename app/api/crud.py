@@ -67,6 +67,24 @@ class ProductCRUD:
         return 'popular'
 
     @staticmethod
+    def normalize_product_region(region: Optional[str]) -> Optional[str]:
+        """Привести значение region из БД к каноническому TR / UA / IN."""
+        if region is None or str(region).strip() == '':
+            return None
+        r = str(region).strip().upper()
+        if r in ('TR', 'UA', 'IN'):
+            return r
+        aliases = {
+            'EN-TR': 'TR',
+            'EN-UA': 'UA',
+            'EN-IN': 'IN',
+            'RU-TR': 'TR',
+            'RU-UA': 'UA',
+            'RU-IN': 'IN',
+        }
+        return aliases.get(r)
+
+    @staticmethod
     def _get_favorites_count_subquery(db: Session):
         return (
             db.query(
@@ -186,7 +204,7 @@ class ProductCRUD:
     ) -> Dict[str, Any]:
         region_mapping = {
             'UA': {
-                'flag': 'рџ‡єрџ‡¦',
+                'flag': '🇺🇦',
                 'name': 'Украина',
                 'code': 'UAH',
                 'price_field': 'price_uah',
@@ -194,7 +212,7 @@ class ProductCRUD:
                 'ps_plus_price_field': 'ps_plus_price_uah',
             },
             'TR': {
-                'flag': 'рџ‡№рџ‡·',
+                'flag': '🇹🇷',
                 'name': 'Турция',
                 'code': 'TRY',
                 'price_field': 'price_try',
@@ -202,7 +220,7 @@ class ProductCRUD:
                 'ps_plus_price_field': 'ps_plus_price_try',
             },
             'IN': {
-                'flag': 'рџ‡®рџ‡і',
+                'flag': '🇮🇳',
                 'name': 'Индия',
                 'code': 'INR',
                 'price_field': 'price_inr',
@@ -211,11 +229,11 @@ class ProductCRUD:
             },
         }
 
-        regional_by_code = {
-            (product.region or '').upper(): product
-            for product in regional_products
-            if getattr(product, 'region', None)
-        }
+        regional_by_code: Dict[str, Product] = {}
+        for rp in regional_products:
+            code = ProductCRUD.normalize_product_region(getattr(rp, 'region', None))
+            if code:
+                regional_by_code[code] = rp
 
         regional_prices: List[Dict[str, Any]] = []
         min_price_rub: Optional[float] = None
@@ -786,123 +804,24 @@ class ProductCRUD:
         Returns:
             dict с данными товара и ценами из всех регионов
         """
-        # Получаем main_name товара
-        main_name = product.get_display_name()
-
-        # Находим ВСЕ варианты ЭТОГО КОНКРЕТНОГО товара (с тем же ID) из разных регионов
-        # ID у товаров одинаковый для всех регионов, отличается только поле region
+        # Все варианты товара по id; цены по регионам — единая логика с каталогом
         regional_products = db.query(Product).filter(Product.id == product.id).all()
+        regional_price_data = ProductCRUD._collect_regional_price_data(regional_products, db)
+        regional_prices = regional_price_data['regional_prices']
+        min_price = regional_price_data['min_price_rub']
+        min_price_old = regional_price_data['min_old_price_rub']
 
-        # Маппинг регионов
-        region_mapping = {
-            'UA': {'flag': '🇺🇦', 'name': 'Украина', 'code': 'UAH', 'price_field': 'price_uah', 'old_price_field': 'old_price_uah'},
-            'TR': {'flag': '🇹🇷', 'name': 'Турция', 'code': 'TRY', 'price_field': 'price_try', 'old_price_field': 'old_price_try'},
-            'IN': {'flag': '🇮🇳', 'name': 'Индия', 'code': 'INR', 'price_field': 'price_inr', 'old_price_field': 'old_price_inr'}
-        }
-
-        # Собираем цены из всех регионов
-        regional_prices = []
-        min_price = None
-        min_price_old = None
-
-        # Определяем какие регионы показывать
-        # На детальной странице товара ВСЕГДА показываем все 3 региона для ознакомления
-        # Порядок: Турция, Индия, Украина
-        enabled_regions = ['TR', 'IN', 'UA']
-
-        for region_code in enabled_regions:
-            # Ищем товар для этого региона
-            regional_product = next((p for p in regional_products if p.region == region_code), None)
-
-            if regional_product and region_code in region_mapping:
-                region_info = region_mapping[region_code]
-
-                # ИСПРАВЛЕНО: Получаем цену из регионального поля, а не из price (которое уже в рублях!)
-                # Определяем поле региональной цены
-                price_field = None
-                old_price_field = None
-                if region_code == 'UA':
-                    price_field = 'price_uah'
-                    old_price_field = 'old_price_uah'
-                elif region_code == 'TR':
-                    price_field = 'price_try'
-                    old_price_field = 'old_price_try'
-                elif region_code == 'IN':
-                    price_field = 'price_inr'
-                    old_price_field = 'old_price_inr'
-
-                price = getattr(regional_product, price_field, None) if price_field else None
-                old_price = getattr(regional_product, old_price_field, None) if old_price_field else None
-
-                # Получаем PS Plus цену для этого региона
-                ps_plus_price_field_map = {
-                    'UA': 'ps_plus_price_uah',
-                    'TR': 'ps_plus_price_try',
-                    'IN': 'ps_plus_price_inr'
-                }
-                ps_plus_price = getattr(regional_product, ps_plus_price_field_map.get(region_code), None)
-
-                if price and price > 0:
-                    # Конвертируем в рубли
-                    from app.models.currency_rate import CurrencyRate
-                    rate = CurrencyRate.get_rate_for_price(db, region_info['code'], price)
-                    price_rub = round(price * rate, 2)
-                    old_price_rub = round(old_price * rate, 2) if old_price and old_price > 0 else None
-                    ps_plus_price_rub = round(ps_plus_price * rate, 2) if ps_plus_price and ps_plus_price > 0 else None
-
-                    # Вычисляем скидку
-                    has_discount = False
-                    discount_percent = None
-                    if old_price and old_price > price:
-                        has_discount = True
-                        discount_percent = int(((old_price - price) / old_price) * 100)
-
-                    # Вычисляем дополнительную скидку PS Plus (если есть)
-                    # ВАЖНО: считаем от оригинальной цены (old_price_rub), а не от текущей!
-                    ps_plus_discount_percent = None
-                    if ps_plus_price_rub and old_price_rub and ps_plus_price_rub < old_price_rub:
-                        ps_plus_discount_percent = int(((old_price_rub - ps_plus_price_rub) / old_price_rub) * 100)
-
-                    # Получаем локализацию
-                    localization_code = regional_product.localization
-                    localization_name = ProductCRUD.get_localization_name(db, localization_code) if localization_code else None
-
-                    regional_prices.append({
-                        'region': region_code,
-                        'flag': region_info['flag'],
-                        'name': region_info['name'],
-                        'currency_code': region_info['code'],
-                        'price_local': price,
-                        'old_price_local': old_price if old_price and old_price > 0 else None,
-                        'ps_plus_price_local': ps_plus_price if ps_plus_price and ps_plus_price > 0 else None,
-                        'price_rub': price_rub,
-                        'old_price_rub': old_price_rub,
-                        'ps_plus_price_rub': ps_plus_price_rub,
-                        'has_discount': has_discount,
-                        'discount_percent': discount_percent,
-                        'ps_plus_discount_percent': ps_plus_discount_percent,
-                        'localization_code': localization_code,
-                        'localization_name': localization_name
-                    })
-
-                    # Обновляем минимальную цену
-                    if min_price is None or price_rub < min_price:
-                        min_price = price_rub
-                        min_price_old = old_price_rub
-
-        # Получаем локализацию из основного товара
         localization_name = ProductCRUD.get_localization_name(db, product.localization)
+        canon_region = ProductCRUD.normalize_product_region(product.region)
+        display_region = canon_region if canon_region else product.region
 
-        # Регион товара уже в правильном формате (UA, TR, IN)
-        normalized_region = product.region
-
-        product_dict = {
+        return {
             'id': product.id,
             'name': product.name,
             'main_name': product.get_display_name(),
             'category': product.category,
             'type': product.type,
-            'region': normalized_region,
+            'region': display_region,
             'image': product.image,
             'publisher': product.publisher,
             'description': product.description,
@@ -911,9 +830,10 @@ class ProductCRUD:
             'platforms': product.platforms,
             'localization': product.localization,
             'localization_name': localization_name,
-            'has_discount': any(p['has_discount'] for p in regional_prices),
+            'has_discount': any(p['has_discount'] for p in regional_prices) if regional_prices else False,
             'discount': product.discount,
             'discount_end': product.discount_end,
+            'discount_percent': regional_price_data.get('max_discount_percent'),
             'ps_plus': product.ps_plus,
             'has_ps_plus': product.has_ps_plus,
             'ps_price': product.ps_price,
@@ -929,10 +849,11 @@ class ProductCRUD:
             'players_online': bool(product.players_online),
             'regional_prices': regional_prices,
             'min_price': min_price,
-            'min_price_old': min_price_old
+            'min_price_old': min_price_old,
+            'min_price_rub': min_price,
+            'rub_price': min_price,
+            'rub_price_old': min_price_old,
         }
-
-        return product_dict
 
     @staticmethod
     def get_unique_products_by_main_name(
