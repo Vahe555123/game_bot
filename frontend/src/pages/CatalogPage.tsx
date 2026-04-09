@@ -4,16 +4,9 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { CatalogFilters } from '../components/catalog/CatalogFilters'
 import { ProductCard } from '../components/catalog/ProductCard'
 import { ProductSkeleton } from '../components/catalog/ProductSkeleton'
-import { mockProducts } from '../data/mockProducts'
 import { fetchCatalog, fetchCategories } from '../services/catalog'
 import type { CatalogFilterState, CatalogProduct } from '../types/catalog'
-import {
-  matchesPlatformFilter,
-  matchesPlayersFilter,
-  matchesPriceRange,
-  normalizeRegionFilterValue,
-  sanitizeCatalogFilters,
-} from '../utils/catalogFilters'
+import { sanitizeCatalogFilters } from '../utils/catalogFilters'
 
 const DEFAULT_FILTERS: CatalogFilterState = {
   page: 1,
@@ -98,64 +91,6 @@ function countActiveFilters(filters: CatalogFilterState) {
     filters.hasPsPlus,
     filters.hasEaAccess,
   ].filter(Boolean).length
-}
-
-function applyMockFilters(products: CatalogProduct[], filters: CatalogFilterState) {
-  const normalizedRegion = normalizeRegionFilterValue(filters.region)
-
-  const filtered = products
-    .filter((product) => {
-      const matchesSearch =
-        !filters.search ||
-        [product.mainName, product.name, product.publisher, product.category, ...product.tags]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-          .includes(filters.search.toLowerCase())
-
-      const matchesCategory = !filters.category || product.category === filters.category
-      const matchesRegion = !normalizedRegion || product.region === normalizedRegion
-      const matchesPlatform = matchesPlatformFilter(product, filters.platform)
-      const matchesPlayers = matchesPlayersFilter(product, filters.players)
-      const matchesPrice = matchesPriceRange(product, filters.minPrice, filters.maxPrice)
-      const matchesDiscount = !filters.hasDiscount || product.hasDiscount
-      const matchesPsPlus = !filters.hasPsPlus || product.hasPsPlus
-      const matchesEaAccess = !filters.hasEaAccess || product.hasEaAccess
-
-      return (
-        matchesSearch &&
-        matchesCategory &&
-        matchesRegion &&
-        matchesPlatform &&
-        matchesPlayers &&
-        matchesPrice &&
-        matchesDiscount &&
-        matchesPsPlus &&
-        matchesEaAccess
-      )
-    })
-    .sort((left, right) => {
-      if (filters.sort === 'alphabet') {
-        return left.mainName.localeCompare(right.mainName, 'ru')
-      }
-
-      if (filters.sort === 'price_asc') {
-        const leftPrice = left.priceRub ?? Number.POSITIVE_INFINITY
-        const rightPrice = right.priceRub ?? Number.POSITIVE_INFINITY
-        return leftPrice - rightPrice || left.mainName.localeCompare(right.mainName, 'ru')
-      }
-
-      return (right.favoritesCount ?? 0) - (left.favoritesCount ?? 0) || left.mainName.localeCompare(right.mainName, 'ru')
-    })
-
-  const start = (filters.page - 1) * filters.limit
-  const end = start + filters.limit
-
-  return {
-    products: filtered.slice(start, end),
-    total: filtered.length,
-    hasNext: end < filtered.length,
-  }
 }
 
 function mergeCatalogProducts(current: CatalogProduct[], next: CatalogProduct[]) {
@@ -326,7 +261,7 @@ export function CatalogPage() {
 
     ;(async () => {
       try {
-        let response = await fetchCatalog({
+        const response = await fetchCatalog({
           page,
           limit: filters.limit,
           sort: filters.sort,
@@ -343,37 +278,6 @@ export function CatalogPage() {
           grouped: true,
         })
 
-        let notice: string | null = null
-
-        if (isFirstPage && response.total === 0 && response.products.length === 0) {
-          const fallbackResponse = await fetchCatalog({
-            page,
-            limit: Math.max(filters.limit * 3, 24),
-            sort: filters.sort,
-            search: filters.search || undefined,
-            category: filters.category || undefined,
-            region: filters.region || undefined,
-            platform: filters.platform || undefined,
-            players: filters.players || undefined,
-            min_price: filters.minPrice ? Number(filters.minPrice) : undefined,
-            max_price: filters.maxPrice ? Number(filters.maxPrice) : undefined,
-            has_discount: filters.hasDiscount || undefined,
-            has_ps_plus: filters.hasPsPlus || undefined,
-            has_ea_access: filters.hasEaAccess || undefined,
-            grouped: false,
-          })
-
-          if (fallbackResponse.products.length > 0) {
-            response = {
-              ...fallbackResponse,
-              products: dedupeCatalogProducts(fallbackResponse.products).slice(0, filters.limit),
-              total: fallbackResponse.total,
-              hasNext: fallbackResponse.hasNext,
-            }
-            notice = 'Каталог восстановлен через резервную загрузку. Если увидите странные дубли, обновите страницу.'
-          }
-        }
-
         if (!ignore) {
           setProducts((current) =>
             isFirstPage
@@ -382,19 +286,16 @@ export function CatalogPage() {
           )
           setTotal(response.total)
           setHasNextPage(response.hasNext)
-          setCatalogNotice(notice)
+          setCatalogNotice(null)
         }
       } catch {
         if (!ignore) {
-          const fallback = applyMockFilters(mockProducts, { ...filters, page })
-          setProducts((current) =>
-            isFirstPage
-              ? dedupeCatalogProducts(fallback.products)
-              : mergeCatalogProducts(current, dedupeCatalogProducts(fallback.products)),
-          )
-          setTotal(fallback.total)
-          setHasNextPage(fallback.hasNext)
-          setCatalogNotice('Не удалось получить живой каталог. Показываю резервную подборку, пока API не ответит.')
+          if (isFirstPage) {
+            setProducts([])
+            setTotal(0)
+          }
+          setHasNextPage(false)
+          setCatalogNotice('Не удалось загрузить каталог. Попробуй обновить страницу или изменить фильтры чуть позже.')
         }
       } finally {
         if (!ignore) {

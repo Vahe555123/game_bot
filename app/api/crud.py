@@ -1,6 +1,6 @@
 from collections import defaultdict
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, func, text
+from sqlalchemy import and_, or_, case, func, literal, text
 from typing import Optional, List, Dict, Any
 from app.models import User, Product, UserFavoriteProduct, Localization
 from app.models.currency_rate import CurrencyRate
@@ -309,6 +309,88 @@ class ProductCRUD:
             'min_old_price_rub': min_old_price_rub,
             'max_discount_percent': max_discount_percent,
         }
+
+    @staticmethod
+    def _get_active_currency_rates_by_region(db: Session) -> Dict[str, List[CurrencyRate]]:
+        rates_by_region: Dict[str, List[CurrencyRate]] = {
+            'TR': [],
+            'IN': [],
+            'UA': [],
+        }
+
+        active_rates = (
+            db.query(CurrencyRate)
+            .filter(
+                CurrencyRate.is_active == True,
+                CurrencyRate.currency_to == 'RUB',
+            )
+            .order_by(
+                CurrencyRate.currency_from.asc(),
+                CurrencyRate.price_min.asc(),
+            )
+            .all()
+        )
+
+        for rate in active_rates:
+            currency_from = (rate.currency_from or '').upper()
+            if currency_from in {'TRY', 'TRL'}:
+                rates_by_region['TR'].append(rate)
+            elif currency_from == 'INR':
+                rates_by_region['IN'].append(rate)
+            elif currency_from == 'UAH':
+                rates_by_region['UA'].append(rate)
+
+        return rates_by_region
+
+    @staticmethod
+    def _build_rate_case_for_price(price_column, rates: List[CurrencyRate]):
+        if not rates:
+            return literal(1.0)
+
+        whens = []
+        for rate in rates:
+            condition = price_column >= rate.price_min
+            if rate.price_max is not None:
+                condition = and_(condition, price_column <= rate.price_max)
+            whens.append((condition, literal(float(rate.rate))))
+
+        return case(*whens, else_=literal(1.0))
+
+    @staticmethod
+    def _build_row_price_rub_expression(db: Session):
+        rates_by_region = ProductCRUD._get_active_currency_rates_by_region(db)
+
+        tr_rate_case = ProductCRUD._build_rate_case_for_price(Product.price_try, rates_by_region['TR'])
+        in_rate_case = ProductCRUD._build_rate_case_for_price(Product.price_inr, rates_by_region['IN'])
+        ua_rate_case = ProductCRUD._build_rate_case_for_price(Product.price_uah, rates_by_region['UA'])
+
+        return case(
+            (
+                and_(
+                    Product.region == 'TR',
+                    Product.price_try.isnot(None),
+                    Product.price_try > 0,
+                ),
+                Product.price_try * tr_rate_case,
+            ),
+            (
+                and_(
+                    Product.region == 'IN',
+                    Product.price_inr.isnot(None),
+                    Product.price_inr > 0,
+                ),
+                Product.price_inr * in_rate_case,
+            ),
+            (
+                and_(
+                    Product.region == 'UA',
+                    Product.price_uah.isnot(None),
+                    Product.price_uah > 0,
+                ),
+                Product.price_uah * ua_rate_case,
+            ),
+            else_=None,
+        )
 
     @staticmethod
     def get_by_id(db: Session, product_id: str, region: Optional[str] = None) -> Optional[Product]:
@@ -963,14 +1045,15 @@ class ProductCRUD:
 
         # Фильтруем по региону если указан
         if filter_region:
+            visible_regions = [filter_region]
             query = query.filter(Product.region == filter_region)
         else:
             # Если регион не указан, берем настройки пользователя или все регионы
             if user:
-                enabled_regions = user.get_enabled_regions()
+                visible_regions = user.get_enabled_regions()
             else:
-                enabled_regions = ['UA', 'TR', 'IN']
-            query = query.filter(Product.region.in_(enabled_regions))
+                visible_regions = ['UA', 'TR', 'IN']
+            query = query.filter(Product.region.in_(visible_regions))
 
         # Применяем фильтры
         if filters.category:
@@ -1137,118 +1220,16 @@ class ProductCRUD:
                 )
             )
 
-        from app.models.currency_rate import CurrencyRate
-
-        # ОПТИМИЗАЦИЯ: Если есть фильтры по цене - нужно загрузить все товары
-        # Если нет - применяем пагинацию на уровне БД (LIMIT/OFFSET)
         sort_mode = ProductCRUD._normalize_sort_mode(getattr(filters, 'sort', None))
         favorites_subquery = ProductCRUD._get_favorites_count_subquery(db)
-        has_price_filter = filters.min_price is not None or filters.max_price is not None
-        requires_in_memory_sort = has_price_filter or sort_mode in {'price_asc', 'price_desc'}
         localization_cache: Dict[str, Optional[str]] = {}
-
-        if requires_in_memory_sort:
-            all_products = query.all()
-            regional_products_by_id: Dict[str, List[Product]] = defaultdict(list)
-            for product in all_products:
-                regional_products_by_id[product.id].append(product)
-
-            favorites_count_rows = (
-                db.query(
-                    favorites_subquery.c.product_id,
-                    favorites_subquery.c.favorites_count,
-                )
-                .filter(favorites_subquery.c.product_id.in_(list(regional_products_by_id.keys())))
-                .all()
-                if regional_products_by_id
-                else []
-            )
-            favorites_count_map = {
-                product_id: int(favorites_count or 0)
-                for product_id, favorites_count in favorites_count_rows
-            }
-
-            representative_map = ProductCRUD._choose_representative_products(
-                all_products,
-                user=user,
-                filter_region=filter_region,
-            )
-
-            grouped_products: List[Dict[str, Any]] = []
-            for product_id, representative in representative_map.items():
-                regional_products = regional_products_by_id.get(product_id, [])
-                price_data = ProductCRUD._collect_regional_price_data(
-                    regional_products,
-                    db,
-                    localization_cache,
-                )
-                min_price_rub = price_data['min_price_rub']
-
-                if filters.min_price is not None and (min_price_rub is None or min_price_rub < filters.min_price):
-                    continue
-                if filters.max_price is not None and (min_price_rub is None or min_price_rub > filters.max_price):
-                    continue
-
-                grouped_products.append(
-                    {
-                        'product': representative,
-                        'regional_products': regional_products,
-                        'favorites_count': favorites_count_map.get(product_id, 0),
-                        'sort_name': ProductCRUD._get_product_sort_name(representative),
-                        'min_price_rub': min_price_rub,
-                    }
-                )
-
-            if sort_mode == 'price_desc':
-                grouped_products.sort(
-                    key=lambda item: (
-                        -(item['min_price_rub'] if item['min_price_rub'] is not None else -1),
-                        item['sort_name'],
-                        item['product'].id,
-                    )
-                )
-            elif sort_mode == 'price_asc':
-                grouped_products.sort(
-                    key=lambda item: (
-                        item['min_price_rub'] if item['min_price_rub'] is not None else float('inf'),
-                        item['sort_name'],
-                        item['product'].id,
-                    )
-                )
-            elif sort_mode == 'alphabet':
-                grouped_products.sort(key=lambda item: (item['sort_name'], item['product'].id))
-            else:
-                grouped_products.sort(
-                    key=lambda item: (
-                        -item['favorites_count'],
-                        item['sort_name'],
-                        item['product'].id,
-                    )
-                )
-
-            total = len(grouped_products)
-            offset = (pagination.page - 1) * pagination.limit
-            paginated_products = grouped_products[offset:offset + pagination.limit]
-
-            result = []
-            for item in paginated_products:
-                result.append(
-                    ProductCRUD.prepare_product_with_multi_region_prices(
-                        item['product'],
-                        db,
-                        user,
-                        filter_region,
-                        regional_products=item['regional_products'],
-                        localization_cache=localization_cache,
-                        favorites_count=item['favorites_count'],
-                    )
-                )
-
-            return result, total
-
         product_id_column = Product.id.label('product_id')
-        sort_name_column = func.min(func.coalesce(Product.main_name, Product.name, Product.id)).label('sort_name')
+        sort_name_column = func.min(
+            func.lower(func.coalesce(Product.main_name, Product.name, Product.id))
+        ).label('sort_name')
         favorites_count_column = func.coalesce(favorites_subquery.c.favorites_count, 0).label('favorites_count')
+        min_price_rub_column = func.min(ProductCRUD._build_row_price_rub_expression(db)).label('min_price_rub')
+        null_prices_last_column = case((min_price_rub_column.is_(None), 1), else_=0)
 
         grouped_query = (
             query.outerjoin(favorites_subquery, favorites_subquery.c.product_id == Product.id)
@@ -1256,13 +1237,34 @@ class ProductCRUD:
                 product_id_column,
                 sort_name_column,
                 favorites_count_column,
+                min_price_rub_column,
             )
             .group_by(Product.id, favorites_subquery.c.favorites_count)
         )
 
+        if filters.min_price is not None:
+            grouped_query = grouped_query.having(min_price_rub_column >= filters.min_price)
+
+        if filters.max_price is not None:
+            grouped_query = grouped_query.having(min_price_rub_column <= filters.max_price)
+
         total = db.query(func.count()).select_from(grouped_query.order_by(None).subquery()).scalar() or 0
 
-        if sort_mode == 'alphabet':
+        if sort_mode == 'price_desc':
+            grouped_query = grouped_query.order_by(
+                null_prices_last_column.asc(),
+                min_price_rub_column.desc(),
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            )
+        elif sort_mode == 'price_asc':
+            grouped_query = grouped_query.order_by(
+                null_prices_last_column.asc(),
+                min_price_rub_column.asc(),
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            )
+        elif sort_mode == 'alphabet':
             grouped_query = grouped_query.order_by(sort_name_column.asc(), product_id_column.asc())
         else:
             grouped_query = grouped_query.order_by(
@@ -1287,7 +1289,14 @@ class ProductCRUD:
             for row in page_rows
         }
 
-        page_products = query.filter(Product.id.in_(page_ids)).all()
+        page_products = (
+            db.query(Product)
+            .filter(
+                Product.id.in_(page_ids),
+                Product.region.in_(visible_regions),
+            )
+            .all()
+        )
         regional_products_by_id: Dict[str, List[Product]] = defaultdict(list)
         for product in page_products:
             regional_products_by_id[product.id].append(product)
@@ -1315,78 +1324,6 @@ class ProductCRUD:
                     favorites_count=page_favorites_map.get(product_id, 0),
                 )
             )
-
-        return result, total
-
-        has_price_filter = filters.min_price is not None or filters.max_price is not None
-
-        if has_price_filter:
-            # Загружаем все товары для фильтрации по цене
-            all_products = query.all()
-
-            # Применяем фильтр по цене (проверяем цену соответствующего региона)
-            filtered_products = []
-            region_price_map = {
-                'UA': ('price_uah', 'UAH'),
-                'TR': ('price_try', 'TRY'),
-                'IN': ('price_inr', 'INR')
-            }
-
-            for product in all_products:
-                price_rub = None
-
-                if product.region and product.region in region_price_map:
-                    price_field, currency_code = region_price_map[product.region]
-                    price_value = getattr(product, price_field, None)
-
-                    if price_value and price_value > 0:
-                        rate = CurrencyRate.get_rate_for_price(db, currency_code, price_value)
-                        price_rub = price_value * rate
-
-                # Применяем фильтры по цене
-                if filters.min_price is not None:
-                    if price_rub is None or price_rub < filters.min_price:
-                        continue
-
-                if filters.max_price is not None:
-                    if price_rub is None or price_rub > filters.max_price:
-                        continue
-
-                filtered_products.append((product, price_rub))
-
-            grouped_products = ProductCRUD._group_product_rows(
-                filtered_products,
-                user=user,
-                filter_region=filter_region,
-            )
-
-            total = len(grouped_products)
-
-            # Применяем пагинацию в памяти
-            offset = (pagination.page - 1) * pagination.limit
-            paginated_products = grouped_products[offset:offset + pagination.limit]
-        else:
-            # Для каталога нужен один товар на карточку, поэтому сначала группируем строки по ID,
-            # а уже потом считаем total и применяем пагинацию.
-            products = query.all()
-            grouped_products = ProductCRUD._group_product_rows(
-                [(product, None) for product in products],
-                user=user,
-                filter_region=filter_region,
-            )
-
-            total = len(grouped_products)
-
-            offset = (pagination.page - 1) * pagination.limit
-            paginated_products = grouped_products[offset:offset + pagination.limit]
-
-        # Подготавливаем продукты с мультирегиональными ценами
-        result = []
-        for product, min_price in paginated_products:
-            product_dict = ProductCRUD.prepare_product_with_multi_region_prices(
-                product, db, user, filter_region
-            )
-            result.append(product_dict)
 
         return result, total
 

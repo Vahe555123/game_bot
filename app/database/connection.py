@@ -27,6 +27,16 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Базовый класс для моделей
 Base = declarative_base()
 
+SQLITE_INDEX_STATEMENTS = (
+    "CREATE INDEX IF NOT EXISTS idx_products_region ON products(region)",
+    "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)",
+    "CREATE INDEX IF NOT EXISTS idx_products_region_category ON products(region, category)",
+    "CREATE INDEX IF NOT EXISTS idx_products_main_name ON products(main_name)",
+    "CREATE INDEX IF NOT EXISTS idx_products_ps_plus_collection ON products(ps_plus_collection)",
+    "CREATE INDEX IF NOT EXISTS idx_products_ea_access ON products(ea_access)",
+    "CREATE INDEX IF NOT EXISTS idx_user_favorite_products_product_id ON user_favorite_products(product_id)",
+)
+
 def get_db():
     """Зависимость для получения сессии базы данных"""
     db = SessionLocal()
@@ -59,7 +69,13 @@ def create_tables():
     from app.models.purchase_order import SitePurchaseOrder
     
     Base.metadata.create_all(bind=engine)
-    print("✅ Таблицы базы данных созданы/обновлены")
+
+    if "sqlite" in settings.DATABASE_URL:
+        with engine.begin() as connection:
+            for statement in SQLITE_INDEX_STATEMENTS:
+                connection.execute(text(statement))
+            connection.execute(text("PRAGMA optimize"))
+    print("Tables initialized")
 
 def init_database():
     """Инициализация базы данных с начальными данными"""

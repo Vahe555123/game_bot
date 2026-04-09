@@ -310,7 +310,7 @@ async def delete_psn_account(telegram_id: int, region: str, db: Session = Depend
 
 # Роуты для товаров
 @router.get("/products/", tags=["Products"], summary="Список товаров")
-async def get_products(
+def get_products(
     page: int = Query(1, ge=1, description="Номер страницы"),
     limit: int = Query(20, ge=1, le=100, description="Количество элементов на странице"),
     category: Optional[str] = Query(None, description="Фильтр по категории"),
@@ -385,7 +385,7 @@ async def get_products(
     }
 
 @router.get("/products/{product_id}", response_model=dict, tags=["Products"], summary="Получить товар")
-async def get_product(
+def get_product(
     product_id: str,
     region: Optional[str] = Query(None, description="Регион товара"),
     telegram_id: Optional[int] = None,
