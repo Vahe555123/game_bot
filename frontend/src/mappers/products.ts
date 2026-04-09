@@ -8,6 +8,7 @@ import type {
   RegionInfo,
 } from '../types/catalog'
 import { formatCurrency } from '../utils/format'
+import { getBestLocalizationPresentation } from '../utils/productPresentation'
 
 const regionMeta: Record<string, { code: string; symbol: string; name: string }> = {
   TR: { code: 'TRY', symbol: '₺', name: 'Турция' },
@@ -105,6 +106,9 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
   const primaryRegionalPrice = pickPrimaryRegionalPrice(regionalPrices)
   const regionInfo = normalizeRegionInfo(raw.region, raw.region_info)
   const price = resolveDisplayPrice(raw, regionInfo, primaryRegionalPrice)
+  const aggregatedLocalization = regionalPrices.length
+    ? getBestLocalizationPresentation(regionalPrices.map((item) => item.localizationName))
+    : null
 
   return {
     id: raw.id,
@@ -121,7 +125,10 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     edition: raw.edition ?? null,
     description: raw.description ?? null,
     localization: raw.localization ?? null,
-    localizationName: raw.localization_name ?? primaryRegionalPrice?.localizationName ?? null,
+    localizationName:
+      aggregatedLocalization && aggregatedLocalization.status !== 'unknown'
+        ? aggregatedLocalization.shortLabel
+        : raw.localization_name ?? primaryRegionalPrice?.localizationName ?? null,
     hasDiscount: Boolean(raw.has_discount),
     discount: raw.discount ?? null,
     discountPercent: raw.discount_percent ?? primaryRegionalPrice?.discountPercent ?? null,

@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { BadgePercent } from 'lucide-react'
 import type { ProductRegionPrice } from '../../types/catalog'
 import { getDualCurrencyPriceDisplay } from '../../utils/format'
-import { shouldShowOldPrice } from '../../utils/productPresentation'
+import { getLocalizationPresentation, shouldShowOldPrice } from '../../utils/productPresentation'
 
 type RegionalPriceListProps = {
   prices: ProductRegionPrice[]
@@ -26,6 +26,7 @@ function RegionalPriceRow({
     variant === 'detail' && price.psPlusPriceRub !== null
       ? getDualCurrencyPriceDisplay(price.psPlusPriceLocal, price.currencyCode, price.psPlusPriceRub)
       : null
+  const localization = getLocalizationPresentation(price.localizationName)
 
   return (
     <div
@@ -50,8 +51,18 @@ function RegionalPriceRow({
               <p className={clsx('truncate font-semibold text-white', variant === 'card' ? 'text-sm' : 'text-base')}>
                 {price.name}
               </p>
-              {variant === 'detail' && price.localizationName ? (
-                <p className="mt-1 truncate text-xs text-slate-400">{price.localizationName}</p>
+              {variant === 'detail' ? (
+                <p
+                  className={clsx(
+                    'mt-1 truncate text-xs',
+                    localization.status === 'full' && 'text-emerald-300',
+                    localization.status === 'partial' && 'text-sky-300',
+                    localization.status === 'unsupported' && 'text-rose-300',
+                    localization.status === 'unknown' && 'text-slate-400',
+                  )}
+                >
+                  {localization.shortLabel}
+                </p>
               ) : null}
             </div>
 

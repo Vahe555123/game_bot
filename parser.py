@@ -1777,10 +1777,11 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
 
                         # Определяем локализацию для каждого региона отдельно
                         localization_code = get_localization_code(voice_languages, subtitles)
-                        # Для TR и IN: если функция вернула данные (даже пустые строки), вызываем get_localization_code
-                        # None означает ошибку парсинга, пустые строки ("", "") означают что языков нет = "none"
-                        localization_tr = get_localization_code(voice_languages_tr, subtitles_tr) if (voice_languages_tr is not None and subtitles_tr is not None) else None
-                        localization_in = get_localization_code(voice_languages_in, subtitles_in) if (voice_languages_in is not None and subtitles_in is not None) else None
+                        # Для TR и IN локализация должна оставаться региональной.
+                        # Если региональную страницу не удалось разобрать, не наследуем UA-локализацию,
+                        # иначе русский язык "размазывается" на все регионы.
+                        localization_tr = get_localization_code(voice_languages_tr, subtitles_tr) if (voice_languages_tr is not None and subtitles_tr is not None) else "none"
+                        localization_in = get_localization_code(voice_languages_in, subtitles_in) if (voice_languages_in is not None and subtitles_in is not None) else "none"
 
                         if not uah_price:
                             uah_price = uah_old_price
@@ -1876,7 +1877,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                                 tr_record = base_data.copy()
                                 tr_record.update({
                                     "region": "TR",
-                                    "localization": localization_tr if localization_tr else localization_code,
+                                    "localization": localization_tr,
                                     "price": price_rub_tr,
                                     "old_price": old_price_rub_tr,
                                     "ps_price": ps_plus_price_rub_tr,
@@ -1913,7 +1914,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                                 in_record = base_data.copy()
                                 in_record.update({
                                     "region": "IN",
-                                    "localization": localization_in if localization_in else localization_code,
+                                    "localization": localization_in,
                                     "price": price_rub_in,
                                     "old_price": old_price_rub_in,
                                     "ps_price": ps_plus_price_rub_in,
@@ -2152,10 +2153,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
 
                     # Определяем локализацию для каждого региона
                     localization_code = get_localization_code_addon(voice_languages, subtitles)
-                    # Для TR и IN: если функция вернула данные (даже пустые строки), вызываем get_localization_code_addon
-                    # None означает ошибку парсинга - используем localization_code как fallback
-                    localization_tr = get_localization_code_addon(voice_languages_tr, subtitles_tr) if (voice_languages_tr is not None and subtitles_tr is not None) else localization_code
-                    localization_in = get_localization_code_addon(voice_languages_in, subtitles_in) if (voice_languages_in is not None and subtitles_in is not None) else localization_code
+                    # Для TR и IN локализация должна определяться отдельно.
+                    # Если региональную страницу не удалось разобрать, не копируем UA-локализацию.
+                    localization_tr = get_localization_code_addon(voice_languages_tr, subtitles_tr) if (voice_languages_tr is not None and subtitles_tr is not None) else "none"
+                    localization_in = get_localization_code_addon(voice_languages_in, subtitles_in) if (voice_languages_in is not None and subtitles_in is not None) else "none"
 
                     if not uah_price:
                         uah_price = uah_old_price
@@ -2248,7 +2249,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                         tr_record = base_data.copy()
                         tr_record.update({
                             "region": "TR",
-                            "localization": localization_tr if localization_tr else localization_code,
+                            "localization": localization_tr,
                             "price": price_rub_tr,
                             "old_price": old_price_rub_tr,
                             "ps_price": ps_plus_price_rub_tr,
@@ -4155,10 +4156,10 @@ def merge_region_data(ua_item: Dict, other_item: Dict, region: str) -> Dict:
         merged["old_price_try"] = 0.0
         merged["ps_plus_price_try"] = None
 
-    # Обновляем локализацию из другого региона (если есть)
+    # Для региональной записи локализация тоже должна быть региональной.
+    # merged стартует с UA-копии, поэтому без явной замены сюда может протечь UA-локализация.
     other_localization = other_item.get("localization")
-    if other_localization:
-        merged["localization"] = other_localization
+    merged["localization"] = other_localization if other_localization is not None else "none"
 
     # Обновляем ps_plus_collection из другого региона (если есть и если в UA не определен)
     other_ps_plus_collection = other_item.get("ps_plus_collection")

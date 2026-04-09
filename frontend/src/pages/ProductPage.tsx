@@ -34,7 +34,7 @@ import {
   resolveRegionPresentation,
 } from '../utils/format'
 import {
-  getLocalizationPresentation,
+  getProductLocalizationPresentation,
   getProductTitle,
   getVisibleRegionalPrices,
 } from '../utils/productPresentation'
@@ -118,7 +118,7 @@ function getMissingCheckoutFields(
 }
 
 function buildHighlights(product: CatalogProduct) {
-  const localization = getLocalizationPresentation(product.localizationName)
+  const localization = getProductLocalizationPresentation(product)
 
   return [
     {
@@ -1071,7 +1071,7 @@ export function ProductPage() {
                   {playersLabel ? (
                     <span className="pill border-white/10 bg-white/5 text-slate-200">Игроки: {playersLabel}</span>
                   ) : null}
-                  <LocalizationBadge localizationName={product.localizationName} />
+                  <LocalizationBadge localizationName={getProductLocalizationPresentation(product).shortLabel} />
                   {product.hasEaAccess ? (
                     <span className="pill border-sky-300/20 bg-sky-500/15 text-sky-50">EA Access</span>
                   ) : null}

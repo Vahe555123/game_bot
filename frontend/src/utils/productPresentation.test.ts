@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { CatalogProduct, ProductRegionPrice } from '../types/catalog'
 import {
+  getBestLocalizationPresentation,
   getLocalizationPresentation,
+  getProductLocalizationPresentation,
   getProductTitle,
   getVisibleRegionalPrices,
   shouldShowOldPrice,
@@ -84,6 +86,37 @@ describe('getLocalizationPresentation', () => {
   })
 })
 
+describe('getBestLocalizationPresentation', () => {
+  it('prefers the best available Russian localization across regions', () => {
+    const localization = getBestLocalizationPresentation([
+      'Нет русского языка',
+      'Русский интерфейс',
+      'Полностью на русском',
+    ])
+
+    expect(localization.status).toBe('full')
+    expect(localization.shortLabel).toBe('Полностью на русском')
+  })
+})
+
+describe('getProductLocalizationPresentation', () => {
+  it('uses regional localization when regions differ', () => {
+    const product = buildProduct({
+      localizationName: 'Без русского',
+      regionalPrices: [
+        buildRegionalPrice('TR', 'Турция', 1499, 'Нет русского языка'),
+        buildRegionalPrice('IN', 'Индия', 1799, 'Нет русского языка'),
+        buildRegionalPrice('UA', 'Украина', 1999, 'Полностью на русском'),
+      ],
+    })
+
+    const localization = getProductLocalizationPresentation(product)
+
+    expect(localization.status).toBe('full')
+    expect(localization.shortLabel).toBe('Полностью на русском')
+  })
+})
+
 describe('shouldShowOldPrice', () => {
   it('hides old price when product has no discount', () => {
     expect(
@@ -110,7 +143,7 @@ describe('shouldShowOldPrice', () => {
   })
 })
 
-function buildRegionalPrice(region: string, name: string, priceRub: number): ProductRegionPrice {
+function buildRegionalPrice(region: string, name: string, priceRub: number, localizationName: string | null = null): ProductRegionPrice {
   return {
     region,
     label: region,
@@ -126,7 +159,7 @@ function buildRegionalPrice(region: string, name: string, priceRub: number): Pro
     hasDiscount: false,
     discountPercent: null,
     psPlusDiscountPercent: null,
-    localizationName: null,
+    localizationName,
   }
 }
 

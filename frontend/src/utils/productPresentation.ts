@@ -15,6 +15,13 @@ export type LocalizationPresentation = {
   fullLabel: string
 }
 
+const LOCALIZATION_PRIORITY: Record<LocalizationStatus, number> = {
+  full: 3,
+  partial: 2,
+  unsupported: 1,
+  unknown: 0,
+}
+
 function compareRegionalPrices(left: ProductRegionPrice, right: ProductRegionPrice) {
   const leftOrder = REGION_SORT_ORDER[left.region] ?? Number.MAX_SAFE_INTEGER
   const rightOrder = REGION_SORT_ORDER[right.region] ?? Number.MAX_SAFE_INTEGER
@@ -133,6 +140,30 @@ export function getLocalizationPresentation(localizationName?: string | null): L
     shortLabel: 'Язык не указан',
     fullLabel: source,
   }
+}
+
+export function getBestLocalizationPresentation(localizationNames: Array<string | null | undefined>): LocalizationPresentation {
+  let best = getLocalizationPresentation(null)
+
+  localizationNames.forEach((localizationName) => {
+    const candidate = getLocalizationPresentation(localizationName)
+
+    if (LOCALIZATION_PRIORITY[candidate.status] > LOCALIZATION_PRIORITY[best.status]) {
+      best = candidate
+    }
+  })
+
+  return best
+}
+
+export function getProductLocalizationPresentation(product: Pick<CatalogProduct, 'localizationName' | 'regionalPrices'>) {
+  const localizationNames = product.regionalPrices.map((price) => price.localizationName)
+
+  if (localizationNames.length > 0) {
+    return getBestLocalizationPresentation(localizationNames)
+  }
+
+  return getLocalizationPresentation(product.localizationName)
 }
 
 export function shouldShowOldPrice(

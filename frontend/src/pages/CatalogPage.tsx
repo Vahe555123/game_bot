@@ -140,6 +140,8 @@ export function CatalogPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false)
+  const [isCompactFiltersVisible, setIsCompactFiltersVisible] = useState(false)
+  const [isCompactFiltersOpen, setIsCompactFiltersOpen] = useState(false)
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [total, setTotal] = useState(0)
@@ -152,6 +154,22 @@ export function CatalogPage() {
     setDraftSearch(filters.search)
     setDraftFilters(filters)
   }, [filters])
+
+  useEffect(() => {
+    function handleScroll() {
+      const shouldCollapse = window.scrollY > 100
+      setIsCompactFiltersVisible((current) => (current !== shouldCollapse ? shouldCollapse : current))
+
+      if (!shouldCollapse) {
+        setIsCompactFiltersOpen(false)
+      }
+    }
+
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
 
   useEffect(() => {
     let ignore = false
@@ -205,6 +223,7 @@ export function CatalogPage() {
     const timeoutId = window.setTimeout(() => {
       setSearchParams(buildSearchParams(nextFilters), { replace: true })
       setIsMobileFiltersOpen(false)
+      setIsCompactFiltersOpen(false)
     }, 1000)
 
     return () => window.clearTimeout(timeoutId)
@@ -311,6 +330,8 @@ export function CatalogPage() {
   }, [filters, filtersKey, page])
 
   const activeFiltersCount = countActiveFilters(filters)
+  const shouldShowInlineFilters = !isCompactFiltersVisible
+  const shouldShowFiltersPanel = shouldShowInlineFilters || isCompactFiltersOpen
 
   function updateDraftFilters(partial: Partial<CatalogFilterState>) {
     setDraftFilters((current) => ({
@@ -330,48 +351,83 @@ export function CatalogPage() {
     setDraftFilters(nextFilters)
     setSearchParams(buildSearchParams(nextFilters), { replace: true })
     setIsMobileFiltersOpen(false)
+    setIsCompactFiltersOpen(false)
   }
 
   return (
     <div className="container py-4 md:py-6">
-      <section className="sticky top-[5.25rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-24 md:rounded-[30px] md:p-5">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <label className="input-shell flex-1">
-            <Search size={18} className="text-brand-300" />
-            <input
-              value={draftSearch}
-              onChange={(event) => setDraftSearch(event.target.value)}
-              placeholder="Поиск игр и подписок..."
-              className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
-            />
-          </label>
-
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto md:gap-3">
-            <div className="w-full rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:w-auto md:px-4 md:text-sm">
-              <span className="font-semibold text-white">{total}</span> товаров
-              {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setIsMobileFiltersOpen((value) => !value)}
-              className="btn-secondary xl:hidden"
-            >
-              <SlidersHorizontal size={16} />
-              Фильтры
-            </button>
-          </div>
-        </div>
-
-        <CatalogFilters
-          categories={categories}
-          draftFilters={draftFilters}
-          onDraftChange={updateDraftFilters}
-          onReset={resetDraftFilters}
-          className={isMobileFiltersOpen ? 'mt-4 block' : 'mt-4 hidden xl:block'}
+      {isCompactFiltersOpen ? (
+        <div
+          className="fixed inset-0 z-30 bg-slate-950/55 backdrop-blur-[2px]"
+          onClick={() => setIsCompactFiltersOpen(false)}
         />
+      ) : null}
 
-      </section>
+      {shouldShowFiltersPanel ? (
+        <section
+          className={
+            shouldShowInlineFilters
+              ? 'sticky top-[5.25rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-24 md:rounded-[30px] md:p-5'
+              : 'fixed inset-x-4 top-[5.25rem] z-40 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-[24px] border border-white/10 bg-slate-950/96 p-3 shadow-card backdrop-blur-xl md:inset-x-6 md:top-24 md:rounded-[30px] md:p-5 lg:left-1/2 lg:right-auto lg:w-[min(980px,calc(100vw-3rem))] lg:-translate-x-1/2'
+          }
+        >
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <label className="input-shell flex-1">
+              <Search size={18} className="text-brand-300" />
+              <input
+                value={draftSearch}
+                onChange={(event) => setDraftSearch(event.target.value)}
+                placeholder="Поиск игр и подписок..."
+                className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
+              />
+            </label>
+
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto md:gap-3">
+              <div className="w-full rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:w-auto md:px-4 md:text-sm">
+                <span className="font-semibold text-white">{total}</span> товаров
+                {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsMobileFiltersOpen((value) => !value)}
+                className="btn-secondary xl:hidden"
+              >
+                <SlidersHorizontal size={16} />
+                Фильтры
+              </button>
+
+              {!shouldShowInlineFilters ? (
+                <button type="button" onClick={() => setIsCompactFiltersOpen(false)} className="btn-secondary">
+                  Скрыть
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          <CatalogFilters
+            categories={categories}
+            draftFilters={draftFilters}
+            onDraftChange={updateDraftFilters}
+            onReset={resetDraftFilters}
+            className={isMobileFiltersOpen || shouldShowInlineFilters || isCompactFiltersOpen ? 'mt-4 block' : 'mt-4 hidden xl:block'}
+          />
+        </section>
+      ) : null}
+
+      {isCompactFiltersVisible && !isCompactFiltersOpen ? (
+        <button
+          type="button"
+          onClick={() => setIsCompactFiltersOpen(true)}
+          className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/95 px-4 py-3 text-sm font-semibold text-white shadow-card backdrop-blur-xl md:bottom-6 md:right-6"
+        >
+          <SlidersHorizontal size={18} className="text-brand-300" />
+          Фильтры
+          {activeFiltersCount > 0 ? (
+            <span className="rounded-full bg-brand-400/20 px-2 py-0.5 text-xs text-brand-100">{activeFiltersCount}</span>
+          ) : null}
+        </button>
+      ) : null}
 
       {catalogNotice ? (
         <div className="mt-4 rounded-[22px] border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm leading-7 text-amber-50">
