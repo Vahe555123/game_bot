@@ -12,10 +12,10 @@ import { getApiErrorMessage } from '../utils/apiErrors'
 
 const SECTIONS = [
   { id: 'admin-dashboard', label: 'Дашборд', icon: LayoutDashboard },
-  { id: 'admin-content', label: 'Помощь', icon: FileText },
-  { id: 'admin-users', label: 'Пользователи', icon: Users },
   { id: 'admin-products', label: 'Товары', icon: Package2 },
   { id: 'admin-purchases', label: 'Покупки', icon: ShoppingBag },
+  { id: 'admin-content', label: 'Помощь', icon: FileText },
+  { id: 'admin-users', label: 'Пользователи', icon: Users },
 ] as const
 
 export function AdminPage() {
@@ -49,9 +49,26 @@ export function AdminPage() {
     'Администратор'
 
   return (
-    <div className="container py-10 md:py-14">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
-        <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1880px] px-3 py-6 sm:px-4 md:px-6 md:py-8 xl:px-8 xl:py-10 2xl:px-10">
+      <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="xl:sticky xl:top-24 xl:self-start">
+          <div className="panel-soft rounded-[30px] p-3 sm:p-4">
+            <div className="flex gap-2 overflow-x-auto pb-1 xl:grid xl:gap-2 xl:overflow-visible xl:pb-0">
+              {SECTIONS.map(({ id, label, icon: Icon }) => (
+                <a
+                  key={id}
+                  href={`#${id}`}
+                  className="flex min-w-[180px] items-center gap-3 rounded-[20px] border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-medium text-slate-200 transition hover:border-brand-300/40 hover:bg-brand-500/10 xl:min-w-0"
+                >
+                  <Icon size={16} className="shrink-0 text-brand-200" />
+                  <span className="truncate">{label}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        <div className="min-w-0 space-y-6">
           <section className="panel mesh-bg overflow-hidden rounded-[34px] p-6 md:p-8">
             <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
               <div>
@@ -85,28 +102,11 @@ export function AdminPage() {
           </section>
 
           <AdminDashboardSection dashboard={dashboard} isLoading={isDashboardLoading} />
-          <AdminContentSection />
-          <AdminUsersSection onDataChanged={loadDashboard} />
           <AdminProductsSection onDataChanged={loadDashboard} />
           <AdminPurchasesSection onDataChanged={loadDashboard} />
+          <AdminContentSection />
+          <AdminUsersSection onDataChanged={loadDashboard} />
         </div>
-
-        <aside className="xl:sticky xl:top-28 xl:self-start">
-          <div className="panel-soft rounded-[30px] p-4">
-            <div className="space-y-2">
-              {SECTIONS.map(({ id, label, icon: Icon }) => (
-                <a
-                  key={id}
-                  href={`#${id}`}
-                  className="flex items-center gap-3 rounded-[20px] border border-white/8 bg-white/[0.03] px-4 py-3 text-sm font-medium text-slate-200 transition hover:border-brand-300/40 hover:bg-brand-500/10"
-                >
-                  <Icon size={16} className="text-brand-200" />
-                  {label}
-                </a>
-              ))}
-            </div>
-          </div>
-        </aside>
       </div>
     </div>
   )

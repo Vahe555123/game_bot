@@ -232,8 +232,8 @@ export function AdminUsersSection({ onDataChanged }: { onDataChanged: () => Prom
         </div>
       }
     >
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-        <div className="space-y-5">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.08fr)_minmax(360px,0.92fr)] 2xl:grid-cols-[minmax(0,1.18fr)_minmax(420px,0.82fr)]">
+        <div className="min-w-0 space-y-5">
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_180px]">
             <input
               value={search}
@@ -374,7 +374,7 @@ export function AdminUsersSection({ onDataChanged }: { onDataChanged: () => Prom
           </div>
         </div>
 
-        <div className="panel-soft rounded-[30px] p-5">
+        <div className="panel-soft min-w-0 rounded-[30px] p-4 sm:p-5 xl:p-6">
           <div className="flex items-center justify-between gap-4 border-b border-white/8 pb-4">
             <div>
               <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Редактор</p>

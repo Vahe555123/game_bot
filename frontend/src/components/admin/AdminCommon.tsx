@@ -24,8 +24,8 @@ export function AdminSectionCard({
   children: ReactNode
 }) {
   return (
-    <section id={id} className="panel-soft rounded-[30px] p-6 md:p-7">
-      <div className="flex flex-col gap-4 border-b border-white/8 pb-5 lg:flex-row lg:items-center lg:justify-between">
+    <section id={id} className="panel-soft rounded-[30px] p-5 sm:p-6 xl:p-7">
+      <div className="flex flex-col gap-4 border-b border-white/8 pb-5 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <h2 className="text-2xl text-white">{title}</h2>
           {description ? <p className="mt-2 max-w-3xl text-sm leading-7 text-slate-400">{description}</p> : null}
@@ -72,7 +72,11 @@ export function AdminMetricCard({
 }
 
 export function AdminTableShell({ children }: { children: ReactNode }) {
-  return <div className="overflow-hidden rounded-[26px] border border-white/10 bg-slate-950/45">{children}</div>
+  return (
+    <div className="overflow-hidden rounded-[26px] border border-white/10 bg-slate-950/45">
+      <div className="overflow-x-auto">{children}</div>
+    </div>
+  )
 }
 
 export function AdminEmptyState({

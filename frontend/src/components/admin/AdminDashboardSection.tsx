@@ -77,7 +77,7 @@ export function AdminDashboardSection({
         />
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] 2xl:grid-cols-[minmax(0,1.15fr)_minmax(420px,0.85fr)]">
         <div className="space-y-6">
           <AdminTableShell>
             <div className="border-b border-white/8 px-5 py-4">

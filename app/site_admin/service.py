@@ -182,23 +182,33 @@ def build_admin_user_record(
     return AdminUserRecord(**payload)
 
 
+def _coerce_optional_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+
+    return str(value).strip() or None
+
+
 def build_admin_product_record(product: Product, *, favorites_count: int = 0) -> AdminProductRecord:
     return AdminProductRecord(
         id=product.id,
         region=(product.region or "").upper(),
-        display_name=product.name or product.get_display_name(),
+        display_name=_coerce_optional_text(product.name or product.get_display_name()) or product.id,
         favorites_count=int(favorites_count or 0),
-        name=product.name,
-        main_name=product.main_name,
-        category=product.category,
-        type=product.type,
-        image=product.image,
-        search_names=product.search_names,
-        platforms=product.platforms,
-        publisher=product.publisher,
-        localization=product.localization,
+        name=_coerce_optional_text(product.name),
+        main_name=_coerce_optional_text(product.main_name),
+        category=_coerce_optional_text(product.category),
+        type=_coerce_optional_text(product.type),
+        image=_coerce_optional_text(product.image),
+        search_names=_coerce_optional_text(product.search_names),
+        platforms=_coerce_optional_text(product.platforms),
+        publisher=_coerce_optional_text(product.publisher),
+        localization=_coerce_optional_text(product.localization),
         rating=product.rating,
-        edition=product.edition,
+        edition=_coerce_optional_text(product.edition),
         price=product.price,
         old_price=product.old_price,
         ps_price=product.ps_price,
@@ -212,16 +222,16 @@ def build_admin_product_record(product: Product, *, favorites_count: int = 0) ->
         ps_plus_price_uah=product.ps_plus_price_uah,
         ps_plus_price_try=product.ps_plus_price_try,
         ps_plus_price_inr=product.ps_plus_price_inr,
-        plus_types=product.plus_types,
+        plus_types=_coerce_optional_text(product.plus_types),
         ps_plus=bool(product.ps_plus),
-        ea_access=product.ea_access,
-        ps_plus_collection=product.ps_plus_collection,
+        ea_access=_coerce_optional_text(product.ea_access),
+        ps_plus_collection=_coerce_optional_text(product.ps_plus_collection),
         discount=product.discount,
-        discount_end=product.discount_end,
-        tags=product.tags,
-        description=product.description,
-        compound=product.compound,
-        info=product.info,
+        discount_end=_coerce_optional_text(product.discount_end),
+        tags=_coerce_optional_text(product.tags),
+        description=_coerce_optional_text(product.description),
+        compound=_coerce_optional_text(product.compound),
+        info=_coerce_optional_text(product.info),
         players_min=product.players_min,
         players_max=product.players_max,
         players_online=bool(product.players_online),
