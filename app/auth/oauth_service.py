@@ -58,6 +58,26 @@ class OAuthService:
     def __init__(self, auth_service: Optional[AuthService] = None) -> None:
         self.auth_service = auth_service or get_auth_service()
 
+    @staticmethod
+    def _serialize_telegram_value(value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        return str(value)
+
+    def _build_telegram_data_check_string(self, payload: TelegramAuthRequest) -> str:
+        payload_data = payload.model_dump(exclude_none=True, exclude={"hash"})
+        extra_payload = getattr(payload, "__pydantic_extra__", None) or {}
+
+        for key, value in extra_payload.items():
+            if key == "hash" or value is None:
+                continue
+            payload_data[key] = value
+
+        return "\n".join(
+            f"{key}={self._serialize_telegram_value(value)}"
+            for key, value in sorted(payload_data.items())
+        )
+
     def build_google_authorization_url(self, next_path: Optional[str] = None) -> str:
         if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
             raise AuthServiceError(503, "Google OAuth не настроен на сервере.")
@@ -250,10 +270,7 @@ class OAuthService:
         if current_time - payload.auth_date > settings.AUTH_TELEGRAM_LOGIN_TTL_SECONDS:
             raise AuthServiceError(400, "Telegram данные входа устарели. Попробуйте снова.")
 
-        data_check_string = "\n".join(
-            f"{key}={value}"
-            for key, value in sorted(payload.model_dump(exclude_none=True, exclude={"hash"}).items())
-        )
+        data_check_string = self._build_telegram_data_check_string(payload)
         secret_key = hashlib.sha256(settings.TELEGRAM_BOT_TOKEN.encode("utf-8")).digest()
         expected_hash = hmac.new(
             secret_key,

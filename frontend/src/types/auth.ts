@@ -97,6 +97,7 @@ export type TelegramAuthPayload = {
   last_name?: string
   username?: string
   photo_url?: string
+  allows_write_to_pm?: boolean
   auth_date: number
   hash: string
 }

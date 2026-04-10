@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from config.settings import settings
 
@@ -253,11 +253,14 @@ class SitePSNAccountUpdateRequest(BaseModel):
 
 
 class TelegramAuthRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     id: int
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     username: Optional[str] = None
     photo_url: Optional[str] = None
+    allows_write_to_pm: Optional[bool] = None
     auth_date: int
     hash: str
 
