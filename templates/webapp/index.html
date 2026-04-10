@@ -806,7 +806,6 @@ class ModernProductCatalog {
             }
         }
     }
-    }
 
     setupEventListeners() {
         // Search
@@ -1646,7 +1645,6 @@ class ModernProductCatalog {
         const eaAccessOnly = document.getElementById('eaAccessOnly').checked;
 
         return !!(category || platform || players || minPrice || maxPrice || (priceCurrency && priceCurrency !== 'RUB') || discountOnly || psPlusOnly || eaAccessOnly || (sort && sort !== 'popular'));
-    }
     }
 
     saveSearchState() {
