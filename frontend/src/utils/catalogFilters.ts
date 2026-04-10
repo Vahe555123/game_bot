@@ -1,14 +1,5 @@
 import type { CatalogFilterState, CatalogProduct } from '../types/catalog'
 
-export const REGION_OPTIONS = [
-  { value: '', label: 'Все регионы' },
-  { value: 'en-ua', label: 'Украина' },
-  { value: 'en-tr', label: 'Турция' },
-  { value: 'en-in', label: 'Индия' },
-] as const
-
-const REGION_OPTION_VALUES = new Set(REGION_OPTIONS.map((option) => option.value))
-
 export const PLATFORM_OPTIONS = [
   { value: '', label: 'Все платформы' },
   { value: 'PS4_ALL', label: 'PS4' },
@@ -23,7 +14,7 @@ const PLATFORM_OPTION_VALUES = new Set(PLATFORM_OPTIONS.map((option) => option.v
 export const PLAYER_OPTIONS = [
   { value: '', label: 'Количество игроков' },
   { value: 'singleplayer', label: 'Одиночная игра' },
-  { value: 'coop', label: 'Кооператив' },
+  { value: 'coop', label: 'Кооп. на одной консоли' },
 ] as const
 
 const PLAYER_OPTION_VALUES = new Set(PLAYER_OPTIONS.map((option) => option.value))
@@ -36,24 +27,29 @@ export const SORT_OPTIONS = [
 
 const SORT_OPTION_VALUES = new Set(SORT_OPTIONS.map((option) => option.value))
 
-const REGION_NORMALIZATION_MAP: Record<string, string> = {
-  'en-ua': 'UA',
-  'en-tr': 'TR',
-  'en-in': 'IN',
-  ua: 'UA',
-  tr: 'TR',
-  in: 'IN',
-  uah: 'UA',
-  try: 'TR',
-  inr: 'IN',
-}
+export const PRICE_CURRENCY_OPTIONS = [
+  { value: 'RUB', label: 'Рубли' },
+  { value: 'TRY', label: 'Лиры' },
+  { value: 'INR', label: 'Рупии' },
+  { value: 'UAH', label: 'Гривны' },
+] as const
 
-export function normalizeRegionFilterValue(region?: string | null) {
-  if (!region) {
-    return ''
+const PRICE_CURRENCY_OPTION_VALUES = new Set(PRICE_CURRENCY_OPTIONS.map((option) => option.value))
+
+export function normalizeRegionFilterValue(value: string) {
+  switch ((value || '').toLowerCase()) {
+    case 'en-tr':
+    case 'tr':
+      return 'TR'
+    case 'en-ua':
+    case 'ua':
+      return 'UA'
+    case 'en-in':
+    case 'in':
+      return 'IN'
+    default:
+      return ''
   }
-
-  return REGION_NORMALIZATION_MAP[region.toLowerCase()] || region.toUpperCase()
 }
 
 function sanitizeSelectValue<T extends string>(value: string, allowedValues: ReadonlySet<T>): T | '' {
@@ -87,7 +83,8 @@ export function sanitizeCatalogFilters(filters: CatalogFilterState, categories: 
   return {
     ...filters,
     sort: sanitizeSelectValue(filters.sort, SORT_OPTION_VALUES) || 'popular',
-    region: sanitizeSelectValue(filters.region, REGION_OPTION_VALUES),
+    region: '',
+    priceCurrency: sanitizeSelectValue(filters.priceCurrency, PRICE_CURRENCY_OPTION_VALUES) || 'RUB',
     platform: sanitizeSelectValue(filters.platform, PLATFORM_OPTION_VALUES),
     players: sanitizeSelectValue(filters.players, PLAYER_OPTION_VALUES),
     category: !filters.category || !categories.length || categories.includes(filters.category) ? filters.category : '',
@@ -100,7 +97,7 @@ export function sanitizeCatalogFilters(filters: CatalogFilterState, categories: 
 export function hasActiveCatalogFilters(filters: CatalogFilterState) {
   return Boolean(
     filters.category ||
-      filters.region ||
+      (filters.priceCurrency && filters.priceCurrency !== 'RUB') ||
       filters.platform ||
       filters.players ||
       filters.minPrice ||

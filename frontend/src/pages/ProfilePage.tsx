@@ -1,6 +1,5 @@
 import {
   ArrowUpRight,
-  Copy,
   ExternalLink,
   Globe2,
   Heart,
@@ -158,10 +157,8 @@ function SectionCard({
 
 function PurchaseCard({
   order,
-  onCopyLink,
 }: {
   order: PurchaseOrder
-  onCopyLink: (order: PurchaseOrder) => Promise<void>
 }) {
   const orderPriceDisplay = getDualCurrencyPriceDisplay(order.local_price, order.currency_code, order.price_rub)
 
@@ -192,26 +189,13 @@ function PurchaseCard({
       </div>
 
       {order.payment_url ? (
-        <div className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] p-4">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Ссылка на оплату</p>
-          <p className="mt-3 break-all text-sm leading-7 text-white">{order.payment_url}</p>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            <a href={order.payment_url} className="btn-primary">
-              <ExternalLink size={16} />
-              Открыть ссылку
-            </a>
-            <button type="button" onClick={() => onCopyLink(order)} className="btn-secondary">
-              <Copy size={16} />
-              Скопировать
-            </button>
-          </div>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <a href={order.payment_url} className="btn-primary">
+            <ExternalLink size={16} />
+            Продолжить оплату
+          </a>
         </div>
-      ) : (
-        <div className="mt-5 rounded-[24px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-7 text-slate-400">
-          Для этой покупки ссылка не сохранена.
-        </div>
-      )}
+      ) : null}
     </article>
   )
 }
@@ -416,26 +400,7 @@ export function ProfilePage() {
     }
   }
 
-  async function handleCopyPaymentLink(order: PurchaseOrder) {
-    if (!order.payment_url) {
-      return
-    }
 
-    try {
-      await navigator.clipboard.writeText(order.payment_url)
-      setPurchaseSaveState({
-        loading: false,
-        message: `Ссылка для ${order.order_number} скопирована.`,
-        error: false,
-      })
-    } catch {
-      setPurchaseSaveState({
-        loading: false,
-        message: 'Не удалось скопировать ссылку автоматически.',
-        error: true,
-      })
-    }
-  }
 
   if (isLoading) {
     return (
@@ -494,7 +459,7 @@ export function ProfilePage() {
           <SectionCard
             id="purchases-section"
             title="Покупки"
-            description="Здесь сохраняются дата покупки и сама ссылка на оплату."
+            description="Здесь сохраняются ваши заказы, даты покупок и быстрый переход к оплате."
           >
             <div className="space-y-4">
               <SaveNotice state={purchaseSaveState} />
@@ -533,7 +498,7 @@ export function ProfilePage() {
                 </div>
               ) : orders.length ? (
                 orders.map((order) => (
-                  <PurchaseCard key={order.order_number} order={order} onCopyLink={handleCopyPaymentLink} />
+                  <PurchaseCard key={order.order_number} order={order} />
                 ))
               ) : (
                 <div className="rounded-[26px] border border-white/10 bg-slate-950/45 px-5 py-8 text-sm leading-7 text-slate-400">

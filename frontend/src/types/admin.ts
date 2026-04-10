@@ -78,6 +78,33 @@ export type AdminProduct = {
   has_ea_access: boolean
 }
 
+export type AdminProductFavorite = {
+  id: number
+  user_id: number
+  telegram_id?: number | null
+  username?: string | null
+  first_name?: string | null
+  last_name?: string | null
+  full_name?: string | null
+  preferred_region?: 'UA' | 'TR' | 'IN' | string | null
+  payment_email?: string | null
+  platform?: 'PS4' | 'PS5' | string | null
+  psn_email?: string | null
+  region?: string | null
+  is_active: boolean
+  favorited_at?: string | null
+}
+
+export type AdminProductDetails = AdminProduct & {
+  regional_products: AdminProduct[]
+  favorites: AdminProductFavorite[]
+  available_regions: string[]
+  missing_regions: string[]
+  favorites_by_region: Record<string, number>
+  regional_rows_total: number
+  favorite_users_total: number
+}
+
 export type AdminProductListResponse = {
   products: AdminProduct[]
   total: number

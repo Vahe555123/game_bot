@@ -30,7 +30,7 @@ from app.auth.service import (
     resolve_user_identifier,
     utcnow,
 )
-from app.models import UserFavoriteProduct
+from app.models import User, UserFavoriteProduct
 from app.models.product import Product
 from app.models.purchase_order import SitePurchaseOrder
 from app.site_orders.service import build_status_label, serialize_purchase_order
@@ -41,6 +41,8 @@ from .schemas import (
     AdminHelpContentResponse,
     AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
+    AdminProductDetailsResponse,
+    AdminProductFavoriteRecord,
     AdminProductListResponse,
     AdminProductRecord,
     AdminProductSummary,
@@ -226,6 +228,32 @@ def build_admin_product_record(product: Product, *, favorites_count: int = 0) ->
         has_discount=product.has_discount,
         has_ps_plus=product.has_ps_plus,
         has_ea_access=product.has_ea_access,
+    )
+
+
+def build_admin_product_favorite_record(
+    favorite: UserFavoriteProduct,
+    user: Optional[User],
+) -> AdminProductFavoriteRecord:
+    first_name = getattr(user, "first_name", None)
+    last_name = getattr(user, "last_name", None)
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip() or getattr(user, "username", None)
+
+    return AdminProductFavoriteRecord(
+        id=favorite.id,
+        user_id=favorite.user_id,
+        telegram_id=getattr(user, "telegram_id", None),
+        username=getattr(user, "username", None),
+        first_name=first_name,
+        last_name=last_name,
+        full_name=full_name or None,
+        preferred_region=getattr(user, "preferred_region", None),
+        payment_email=getattr(user, "payment_email", None),
+        platform=getattr(user, "platform", None),
+        psn_email=getattr(user, "psn_email", None),
+        region=favorite.region,
+        is_active=bool(getattr(user, "is_active", False)),
+        favorited_at=favorite.created_at,
     )
 
 
@@ -529,6 +557,8 @@ class SiteAdminService:
                     Product.id.ilike(pattern),
                     Product.name.ilike(pattern),
                     Product.main_name.ilike(pattern),
+                    Product.search_names.ilike(pattern),
+                    Product.publisher.ilike(pattern),
                 )
             )
         if region:
@@ -565,17 +595,11 @@ class SiteAdminService:
             limit=limit,
         )
 
-    def get_product(self, db: Session, *, product_id: str, region: str) -> AdminProductRecord:
+    def get_product(self, db: Session, *, product_id: str, region: str) -> AdminProductDetailsResponse:
         product = self._get_product_or_error(db, product_id=product_id, region=region)
-        favorites_count = (
-            db.query(func.count(UserFavoriteProduct.id))
-            .filter(UserFavoriteProduct.product_id == product.id)
-            .scalar()
-            or 0
-        )
-        return build_admin_product_record(product, favorites_count=favorites_count)
+        return self._build_product_details(db, product)
 
-    def create_product(self, db: Session, payload: AdminProductCreateRequest) -> AdminProductRecord:
+    def create_product(self, db: Session, payload: AdminProductCreateRequest) -> AdminProductDetailsResponse:
         existing = (
             db.query(Product)
             .filter(Product.id == payload.id, Product.region == payload.region)
@@ -589,7 +613,7 @@ class SiteAdminService:
         db.add(product)
         db.commit()
         db.refresh(product)
-        return build_admin_product_record(product, favorites_count=0)
+        return self._build_product_details(db, product)
 
     def update_product(
         self,
@@ -598,23 +622,48 @@ class SiteAdminService:
         product_id: str,
         region: str,
         payload: AdminProductUpdateRequest,
-    ) -> AdminProductRecord:
+    ) -> AdminProductDetailsResponse:
         product = self._get_product_or_error(db, product_id=product_id, region=region)
         self._apply_product_payload(product, payload)
         db.add(product)
         db.commit()
         db.refresh(product)
-        favorites_count = (
-            db.query(func.count(UserFavoriteProduct.id))
-            .filter(UserFavoriteProduct.product_id == product.id)
-            .scalar()
-            or 0
-        )
-        return build_admin_product_record(product, favorites_count=favorites_count)
+        return self._build_product_details(db, product)
 
     def delete_product(self, db: Session, *, product_id: str, region: str) -> None:
         product = self._get_product_or_error(db, product_id=product_id, region=region)
         db.delete(product)
+        db.commit()
+        remaining_rows = db.query(func.count(Product.id)).filter(Product.id == product_id).scalar() or 0
+        if remaining_rows == 0:
+            db.query(UserFavoriteProduct).filter(UserFavoriteProduct.product_id == product_id).delete()
+            db.commit()
+
+    def delete_product_group(self, db: Session, *, product_id: str) -> int:
+        products = db.query(Product).filter(Product.id == product_id).all()
+        if not products:
+            raise AuthServiceError(404, "Товар не найден.")
+
+        deleted_count = len(products)
+        db.query(UserFavoriteProduct).filter(UserFavoriteProduct.product_id == product_id).delete()
+        for product in products:
+            db.delete(product)
+        db.commit()
+        return deleted_count
+
+    def delete_product_favorite(self, db: Session, *, product_id: str, favorite_id: int) -> None:
+        favorite = (
+            db.query(UserFavoriteProduct)
+            .filter(
+                UserFavoriteProduct.id == favorite_id,
+                UserFavoriteProduct.product_id == product_id,
+            )
+            .first()
+        )
+        if not favorite:
+            raise AuthServiceError(404, "Запись избранного не найдена.")
+
+        db.delete(favorite)
         db.commit()
 
     def list_purchases(
@@ -890,6 +939,61 @@ class SiteAdminService:
             }
             for site_user_id, purchase_count, total_spent_rub in rows
         }
+
+    def _get_product_favorites_count(self, db: Session, *, product_id: str) -> int:
+        return (
+            db.query(func.count(UserFavoriteProduct.id))
+            .filter(UserFavoriteProduct.product_id == product_id)
+            .scalar()
+            or 0
+        )
+
+    def _get_product_favorites(self, db: Session, *, product_id: str) -> list[AdminProductFavoriteRecord]:
+        favorite_rows = (
+            db.query(UserFavoriteProduct, User)
+            .outerjoin(User, User.id == UserFavoriteProduct.user_id)
+            .filter(UserFavoriteProduct.product_id == product_id)
+            .order_by(UserFavoriteProduct.created_at.desc(), UserFavoriteProduct.id.desc())
+            .all()
+        )
+        return [
+            build_admin_product_favorite_record(favorite, user)
+            for favorite, user in favorite_rows
+        ]
+
+    def _build_product_details(self, db: Session, product: Product) -> AdminProductDetailsResponse:
+        favorites_count = self._get_product_favorites_count(db, product_id=product.id)
+        favorites = self._get_product_favorites(db, product_id=product.id)
+        regional_products = db.query(Product).filter(Product.id == product.id).all()
+        region_order = {"TR": 0, "UA": 1, "IN": 2}
+        regional_products.sort(key=lambda item: (region_order.get((item.region or "").upper(), 99), item.region or ""))
+        regional_records = [
+            build_admin_product_record(regional_product, favorites_count=favorites_count)
+            for regional_product in regional_products
+        ]
+
+        available_regions = [record.region for record in regional_records if record.region]
+        missing_regions = [
+            region_code
+            for region_code in ("TR", "UA", "IN")
+            if region_code not in set(available_regions)
+        ]
+        favorites_by_region: dict[str, int] = {}
+        for favorite in favorites:
+            region_code = (favorite.region or "").upper() or "UNKNOWN"
+            favorites_by_region[region_code] = favorites_by_region.get(region_code, 0) + 1
+
+        payload = build_admin_product_record(product, favorites_count=favorites_count).model_dump()
+        payload.update(
+            regional_products=regional_records,
+            favorites=favorites,
+            available_regions=available_regions,
+            missing_regions=missing_regions,
+            favorites_by_region=favorites_by_region,
+            regional_rows_total=len(regional_records),
+            favorite_users_total=favorites_count,
+        )
+        return AdminProductDetailsResponse(**payload)
 
     def _get_product_or_error(self, db: Session, *, product_id: str, region: str) -> Product:
         product = db.query(Product).filter(Product.id == product_id, Product.region == region.upper()).first()

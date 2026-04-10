@@ -1,13 +1,21 @@
-import { Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { CopyPlus, Heart, Pencil, Plus, RefreshCw, Trash2, UserRound } from 'lucide-react'
+import { type FormEvent, useEffect, useState } from 'react'
 import {
   createAdminProduct,
   deleteAdminProduct,
+  deleteAdminProductFavorite,
+  deleteAdminProductGroup,
   fetchAdminProduct,
   fetchAdminProducts,
   updateAdminProduct,
 } from '../../services/admin'
-import type { AdminProduct, AdminProductPayload, AdminProductSortMode } from '../../types/admin'
+import type {
+  AdminProduct,
+  AdminProductDetails,
+  AdminProductFavorite,
+  AdminProductPayload,
+  AdminProductSortMode,
+} from '../../types/admin'
 import { getApiErrorMessage } from '../../utils/apiErrors'
 import {
   AdminEmptyState,
@@ -15,6 +23,7 @@ import {
   AdminSectionCard,
   AdminTableShell,
   EMPTY_ADMIN_NOTICE,
+  formatDateTime,
   type AdminNoticeState,
 } from './AdminCommon'
 
@@ -173,6 +182,7 @@ function toPayload(form: ProductFormState): AdminProductPayload {
     publisher: form.publisher.trim() || null,
     localization: form.localization.trim() || null,
     rating: parseNumber(form.rating),
+    info: form.info.trim() || null,
     edition: form.edition.trim() || null,
     price: parseNumber(form.price),
     old_price: parseNumber(form.old_price),
@@ -196,7 +206,6 @@ function toPayload(form: ProductFormState): AdminProductPayload {
     tags: form.tags.trim() || null,
     description: form.description.trim() || null,
     compound: form.compound.trim() || null,
-    info: form.info.trim() || null,
     players_min: parseNumber(form.players_min),
     players_max: parseNumber(form.players_max),
     players_online: form.players_online,
@@ -257,6 +266,46 @@ function TextAreaField({
   )
 }
 
+function SummaryCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string
+  value: string | number
+  hint?: string
+}) {
+  return (
+    <div className="rounded-[24px] border border-white/10 bg-slate-950/50 p-4">
+      <p className="text-xs uppercase tracking-[0.22em] text-slate-500">{label}</p>
+      <p className="mt-2 text-lg font-semibold text-white">{value}</p>
+      {hint ? <p className="mt-2 text-xs leading-6 text-slate-400">{hint}</p> : null}
+    </div>
+  )
+}
+
+function ProductStatusBadge({ active, label }: { active: boolean; label: string }) {
+  return (
+    <span
+      className={`rounded-full px-3 py-1 text-xs font-medium ${
+        active
+          ? 'border border-cyan-400/30 bg-cyan-500/12 text-cyan-100'
+          : 'border border-white/10 bg-white/[0.03] text-slate-400'
+      }`}
+    >
+      {label}
+    </span>
+  )
+}
+
+function formatCompactPrice(product: AdminProduct) {
+  return product.price_try ?? product.price_uah ?? product.price_inr ?? product.price ?? '—'
+}
+
+function productKey(product: Pick<AdminProduct, 'id' | 'region'>) {
+  return `${product.id}-${product.region}`
+}
+
 export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => Promise<void> }) {
   const [products, setProducts] = useState<AdminProduct[]>([])
   const [total, setTotal] = useState(0)
@@ -268,10 +317,13 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   const [sort, setSort] = useState<AdminProductSortMode>('popular')
   const [isLoading, setIsLoading] = useState(true)
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
-  const [selectedProduct, setSelectedProduct] = useState<AdminProduct | null>(null)
+  const [activeProduct, setActiveProduct] = useState<AdminProductDetails | null>(null)
+  const [editingProduct, setEditingProduct] = useState<AdminProductDetails | null>(null)
   const [form, setForm] = useState<ProductFormState>(EMPTY_FORM)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isDeletingGroup, setIsDeletingGroup] = useState(false)
+  const [removingFavoriteId, setRemovingFavoriteId] = useState<number | null>(null)
 
   async function loadProducts() {
     setIsLoading(true)
@@ -300,12 +352,31 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     loadProducts()
   }, [page, limit, search, regionFilter, categoryFilter, sort])
 
-  async function startEdit(product: AdminProduct) {
+  function applyProductToList(product: AdminProductDetails) {
+    setProducts((current) => {
+      const next = [...current]
+      const index = next.findIndex((item) => productKey(item) === productKey(product))
+      if (index >= 0) {
+        next[index] = product
+        return next
+      }
+      return [product, ...next]
+    })
+  }
+
+  async function loadProductDetails(productId: string, region: string) {
+    const detail = await fetchAdminProduct(productId, region)
+    setActiveProduct(detail)
+    setEditingProduct(detail)
+    setForm(fromProduct(detail))
+    applyProductToList(detail)
+    return detail
+  }
+
+  async function openProduct(product: AdminProduct) {
     setNotice(EMPTY_ADMIN_NOTICE)
     try {
-      const fullProduct = await fetchAdminProduct(product.id, product.region)
-      setSelectedProduct(fullProduct)
-      setForm(fromProduct(fullProduct))
+      await loadProductDetails(product.id, product.region)
     } catch (error) {
       setNotice({
         type: 'error',
@@ -315,27 +386,46 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   }
 
   function startCreate() {
-    setSelectedProduct(null)
+    setEditingProduct(null)
     setForm(EMPTY_FORM)
     setNotice(EMPTY_ADMIN_NOTICE)
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  function startCloneForRegion(region: 'TR' | 'UA' | 'IN') {
+    if (!activeProduct) {
+      return
+    }
+    setEditingProduct(null)
+    setForm({
+      ...fromProduct(activeProduct),
+      region,
+    })
+    setNotice({
+      type: 'info',
+      message: `Создаётся новая строка для региона ${region} на основе текущего товара.`,
+    })
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsSaving(true)
     setNotice(EMPTY_ADMIN_NOTICE)
 
     try {
-      if (selectedProduct) {
-        const updatedProduct = await updateAdminProduct(selectedProduct.id, selectedProduct.region, toPayload(form))
-        setSelectedProduct(updatedProduct)
+      if (editingProduct) {
+        const updatedProduct = await updateAdminProduct(editingProduct.id, editingProduct.region, toPayload(form))
+        setActiveProduct(updatedProduct)
+        setEditingProduct(updatedProduct)
         setForm(fromProduct(updatedProduct))
+        applyProductToList(updatedProduct)
         setNotice({ type: 'success', message: 'Товар обновлён.' })
       } else {
         const createdProduct = await createAdminProduct(toPayload(form))
-        setSelectedProduct(createdProduct)
+        setActiveProduct(createdProduct)
+        setEditingProduct(createdProduct)
         setForm(fromProduct(createdProduct))
-        setNotice({ type: 'success', message: 'Товар создан.' })
+        applyProductToList(createdProduct)
+        setNotice({ type: 'success', message: 'Новая строка товара создана.' })
       }
       await onDataChanged()
       await loadProducts()
@@ -349,12 +439,12 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     }
   }
 
-  async function handleDelete() {
-    if (!selectedProduct) {
+  async function handleDeleteCurrent() {
+    if (!activeProduct) {
       return
     }
 
-    if (!window.confirm(`Удалить товар ${selectedProduct.display_name} (${selectedProduct.region})?`)) {
+    if (!window.confirm(`Удалить строку ${activeProduct.display_name} (${activeProduct.region})?`)) {
       return
     }
 
@@ -362,19 +452,87 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     setNotice(EMPTY_ADMIN_NOTICE)
 
     try {
-      await deleteAdminProduct(selectedProduct.id, selectedProduct.region)
-      setSelectedProduct(null)
+      await deleteAdminProduct(activeProduct.id, activeProduct.region)
+      setProducts((current) => current.filter((item) => productKey(item) !== productKey(activeProduct)))
+      setActiveProduct(null)
+      setEditingProduct(null)
       setForm(EMPTY_FORM)
-      setNotice({ type: 'success', message: 'Товар удалён.' })
+      setNotice({ type: 'success', message: 'Строка товара удалена.' })
       await onDataChanged()
       await loadProducts()
     } catch (error) {
       setNotice({
         type: 'error',
-        message: getApiErrorMessage(error, 'Не удалось удалить товар.'),
+        message: getApiErrorMessage(error, 'Не удалось удалить строку товара.'),
       })
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  async function handleDeleteGroup() {
+    if (!activeProduct) {
+      return
+    }
+
+    if (!window.confirm(`Удалить товар ${activeProduct.id} сразу во всех регионах?`)) {
+      return
+    }
+
+    setIsDeletingGroup(true)
+    setNotice(EMPTY_ADMIN_NOTICE)
+
+    try {
+      const response = await deleteAdminProductGroup(activeProduct.id)
+      setProducts((current) => current.filter((item) => item.id !== activeProduct.id))
+      setActiveProduct(null)
+      setEditingProduct(null)
+      setForm(EMPTY_FORM)
+      setNotice({ type: 'success', message: response.message })
+      await onDataChanged()
+      await loadProducts()
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        message: getApiErrorMessage(error, 'Не удалось удалить товар целиком.'),
+      })
+    } finally {
+      setIsDeletingGroup(false)
+    }
+  }
+
+  async function handleRemoveFavorite(favorite: AdminProductFavorite) {
+    if (!activeProduct) {
+      return
+    }
+
+    const userLabel = favorite.full_name || favorite.username || favorite.telegram_id || favorite.user_id
+    if (!window.confirm(`Убрать товар из избранного у пользователя ${userLabel}?`)) {
+      return
+    }
+
+    setRemovingFavoriteId(favorite.id)
+    setNotice(EMPTY_ADMIN_NOTICE)
+
+    try {
+      await deleteAdminProductFavorite(activeProduct.id, favorite.id)
+      const refreshed = await fetchAdminProduct(activeProduct.id, activeProduct.region)
+      setActiveProduct(refreshed)
+      if (editingProduct && productKey(editingProduct) === productKey(refreshed)) {
+        setEditingProduct(refreshed)
+        setForm(fromProduct(refreshed))
+      }
+      applyProductToList(refreshed)
+      setNotice({ type: 'success', message: 'Товар удалён из избранного пользователя.' })
+      await onDataChanged()
+      await loadProducts()
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        message: getApiErrorMessage(error, 'Не удалось удалить товар из избранного.'),
+      })
+    } finally {
+      setRemovingFavoriteId(null)
     }
   }
 
@@ -383,8 +541,8 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   return (
     <AdminSectionCard
       id="admin-products"
-      title="Каталог и CRUD товаров"
-      description="Редактирование карточек каталога по регионам, ценам, скидкам, PS Plus и метаданным."
+      title="Товары и полное управление каталогом"
+      description="Просмотр всех полей товара, региональных строк, избранного и ручное управление карточками без похода в базу."
       action={
         <div className="flex flex-wrap gap-3">
           <button type="button" className="btn-secondary" onClick={() => loadProducts()}>
@@ -398,7 +556,9 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
         </div>
       }
     >
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(380px,0.9fr)]">
+      <AdminNotice state={notice} />
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.95fr)_minmax(420px,1.05fr)]">
         <div className="space-y-5">
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px_180px]">
             <input
@@ -408,7 +568,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
                 setSearch(event.target.value)
               }}
               className="auth-input"
-              placeholder="Поиск по ID, main_name или полному имени"
+              placeholder="Поиск по ID, названию, main_name"
             />
 
             <select
@@ -432,7 +592,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
                 setCategoryFilter(event.target.value)
               }}
               className="auth-input"
-              placeholder="Фильтр по категории"
+              placeholder="Категория"
             />
 
             <select
@@ -443,18 +603,15 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
               }}
               className="auth-input"
             >
-              <option value="popular">Популярность</option>
+              <option value="popular">По избранному</option>
               <option value="alphabet">По алфавиту</option>
             </select>
           </div>
 
-          <AdminNotice state={notice} />
-
           <AdminTableShell>
-            <div className="hidden grid-cols-[minmax(0,1.2fr)_90px_110px_90px_130px_130px] gap-3 border-b border-white/8 px-5 py-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 lg:grid">
+            <div className="hidden grid-cols-[minmax(0,1.2fr)_70px_90px_120px_120px] gap-3 border-b border-white/8 px-5 py-4 text-xs font-semibold uppercase tracking-[0.24em] text-slate-500 lg:grid">
               <span>Товар</span>
               <span>Регион</span>
-              <span>Категория</span>
               <span>В избр.</span>
               <span>Цена</span>
               <span>Действия</span>
@@ -462,36 +619,49 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
 
             {isLoading ? (
               <div className="space-y-3 px-5 py-5">
-                {Array.from({ length: 5 }).map((_, index) => (
-                  <div key={index} className="h-20 animate-pulse rounded-[20px] bg-white/[0.04]" />
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div key={index} className="h-24 animate-pulse rounded-[20px] bg-white/[0.04]" />
                 ))}
               </div>
             ) : products.length ? (
               <div className="divide-y divide-white/6">
-                {products.map((product) => (
-                  <div key={`${product.id}-${product.region}`} className="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1.2fr)_90px_110px_90px_130px_130px] lg:items-center">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-white">{product.display_name}</p>
-                      <p className="mt-1 truncate text-sm text-slate-400">{product.id}</p>
-                    </div>
-                    <div className="text-sm text-slate-300">{product.region}</div>
-                    <div className="text-sm text-slate-300">{product.category || '—'}</div>
-                    <div className="text-sm text-slate-300">{product.favorites_count}</div>
-                    <div className="text-sm text-slate-300">
-                      {product.price_try ?? product.price_uah ?? product.price_inr ?? product.price ?? '—'}
-                    </div>
-                    <div className="flex gap-2">
-                      <button type="button" className="btn-secondary px-4 py-2 text-xs" onClick={() => startEdit(product)}>
-                        <Pencil size={14} />
-                        Изменить
+                {products.map((product) => {
+                  const isActive = activeProduct ? productKey(product) === productKey(activeProduct) : false
+
+                  return (
+                    <div
+                      key={productKey(product)}
+                      className={`grid gap-4 px-5 py-4 transition lg:grid-cols-[minmax(0,1.2fr)_70px_90px_120px_120px] lg:items-center ${
+                        isActive ? 'bg-cyan-500/[0.06]' : ''
+                      }`}
+                    >
+                      <button type="button" className="min-w-0 text-left" onClick={() => openProduct(product)}>
+                        <p className="truncate text-sm font-semibold text-white">{product.display_name}</p>
+                        <p className="mt-1 truncate text-xs text-slate-400">{product.id}</p>
+                        <p className="mt-2 truncate text-xs text-slate-500">
+                          {product.category || 'Без категории'} • {product.localization || 'Без локализации'}
+                        </p>
                       </button>
+
+                      <div className="text-sm text-slate-300">{product.region}</div>
+                      <div className="text-sm text-slate-300">{product.favorites_count}</div>
+                      <div className="text-sm text-slate-300">{formatCompactPrice(product)}</div>
+                      <div className="flex gap-2">
+                        <button type="button" className="btn-secondary px-4 py-2 text-xs" onClick={() => openProduct(product)}>
+                          <Pencil size={14} />
+                          Открыть
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <div className="px-5 py-8">
-                <AdminEmptyState title="Товары не найдены" description="Попробуйте другие фильтры или создайте карточку вручную." />
+                <AdminEmptyState
+                  title="Товары не найдены"
+                  description="Попробуйте другие фильтры или создайте карточку вручную."
+                />
               </div>
             )}
           </AdminTableShell>
@@ -511,113 +681,274 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
           </div>
         </div>
 
-        <div className="panel-soft rounded-[30px] p-5">
-          <div className="flex items-center justify-between gap-4 border-b border-white/8 pb-4">
-            <div>
-              <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Редактор товара</p>
-              <h3 className="mt-2 text-xl text-white">
-                {selectedProduct ? 'Редактирование строки каталога' : 'Создание строки каталога'}
-              </h3>
-            </div>
+        <div className="space-y-6">
+          <div className="panel-soft rounded-[30px] p-5">
+            {activeProduct ? (
+              <div className="space-y-5">
+                <div className="flex flex-col gap-4 border-b border-white/8 pb-5 md:flex-row md:items-start">
+                  <div className="h-28 w-28 overflow-hidden rounded-[24px] border border-white/10 bg-slate-950/60">
+                    {activeProduct.image ? (
+                      <img src={activeProduct.image} alt={activeProduct.display_name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-xs text-slate-500">Нет картинки</div>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Центр товара</p>
+                    <h3 className="mt-2 text-2xl text-white">{activeProduct.display_name}</h3>
+                    <p className="mt-2 break-all text-sm text-slate-400">{activeProduct.id}</p>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <ProductStatusBadge active={activeProduct.has_discount} label="Есть скидка" />
+                      <ProductStatusBadge active={activeProduct.has_ps_plus} label="PS Plus" />
+                      <ProductStatusBadge active={activeProduct.has_ea_access} label="EA Access" />
+                      <ProductStatusBadge active={activeProduct.players_online} label="Онлайн" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <SummaryCard label="Избранное" value={activeProduct.favorite_users_total} hint="Сколько пользователей добавили товар." />
+                  <SummaryCard label="Региональные строки" value={activeProduct.regional_rows_total} hint={activeProduct.available_regions.join(', ') || 'Нет'} />
+                  <SummaryCard label="Отсутствуют регионы" value={activeProduct.missing_regions.length || '0'} hint={activeProduct.missing_regions.join(', ') || 'Все регионы присутствуют'} />
+                  <SummaryCard label="Локализация" value={activeProduct.localization || '—'} hint={activeProduct.category || 'Без категории'} />
+                </div>
+
+                <div className="rounded-[26px] border border-white/10 bg-slate-950/45 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Региональные строки товара</p>
+                      <p className="mt-1 text-xs text-slate-500">Быстро переключайтесь между строками каталога с одним ID.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {activeProduct.missing_regions.map((region) => (
+                        <button
+                          key={region}
+                          type="button"
+                          className="btn-secondary px-3 py-2 text-xs"
+                          onClick={() => startCloneForRegion(region as 'TR' | 'UA' | 'IN')}
+                        >
+                          <CopyPlus size={14} />
+                          Создать {region}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3">
+                    {activeProduct.regional_products.map((regionalProduct) => (
+                      <div key={productKey(regionalProduct)} className="rounded-[22px] border border-white/8 bg-white/[0.03] p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-white">{regionalProduct.region}</p>
+                            <p className="mt-1 text-xs text-slate-400">
+                              {regionalProduct.localization || 'Без локализации'} • Цена: {formatCompactPrice(regionalProduct)}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-secondary px-4 py-2 text-xs"
+                            onClick={() => openProduct(regionalProduct)}
+                          >
+                            <Pencil size={14} />
+                            Открыть строку
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-[26px] border border-white/10 bg-slate-950/45 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-white">Избранное по пользователям</p>
+                      <p className="mt-1 text-xs text-slate-500">Видно, кто добавил товар и когда. Отсюда же можно убрать товар из избранного.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(activeProduct.favorites_by_region).map(([region, count]) => (
+                        <span key={region} className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-xs text-slate-300">
+                          {region}: {count}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 space-y-3">
+                    {activeProduct.favorites.length ? (
+                      activeProduct.favorites.map((favorite) => (
+                        <div key={favorite.id} className="flex flex-col gap-3 rounded-[22px] border border-white/8 bg-white/[0.03] p-4 md:flex-row md:items-center md:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                              <UserRound size={15} />
+                              <span className="truncate">{favorite.full_name || favorite.username || `User #${favorite.user_id}`}</span>
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+                              <span>Telegram: {favorite.telegram_id ?? '—'}</span>
+                              <span>Регион пользователя: {favorite.preferred_region ?? '—'}</span>
+                              <span>Регион избранного: {favorite.region ?? '—'}</span>
+                              <span>Email покупок: {favorite.payment_email ?? '—'}</span>
+                              <span>Добавил: {formatDateTime(favorite.favorited_at)}</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            className="btn-secondary border-rose-400/20 px-4 py-2 text-xs text-rose-100 hover:bg-rose-500/10"
+                            onClick={() => handleRemoveFavorite(favorite)}
+                            disabled={removingFavoriteId === favorite.id}
+                          >
+                            <Heart size={14} />
+                            {removingFavoriteId === favorite.id ? 'Удаляем...' : 'Убрать из избранного'}
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <AdminEmptyState
+                        title="Этот товар пока не в избранном"
+                        description="Как только пользователи начнут добавлять его в избранное, список появится здесь."
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <AdminEmptyState
+                title="Товар не выбран"
+                description="Откройте строку слева, чтобы увидеть все данные товара, регионы и список пользователей из избранного."
+              />
+            )}
           </div>
 
-          <form className="mt-5 space-y-6" onSubmit={handleSubmit}>
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextField label="ID товара" value={form.id} onChange={(value) => setForm((current) => ({ ...current, id: value }))} disabled={Boolean(selectedProduct)} />
+          <div className="panel-soft rounded-[30px] p-5">
+            <div className="flex flex-col gap-4 border-b border-white/8 pb-4 md:flex-row md:items-center md:justify-between">
               <div>
-                <label className="mb-2 block text-sm font-medium text-slate-200">Регион</label>
-                <select
-                  value={form.region}
-                  onChange={(event) => setForm((current) => ({ ...current, region: event.target.value as ProductFormState['region'] }))}
-                  className="auth-input"
-                  disabled={Boolean(selectedProduct)}
-                >
-                  <option value="TR">TR</option>
-                  <option value="UA">UA</option>
-                  <option value="IN">IN</option>
-                </select>
+                <p className="text-sm uppercase tracking-[0.24em] text-slate-500">Редактор товара</p>
+                <h3 className="mt-2 text-xl text-white">
+                  {editingProduct ? `Редактирование ${editingProduct.region}` : 'Создание новой строки каталога'}
+                </h3>
               </div>
-              <TextField label="Полное имя" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
-              <TextField label="Main name" value={form.main_name} onChange={(value) => setForm((current) => ({ ...current, main_name: value }))} />
-              <TextField label="Категория" value={form.category} onChange={(value) => setForm((current) => ({ ...current, category: value }))} />
-              <TextField label="Тип" value={form.type} onChange={(value) => setForm((current) => ({ ...current, type: value }))} />
-              <TextField label="Edition" value={form.edition} onChange={(value) => setForm((current) => ({ ...current, edition: value }))} />
-              <TextField label="Image URL" value={form.image} onChange={(value) => setForm((current) => ({ ...current, image: value }))} />
-              <TextField label="Platforms" value={form.platforms} onChange={(value) => setForm((current) => ({ ...current, platforms: value }))} />
-              <TextField label="Publisher" value={form.publisher} onChange={(value) => setForm((current) => ({ ...current, publisher: value }))} />
-              <TextField label="Localization" value={form.localization} onChange={(value) => setForm((current) => ({ ...current, localization: value }))} />
-              <TextField label="Rating" value={form.rating} onChange={(value) => setForm((current) => ({ ...current, rating: value }))} type="number" />
-            </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextField label="Цена base" value={form.price} onChange={(value) => setForm((current) => ({ ...current, price: value }))} type="number" />
-              <TextField label="Старая цена base" value={form.old_price} onChange={(value) => setForm((current) => ({ ...current, old_price: value }))} type="number" />
-              <TextField label="PS цена base" value={form.ps_price} onChange={(value) => setForm((current) => ({ ...current, ps_price: value }))} type="number" />
-              <TextField label="EA цена base" value={form.ea_price} onChange={(value) => setForm((current) => ({ ...current, ea_price: value }))} type="number" />
-              <TextField label="TRY цена" value={form.price_try} onChange={(value) => setForm((current) => ({ ...current, price_try: value }))} type="number" />
-              <TextField label="TRY старая" value={form.old_price_try} onChange={(value) => setForm((current) => ({ ...current, old_price_try: value }))} type="number" />
-              <TextField label="UAH цена" value={form.price_uah} onChange={(value) => setForm((current) => ({ ...current, price_uah: value }))} type="number" />
-              <TextField label="UAH старая" value={form.old_price_uah} onChange={(value) => setForm((current) => ({ ...current, old_price_uah: value }))} type="number" />
-              <TextField label="INR цена" value={form.price_inr} onChange={(value) => setForm((current) => ({ ...current, price_inr: value }))} type="number" />
-              <TextField label="INR старая" value={form.old_price_inr} onChange={(value) => setForm((current) => ({ ...current, old_price_inr: value }))} type="number" />
-              <TextField label="PS Plus TRY" value={form.ps_plus_price_try} onChange={(value) => setForm((current) => ({ ...current, ps_plus_price_try: value }))} type="number" />
-              <TextField label="PS Plus UAH" value={form.ps_plus_price_uah} onChange={(value) => setForm((current) => ({ ...current, ps_plus_price_uah: value }))} type="number" />
-              <TextField label="PS Plus INR" value={form.ps_plus_price_inr} onChange={(value) => setForm((current) => ({ ...current, ps_plus_price_inr: value }))} type="number" />
-              <TextField label="Скидка %" value={form.discount} onChange={(value) => setForm((current) => ({ ...current, discount: value }))} type="number" />
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <TextField label="Дата конца скидки" value={form.discount_end} onChange={(value) => setForm((current) => ({ ...current, discount_end: value }))} />
-              <TextField label="Plus types" value={form.plus_types} onChange={(value) => setForm((current) => ({ ...current, plus_types: value }))} />
-              <TextField label="PS Plus collection" value={form.ps_plus_collection} onChange={(value) => setForm((current) => ({ ...current, ps_plus_collection: value }))} />
-              <TextField label="EA access" value={form.ea_access} onChange={(value) => setForm((current) => ({ ...current, ea_access: value }))} />
-              <TextField label="Players min" value={form.players_min} onChange={(value) => setForm((current) => ({ ...current, players_min: value }))} type="number" />
-              <TextField label="Players max" value={form.players_max} onChange={(value) => setForm((current) => ({ ...current, players_max: value }))} type="number" />
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={form.ps_plus}
-                  onChange={(event) => setForm((current) => ({ ...current, ps_plus: event.target.checked }))}
-                />
-                Доступен в PS Plus
-              </label>
-
-              <label className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
-                <input
-                  type="checkbox"
-                  checked={form.players_online}
-                  onChange={(event) => setForm((current) => ({ ...current, players_online: event.target.checked }))}
-                />
-                Есть онлайн
-              </label>
-            </div>
-
-            <TextAreaField label="Search names" value={form.search_names} onChange={(value) => setForm((current) => ({ ...current, search_names: value }))} />
-            <TextAreaField label="Tags" value={form.tags} onChange={(value) => setForm((current) => ({ ...current, tags: value }))} />
-            <TextAreaField label="Description" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
-            <TextAreaField label="Compound" value={form.compound} onChange={(value) => setForm((current) => ({ ...current, compound: value }))} />
-            <TextAreaField label="Info" value={form.info} onChange={(value) => setForm((current) => ({ ...current, info: value }))} />
-
-            <div className="flex flex-wrap gap-3">
-              <button type="submit" className="btn-primary" disabled={isSaving}>
-                {isSaving ? 'Сохраняем...' : selectedProduct ? 'Сохранить изменения' : 'Создать товар'}
-              </button>
-
-              <button type="button" className="btn-secondary" onClick={startCreate}>
-                Очистить
-              </button>
-
-              {selectedProduct ? (
-                <button type="button" className="btn-secondary border-rose-400/20 text-rose-100 hover:bg-rose-500/10" onClick={handleDelete} disabled={isDeleting}>
-                  <Trash2 size={16} />
-                  {isDeleting ? 'Удаляем...' : 'Удалить'}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn-secondary px-4 py-2 text-xs" onClick={startCreate}>
+                  <Plus size={14} />
+                  Пустая форма
                 </button>
-              ) : null}
+
+                {activeProduct ? (
+                  <button
+                    type="button"
+                    className="btn-secondary border-rose-400/20 px-4 py-2 text-xs text-rose-100 hover:bg-rose-500/10"
+                    onClick={handleDeleteGroup}
+                    disabled={isDeletingGroup}
+                  >
+                    <Trash2 size={14} />
+                    {isDeletingGroup ? 'Удаляем...' : 'Удалить весь товар'}
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </form>
+
+            <form className="mt-5 space-y-6" onSubmit={handleSubmit}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextField label="ID товара" value={form.id} onChange={(value) => setForm((current) => ({ ...current, id: value }))} disabled={Boolean(editingProduct)} />
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-slate-200">Регион</label>
+                  <select
+                    value={form.region}
+                    onChange={(event) => setForm((current) => ({ ...current, region: event.target.value as ProductFormState['region'] }))}
+                    className="auth-input"
+                    disabled={Boolean(editingProduct)}
+                  >
+                    <option value="TR">TR</option>
+                    <option value="UA">UA</option>
+                    <option value="IN">IN</option>
+                  </select>
+                </div>
+                <TextField label="Полное имя" value={form.name} onChange={(value) => setForm((current) => ({ ...current, name: value }))} />
+                <TextField label="Main name" value={form.main_name} onChange={(value) => setForm((current) => ({ ...current, main_name: value }))} />
+                <TextField label="Категория" value={form.category} onChange={(value) => setForm((current) => ({ ...current, category: value }))} />
+                <TextField label="Тип" value={form.type} onChange={(value) => setForm((current) => ({ ...current, type: value }))} />
+                <TextField label="Edition" value={form.edition} onChange={(value) => setForm((current) => ({ ...current, edition: value }))} />
+                <TextField label="Image URL" value={form.image} onChange={(value) => setForm((current) => ({ ...current, image: value }))} />
+                <TextField label="Platforms" value={form.platforms} onChange={(value) => setForm((current) => ({ ...current, platforms: value }))} />
+                <TextField label="Publisher" value={form.publisher} onChange={(value) => setForm((current) => ({ ...current, publisher: value }))} />
+                <TextField label="Localization" value={form.localization} onChange={(value) => setForm((current) => ({ ...current, localization: value }))} />
+                <TextField label="Rating" value={form.rating} onChange={(value) => setForm((current) => ({ ...current, rating: value }))} type="number" />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <TextField label="Цена base" value={form.price} onChange={(value) => setForm((current) => ({ ...current, price: value }))} type="number" />
+                <TextField label="Старая цена base" value={form.old_price} onChange={(value) => setForm((current) => ({ ...current, old_price: value }))} type="number" />
+                <TextField label="PS цена base" value={form.ps_price} onChange={(value) => setForm((current) => ({ ...current, ps_price: value }))} type="number" />
+                <TextField label="EA цена base" value={form.ea_price} onChange={(value) => setForm((current) => ({ ...current, ea_price: value }))} type="number" />
+                <TextField label="TRY цена" value={form.price_try} onChange={(value) => setForm((current) => ({ ...current, price_try: value }))} type="number" />
+                <TextField label="TRY старая" value={form.old_price_try} onChange={(value) => setForm((current) => ({ ...current, old_price_try: value }))} type="number" />
+                <TextField label="UAH цена" value={form.price_uah} onChange={(value) => setForm((current) => ({ ...current, price_uah: value }))} type="number" />
+                <TextField label="UAH старая" value={form.old_price_uah} onChange={(value) => setForm((current) => ({ ...current, old_price_uah: value }))} type="number" />
+                <TextField label="INR цена" value={form.price_inr} onChange={(value) => setForm((current) => ({ ...current, price_inr: value }))} type="number" />
+                <TextField label="INR старая" value={form.old_price_inr} onChange={(value) => setForm((current) => ({ ...current, old_price_inr: value }))} type="number" />
+                <TextField label="PS Plus TRY" value={form.ps_plus_price_try} onChange={(value) => setForm((current) => ({ ...current, ps_plus_price_try: value }))} type="number" />
+                <TextField label="PS Plus UAH" value={form.ps_plus_price_uah} onChange={(value) => setForm((current) => ({ ...current, ps_plus_price_uah: value }))} type="number" />
+                <TextField label="PS Plus INR" value={form.ps_plus_price_inr} onChange={(value) => setForm((current) => ({ ...current, ps_plus_price_inr: value }))} type="number" />
+                <TextField label="Скидка %" value={form.discount} onChange={(value) => setForm((current) => ({ ...current, discount: value }))} type="number" />
+                <TextField label="Дата конца скидки" value={form.discount_end} onChange={(value) => setForm((current) => ({ ...current, discount_end: value }))} />
+                <TextField label="Plus types" value={form.plus_types} onChange={(value) => setForm((current) => ({ ...current, plus_types: value }))} />
+                <TextField label="PS Plus collection" value={form.ps_plus_collection} onChange={(value) => setForm((current) => ({ ...current, ps_plus_collection: value }))} />
+                <TextField label="EA access" value={form.ea_access} onChange={(value) => setForm((current) => ({ ...current, ea_access: value }))} />
+                <TextField label="Players min" value={form.players_min} onChange={(value) => setForm((current) => ({ ...current, players_min: value }))} type="number" />
+                <TextField label="Players max" value={form.players_max} onChange={(value) => setForm((current) => ({ ...current, players_max: value }))} type="number" />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={form.ps_plus}
+                    onChange={(event) => setForm((current) => ({ ...current, ps_plus: event.target.checked }))}
+                  />
+                  Доступен в PS Plus
+                </label>
+
+                <label className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={form.players_online}
+                    onChange={(event) => setForm((current) => ({ ...current, players_online: event.target.checked }))}
+                  />
+                  Есть онлайн
+                </label>
+              </div>
+
+              <TextAreaField label="Search names" value={form.search_names} onChange={(value) => setForm((current) => ({ ...current, search_names: value }))} />
+              <TextAreaField label="Tags" value={form.tags} onChange={(value) => setForm((current) => ({ ...current, tags: value }))} />
+              <TextAreaField label="Description" value={form.description} onChange={(value) => setForm((current) => ({ ...current, description: value }))} />
+              <TextAreaField label="Compound" value={form.compound} onChange={(value) => setForm((current) => ({ ...current, compound: value }))} />
+              <TextAreaField label="Info" value={form.info} onChange={(value) => setForm((current) => ({ ...current, info: value }))} />
+
+              <div className="flex flex-wrap gap-3">
+                <button type="submit" className="btn-primary" disabled={isSaving}>
+                  {isSaving ? 'Сохраняем...' : editingProduct ? 'Сохранить изменения' : 'Создать строку'}
+                </button>
+
+                <button type="button" className="btn-secondary" onClick={startCreate}>
+                  Очистить
+                </button>
+
+                {activeProduct ? (
+                  <button
+                    type="button"
+                    className="btn-secondary border-rose-400/20 text-rose-100 hover:bg-rose-500/10"
+                    onClick={handleDeleteCurrent}
+                    disabled={isDeleting}
+                  >
+                    <Trash2 size={16} />
+                    {isDeleting ? 'Удаляем...' : 'Удалить текущую строку'}
+                  </button>
+                ) : null}
+              </div>
+            </form>
+          </div>
         </div>
       </div>
     </AdminSectionCard>

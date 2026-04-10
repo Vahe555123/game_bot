@@ -300,6 +300,33 @@ class AdminProductRecord(BaseModel):
     has_ea_access: bool = False
 
 
+class AdminProductFavoriteRecord(BaseModel):
+    id: int
+    user_id: int
+    telegram_id: Optional[int] = None
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    full_name: Optional[str] = None
+    preferred_region: Optional[str] = None
+    payment_email: Optional[str] = None
+    platform: Optional[str] = None
+    psn_email: Optional[str] = None
+    region: Optional[str] = None
+    is_active: bool = False
+    favorited_at: Optional[datetime] = None
+
+
+class AdminProductDetailsResponse(AdminProductRecord):
+    regional_products: list[AdminProductRecord] = Field(default_factory=list)
+    favorites: list[AdminProductFavoriteRecord] = Field(default_factory=list)
+    available_regions: list[str] = Field(default_factory=list)
+    missing_regions: list[str] = Field(default_factory=list)
+    favorites_by_region: dict[str, int] = Field(default_factory=dict)
+    regional_rows_total: int = 0
+    favorite_users_total: int = 0
+
+
 class AdminProductListResponse(BaseModel):
     products: list[AdminProductRecord] = Field(default_factory=list)
     total: int

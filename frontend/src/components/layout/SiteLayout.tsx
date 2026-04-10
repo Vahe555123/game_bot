@@ -293,9 +293,9 @@ export function SiteLayout() {
 
               {isAuthenticated ? (
                 <>
-                  <ActionLink href="https://oplata.info" external className={DESKTOP_ACTION_BUTTON_CLASS}>
+                  {/* <ActionLink href="https://oplata.info" external className={DESKTOP_ACTION_BUTTON_CLASS}>
                     Мои покупки
-                  </ActionLink>
+                  </ActionLink> */}
 
                   <IconLink to="/profile" className={DESKTOP_ACTION_BUTTON_CLASS} icon={UserRound} label="Профиль" />
 
@@ -404,14 +404,14 @@ export function SiteLayout() {
 
               {isAuthenticated ? (
                 <>
-                  <ActionLink
+                  {/* <ActionLink
                     href="https://oplata.info"
                     external
                     className={MOBILE_MENU_LINK_CLASS}
                     onClick={closeMobileMenu}
                   >
                     Мои покупки
-                  </ActionLink>
+                  </ActionLink> */}
 
                   <IconLink
                     to="/profile"

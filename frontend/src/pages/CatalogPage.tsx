@@ -15,6 +15,7 @@ const DEFAULT_FILTERS: CatalogFilterState = {
   search: '',
   category: '',
   region: '',
+  priceCurrency: 'RUB',
   platform: '',
   players: '',
   minPrice: '',
@@ -33,7 +34,8 @@ function parseFilters(searchParams: URLSearchParams): CatalogFilterState {
     sort: searchParams.get('sort') || 'popular',
     search: searchParams.get('search') || '',
     category: searchParams.get('category') || '',
-    region: searchParams.get('region') || '',
+    region: '',
+    priceCurrency: searchParams.get('priceCurrency') || 'RUB',
     platform: searchParams.get('platform') || '',
     players: searchParams.get('players') || '',
     minPrice: searchParams.get('minPrice') || '',
@@ -50,7 +52,7 @@ function buildSearchParams(filters: CatalogFilterState) {
   if (filters.sort && filters.sort !== 'popular') next.set('sort', filters.sort)
   if (filters.search) next.set('search', filters.search)
   if (filters.category) next.set('category', filters.category)
-  if (filters.region) next.set('region', filters.region)
+  if (filters.priceCurrency && filters.priceCurrency !== 'RUB') next.set('priceCurrency', filters.priceCurrency)
   if (filters.platform) next.set('platform', filters.platform)
   if (filters.players) next.set('players', filters.players)
   if (filters.minPrice) next.set('minPrice', filters.minPrice)
@@ -69,7 +71,7 @@ function areFiltersEqual(left: CatalogFilterState, right: CatalogFilterState) {
     left.sort === right.sort &&
     left.search === right.search &&
     left.category === right.category &&
-    left.region === right.region &&
+    left.priceCurrency === right.priceCurrency &&
     left.platform === right.platform &&
     left.players === right.players &&
     left.minPrice === right.minPrice &&
@@ -83,7 +85,7 @@ function areFiltersEqual(left: CatalogFilterState, right: CatalogFilterState) {
 function countActiveFilters(filters: CatalogFilterState) {
   return [
     filters.category,
-    filters.region,
+    filters.priceCurrency !== 'RUB',
     filters.platform,
     filters.players,
     filters.minPrice || filters.maxPrice,
@@ -129,6 +131,9 @@ function dedupeCatalogProducts(products: CatalogProduct[]) {
   return result
 }
 
+const COMPACT_FILTERS_COLLAPSE_SCROLL = 100
+const COMPACT_FILTERS_RESTORE_SCROLL = 48
+
 export function CatalogPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const filters = useMemo(() => parseFilters(searchParams), [searchParams])
@@ -149,6 +154,11 @@ export function CatalogPage() {
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null)
   const previousFiltersKeyRef = useRef(filtersKey)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const inlineFiltersRef = useRef<HTMLElement | null>(null)
+  const [inlineFiltersHeight, setInlineFiltersHeight] = useState(0)
+  const activeFiltersCount = countActiveFilters(filters)
+  const shouldShowInlineFilters = !isCompactFiltersVisible
+  const shouldShowFiltersPanel = shouldShowInlineFilters || isCompactFiltersOpen
 
   useEffect(() => {
     setDraftSearch(filters.search)
@@ -157,12 +167,17 @@ export function CatalogPage() {
 
   useEffect(() => {
     function handleScroll() {
-      const shouldCollapse = window.scrollY > 100
-      setIsCompactFiltersVisible((current) => (current !== shouldCollapse ? shouldCollapse : current))
+      setIsCompactFiltersVisible((current) => {
+        const shouldCollapse = current
+          ? window.scrollY > COMPACT_FILTERS_RESTORE_SCROLL
+          : window.scrollY > COMPACT_FILTERS_COLLAPSE_SCROLL
 
-      if (!shouldCollapse) {
-        setIsCompactFiltersOpen(false)
-      }
+        return current !== shouldCollapse ? shouldCollapse : current
+      })
+
+      setIsCompactFiltersOpen((current) =>
+        current && window.scrollY <= COMPACT_FILTERS_RESTORE_SCROLL ? false : current,
+      )
     }
 
     handleScroll()
@@ -170,6 +185,37 @@ export function CatalogPage() {
 
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
+
+  useEffect(() => {
+    if (!shouldShowInlineFilters) {
+      return undefined
+    }
+
+    const node = inlineFiltersRef.current
+
+    if (!node) {
+      return undefined
+    }
+
+    const inlineFiltersNode = node
+
+    function syncInlineFiltersHeight() {
+      const nextHeight = inlineFiltersNode.offsetHeight
+      setInlineFiltersHeight((current) => (current !== nextHeight ? nextHeight : current))
+    }
+
+    syncInlineFiltersHeight()
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', syncInlineFiltersHeight)
+      return () => window.removeEventListener('resize', syncInlineFiltersHeight)
+    }
+
+    const resizeObserver = new ResizeObserver(() => syncInlineFiltersHeight())
+    resizeObserver.observe(inlineFiltersNode)
+
+    return () => resizeObserver.disconnect()
+  }, [shouldShowInlineFilters, draftFilters, categories, draftSearch, total, activeFiltersCount, isMobileFiltersOpen])
 
   useEffect(() => {
     let ignore = false
@@ -286,7 +332,7 @@ export function CatalogPage() {
           sort: filters.sort,
           search: filters.search || undefined,
           category: filters.category || undefined,
-          region: filters.region || undefined,
+          price_currency: filters.priceCurrency || undefined,
           platform: filters.platform || undefined,
           players: filters.players || undefined,
           min_price: filters.minPrice ? Number(filters.minPrice) : undefined,
@@ -329,10 +375,6 @@ export function CatalogPage() {
     }
   }, [filters, filtersKey, page])
 
-  const activeFiltersCount = countActiveFilters(filters)
-  const shouldShowInlineFilters = !isCompactFiltersVisible
-  const shouldShowFiltersPanel = shouldShowInlineFilters || isCompactFiltersOpen
-
   function updateDraftFilters(partial: Partial<CatalogFilterState>) {
     setDraftFilters((current) => ({
       ...current,
@@ -363,8 +405,11 @@ export function CatalogPage() {
         />
       ) : null}
 
+      {isCompactFiltersVisible && inlineFiltersHeight > 0 ? <div aria-hidden style={{ height: inlineFiltersHeight }} /> : null}
+
       {shouldShowFiltersPanel ? (
         <section
+          ref={shouldShowInlineFilters ? inlineFiltersRef : undefined}
           className={
             shouldShowInlineFilters
               ? 'sticky top-[5.25rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-24 md:rounded-[30px] md:p-5'

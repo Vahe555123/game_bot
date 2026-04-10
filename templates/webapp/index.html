@@ -82,6 +82,53 @@
     margin-bottom: 8px;
 }
 
+.price-row-regional {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.price-region-badge {
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(36, 129, 204, 0.16);
+    color: var(--tg-theme-text-color);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.price-region-content {
+    min-width: 0;
+    flex: 1;
+}
+
+.price-region-name {
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--tg-theme-text-color);
+    margin-bottom: 3px;
+}
+
+.price-values {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+}
+
+.price-local-currency {
+    font-size: 11px;
+    color: var(--tg-theme-hint-color);
+}
+
 /* Бейдж языка - разрешаем перенос на 2 строки */
 .product-badge.language {
     white-space: normal !important;
@@ -317,18 +364,6 @@
         gap: 4px;
     }
 
-    .price-row-regional {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-
-    .price-values {
-        display: flex;
-        align-items: baseline;
-        gap: 6px;
-    }
-
     .price-main-wrapper {
         display: flex;
         align-items: baseline;
@@ -422,13 +457,7 @@
                 <option value="price_asc">По цене</option>
             </select>
             <select class="filter-select" id="categoryFilter">
-                <option value="">Все категории</option>
-            </select>
-            <select class="filter-select" id="regionSelect">
-                <option value="">Все регионы</option>
-                <option value="en-ua">🇺🇦 Украина</option>
-                <option value="en-tr">🇹🇷 Турция</option>
-                <option value="en-in">🇮🇳 Индия</option>
+                <option value="">??? ????? ???</option>
             </select>
         </div>
 
@@ -444,13 +473,22 @@
             <select class="filter-select" id="playersFilter">
                 <option value="">Количество игроков</option>
                 <option value="singleplayer">👤 Одиночная игра</option>
-                <option value="coop">🤝 Кооператив</option>
+                <option value="coop">?? ????. ?? ????? ???????</option>
             </select>
         </div>
 
         <div class="price-range-row">
             <input type="number" class="form-control" id="minPrice" placeholder="Мин. цена">
             <input type="number" class="form-control" id="maxPrice" placeholder="Макс. цена">
+        </div>
+
+        <div class="filter-row">
+            <select class="filter-select" id="priceCurrency">
+                <option value="RUB">?????</option>
+                <option value="TRY">????</option>
+                <option value="INR">?????</option>
+                <option value="UAH">??????</option>
+            </select>
         </div>
 
         <div class="checkbox-row">
@@ -465,7 +503,7 @@
 
         <div class="checkbox-row">
             <input type="checkbox" class="checkbox" id="eaAccessOnly">
-            <label for="eaAccessOnly" class="checkbox-label">Доступно в EA Access</label>
+            <label for="eaAccessOnly" class="checkbox-label">???????? ? EA PLAY</label>
         </div>
 
         <div class="filter-actions">
@@ -621,18 +659,10 @@ class ModernProductCatalog {
         // Setup event listeners and UI early
         this.initializePlatformFilterOptions();
         this.setupEventListeners();
-        this.restoreSelectedRegion();
         this.updateFilterState();
         this.setupInfiniteScroll();
 
         // Проверяем, изменился ли регион пользователя (если был флаг об изменении региона)
-        const regionChanged = sessionStorage.getItem('regionSettingsChanged');
-        if (regionChanged === 'true') {
-            sessionStorage.removeItem('catalogSearchState');
-            sessionStorage.removeItem('catalogProductsHTML');
-            sessionStorage.removeItem('regionSettingsChanged');
-        }
-
         // Проверяем, есть ли сохраненное состояние поиска
         const hasSavedSearchState = sessionStorage.getItem('catalogSearchState');
 
@@ -696,7 +726,6 @@ class ModernProductCatalog {
             if (this.tgApp && this.tgApp.isInitialized && this.userTelegramId) {
                 this.userTelegramId = this.tgApp.getUserId();
                 console.log('✅ Telegram готов за', waited, 'мс');
-                await this.applyUserRegionSettingsToFilter();
                 return;
             }
             await new Promise(resolve => setTimeout(resolve, checkInterval));
@@ -777,78 +806,6 @@ class ModernProductCatalog {
             }
         }
     }
-
-    _regionSettingsFromSelectValue(selectedRegion) {
-        const settings = {
-            show_ukraine_prices: false,
-            show_turkey_prices: false,
-            show_india_prices: false
-        };
-
-        if (selectedRegion === 'en-ua') {
-            settings.show_ukraine_prices = true;
-        } else if (selectedRegion === 'en-tr') {
-            settings.show_turkey_prices = true;
-        } else if (selectedRegion === 'en-in') {
-            settings.show_india_prices = true;
-        } else {
-            // Если фильтр сброшен, оставляем дефолт как в профиле: Турция
-            settings.show_turkey_prices = true;
-        }
-
-        return settings;
-    }
-
-    _selectValueFromRegionSettings(regionSettings) {
-        if (!regionSettings) return '';
-
-        if (regionSettings.show_ukraine_prices) return 'en-ua';
-        if (regionSettings.show_turkey_prices) return 'en-tr';
-        if (regionSettings.show_india_prices) return 'en-in';
-
-        return 'en-tr';
-    }
-
-    async syncRegionFilterToUserSettings() {
-        try {
-            const regionSelect = document.getElementById('regionSelect');
-            if (!regionSelect) return;
-
-            const selectedRegion = regionSelect.value;
-
-            // Если Telegram еще не готов, просто сохраняем в localStorage (уже сделали) и выходим
-            if (!this.userTelegramId) return;
-
-            const payload = this._regionSettingsFromSelectValue(selectedRegion);
-            await this.api.put(`/users/${this.userTelegramId}/region-settings`, payload);
-
-            // Сообщаем другим страницам, что настройки региона обновились
-            sessionStorage.setItem('regionSettingsChanged', 'true');
-        } catch (error) {
-            console.error('❌ Failed to sync region filter to user settings:', error);
-        }
-    }
-
-    async applyUserRegionSettingsToFilter() {
-        try {
-            const regionSelect = document.getElementById('regionSelect');
-            if (!regionSelect) return;
-
-            if (!this.userTelegramId) return;
-
-            const settings = await this.api.get(`/users/${this.userTelegramId}/region-settings`);
-            const desiredValue = this._selectValueFromRegionSettings(settings);
-
-            const optionExists = Array.from(regionSelect.options).some(option => option.value === desiredValue);
-            if (!optionExists) return;
-
-            // Обновляем фильтр и localStorage
-            regionSelect.value = desiredValue;
-            this.saveSelectedRegion();
-            this.updateFilterState();
-        } catch (error) {
-            console.error('❌ Failed to apply user region settings to filter:', error);
-        }
     }
 
     setupEventListeners() {
@@ -892,14 +849,6 @@ class ModernProductCatalog {
 
         // Filters (removed auto-search, now only on apply)
         document.getElementById('categoryFilter').addEventListener('change', () => this.updateFilterState());
-        document.getElementById('regionSelect').addEventListener('change', async () => {
-            this.saveSelectedRegion();
-            await this.syncRegionFilterToUserSettings();
-            this.updateFilterState();
-            // Очищаем кеш и перезагружаем избранное при смене региона
-            this.api.clearCache();
-            await this.loadFavorites();
-        });
         document.getElementById('platformFilter').addEventListener('change', () => this.updateFilterState());
         document.getElementById('playersFilter').addEventListener('change', () => this.updateFilterState());
         if (sortFilter) {
@@ -907,6 +856,7 @@ class ModernProductCatalog {
         }
         document.getElementById('minPrice').addEventListener('input', () => this.updateFilterState());
         document.getElementById('maxPrice').addEventListener('input', () => this.updateFilterState());
+        document.getElementById('priceCurrency').addEventListener('change', () => this.updateFilterState());
         document.getElementById('discountOnly').addEventListener('change', () => this.updateFilterState());
         document.getElementById('psPlusOnly').addEventListener('change', () => this.updateFilterState());
         document.getElementById('eaAccessOnly').addEventListener('change', () => this.updateFilterState());
@@ -961,15 +911,14 @@ class ModernProductCatalog {
 
                     sessionStorage.setItem('productDetailReturn', JSON.stringify({ from: 'home' }));
 
-                    // Сохраняем регион ИЗ КАРТОЧКИ товара, а не из фильтра
+                    // Сохраняем регион только для страницы товара, не для фильтра каталога
                     const productRegion = productCard.dataset.productRegion;
                     if (productRegion) {
-                        localStorage.setItem('selectedRegion', productRegion);
-                        console.log('🌍 Сохранен регион из карточки:', productRegion);
+                        localStorage.setItem('productDetailSelectedRegion', productRegion);
+                        console.log('🌍 Сохранен регион для карточки товара:', productRegion);
                     } else {
-                        // Если регион не указан в карточке, удаляем из localStorage
-                        localStorage.removeItem('selectedRegion');
-                        console.log('🌍 Регион не указан в карточке, удален из localStorage');
+                        localStorage.removeItem('productDetailSelectedRegion');
+                        console.log('🌍 Регион товара не указан, удален из localStorage');
                     }
                     const productUrl = productRegion
                         ? `/webapp/product/${productId}?region=${encodeURIComponent(productRegion)}`
@@ -1071,13 +1020,9 @@ class ModernProductCatalog {
         try {
             const params = new URLSearchParams({
                 page: this.currentPage,
-                limit: 12
+                limit: 12,
+                grouped: 'true'
             });
-
-            // Add telegram_id if available for user-specific region settings
-            if (this.userTelegramId) {
-                params.append('telegram_id', this.userTelegramId);
-            }
 
             // Add filters
             const search = document.getElementById('searchInput').value.trim();
@@ -1085,9 +1030,6 @@ class ModernProductCatalog {
 
             const category = document.getElementById('categoryFilter').value;
             if (category) params.append('category', category);
-
-            const region = document.getElementById('regionSelect').value;
-            if (region) params.append('region', region);
 
             const platform = document.getElementById('platformFilter').value;
             if (platform) params.append('platform', platform);
@@ -1103,6 +1045,9 @@ class ModernProductCatalog {
 
             const maxPrice = document.getElementById('maxPrice').value;
             if (maxPrice) params.append('max_price', maxPrice);
+
+            const priceCurrency = document.getElementById('priceCurrency').value;
+            if (priceCurrency && priceCurrency !== 'RUB') params.append('price_currency', priceCurrency);
 
             const discountOnly = document.getElementById('discountOnly').checked;
             if (discountOnly) params.append('has_discount', 'true');
@@ -1314,13 +1259,6 @@ class ModernProductCatalog {
     renderProductPrices(container, product) {
         container.innerHTML = '';
 
-        // Маппинг флагов на изображения
-        const flagMapping = {
-            '🇺🇦': '/static/images/flags/ukraine.png',
-            '🇹🇷': '/static/images/flags/turkey.png',
-            '🇮🇳': '/static/images/flags/India.png'
-        };
-
         // Отображаем все региональные цены с флагами
         // Порядок: Турция, Индия, Украина
         const regionOrder = { 'TR': 1, 'IN': 2, 'UA': 3 };
@@ -1334,13 +1272,18 @@ class ModernProductCatalog {
                 const priceRow = document.createElement('div');
                 priceRow.className = 'price-row-regional';
 
-                // Флаг региона
-                const flagImg = document.createElement('img');
-                flagImg.className = 'region-flag-img';
-                flagImg.src = flagMapping[regionPrice.flag] || WEBAPP_FLAG_BY_REGION[regionPrice.region] || regionPrice.flag;
-                flagImg.alt = regionPrice.name;
-                flagImg.onerror = function() { this.style.display = 'none'; };
-                priceRow.appendChild(flagImg);
+                const regionBadge = document.createElement('div');
+                regionBadge.className = 'price-region-badge';
+                regionBadge.textContent = regionPrice.region || '';
+                priceRow.appendChild(regionBadge);
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'price-region-content';
+
+                const regionName = document.createElement('div');
+                regionName.className = 'price-region-name';
+                regionName.textContent = regionPrice.name || regionPrice.region || '';
+                contentDiv.appendChild(regionName);
 
                 // Блок с ценами
                 const pricesDiv = document.createElement('div');
@@ -1379,7 +1322,8 @@ class ModernProductCatalog {
                     pricesDiv.appendChild(noPrice);
                 }
 
-                priceRow.appendChild(pricesDiv);
+                contentDiv.appendChild(pricesDiv);
+                priceRow.appendChild(contentDiv);
                 container.appendChild(priceRow);
             });
         } else {
@@ -1691,42 +1635,18 @@ class ModernProductCatalog {
 
     hasActiveFilters() {
         const category = document.getElementById('categoryFilter').value;
-        const region = document.getElementById('regionSelect').value;
         const platform = document.getElementById('platformFilter').value;
         const players = document.getElementById('playersFilter').value;
         const sort = document.getElementById('sortFilter').value;
         const minPrice = document.getElementById('minPrice').value;
         const maxPrice = document.getElementById('maxPrice').value;
+        const priceCurrency = document.getElementById('priceCurrency').value;
         const discountOnly = document.getElementById('discountOnly').checked;
         const psPlusOnly = document.getElementById('psPlusOnly').checked;
         const eaAccessOnly = document.getElementById('eaAccessOnly').checked;
 
-        return !!(category || region || platform || players || minPrice || maxPrice || discountOnly || psPlusOnly || eaAccessOnly || (sort && sort !== 'popular'));
+        return !!(category || platform || players || minPrice || maxPrice || (priceCurrency && priceCurrency !== 'RUB') || discountOnly || psPlusOnly || eaAccessOnly || (sort && sort !== 'popular'));
     }
-
-    restoreSelectedRegion() {
-        const savedRegion = localStorage.getItem('selectedRegion');
-        if (savedRegion) {
-            const regionSelect = document.getElementById('regionSelect');
-            // Проверяем, что такой регион существует в списке
-            const optionExists = Array.from(regionSelect.options).some(option => option.value === savedRegion);
-            if (optionExists) {
-                regionSelect.value = savedRegion;
-                console.log('🔄 Восстановлен регион из localStorage:', savedRegion);
-            }
-        }
-    }
-
-    saveSelectedRegion() {
-        const regionSelect = document.getElementById('regionSelect');
-        const selectedRegion = regionSelect.value;
-        if (selectedRegion) {
-            localStorage.setItem('selectedRegion', selectedRegion);
-            console.log('💾 Сохранен регион в localStorage:', selectedRegion);
-        } else {
-            localStorage.removeItem('selectedRegion');
-            console.log('🗑️ Регион удален из localStorage');
-        }
     }
 
     saveSearchState() {
@@ -1734,11 +1654,11 @@ class ModernProductCatalog {
             searchText: document.getElementById('searchInput').value,
             sort: document.getElementById('sortFilter').value,
             category: document.getElementById('categoryFilter').value,
-            region: document.getElementById('regionSelect').value,
             platform: document.getElementById('platformFilter').value,
             players: document.getElementById('playersFilter').value,
             minPrice: document.getElementById('minPrice').value,
             maxPrice: document.getElementById('maxPrice').value,
+            priceCurrency: document.getElementById('priceCurrency').value,
             discountOnly: document.getElementById('discountOnly').checked,
             psPlusOnly: document.getElementById('psPlusOnly').checked,
             eaAccessOnly: document.getElementById('eaAccessOnly').checked,
@@ -1772,11 +1692,11 @@ class ModernProductCatalog {
             document.getElementById('searchInput').value = state.searchText || '';
             document.getElementById('sortFilter').value = state.sort || 'popular';
             document.getElementById('categoryFilter').value = state.category || '';
-            document.getElementById('regionSelect').value = state.region || '';
             document.getElementById('platformFilter').value = this.normalizePlatformFilterValue(state.platform);
             document.getElementById('playersFilter').value = state.players || '';
             document.getElementById('minPrice').value = state.minPrice || '';
             document.getElementById('maxPrice').value = state.maxPrice || '';
+            document.getElementById('priceCurrency').value = state.priceCurrency || 'RUB';
             document.getElementById('discountOnly').checked = state.discountOnly || false;
             document.getElementById('psPlusOnly').checked = state.psPlusOnly || false;
             document.getElementById('eaAccessOnly').checked = state.eaAccessOnly || false;
@@ -1878,16 +1798,15 @@ class ModernProductCatalog {
     clearFilters() {
         document.getElementById('sortFilter').value = 'popular';
         document.getElementById('categoryFilter').value = '';
-        document.getElementById('regionSelect').value = '';
         document.getElementById('platformFilter').value = '';
         document.getElementById('playersFilter').value = '';
         document.getElementById('minPrice').value = '';
         document.getElementById('maxPrice').value = '';
+        document.getElementById('priceCurrency').value = 'RUB';
         document.getElementById('discountOnly').checked = false;
         document.getElementById('psPlusOnly').checked = false;
         document.getElementById('eaAccessOnly').checked = false;
         // Очищаем также сохраненный регион
-        localStorage.removeItem('selectedRegion');
 
         this.hideFilters();
         this.updateFilterState();

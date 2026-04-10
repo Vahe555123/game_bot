@@ -229,6 +229,7 @@ class ProductFilter(BaseModel):
     region: Optional[str] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None
+    price_currency: Optional[str] = Field('RUB', description="Валюта ценового фильтра (RUB, TRY, INR, UAH)")
     has_discount: Optional[bool] = None
     has_ps_plus: Optional[bool] = None
     has_ea_access: Optional[bool] = None

@@ -2,7 +2,7 @@ import type {
   AdminDashboard,
   AdminHelpContent,
   AdminHelpContentPayload,
-  AdminProduct,
+  AdminProductDetails,
   AdminProductListResponse,
   AdminProductPayload,
   AdminPurchase,
@@ -69,19 +69,19 @@ export async function fetchAdminProducts(params: {
 }
 
 export async function fetchAdminProduct(productId: string, region: string) {
-  const response = await apiClient.get<AdminProduct>(`/site/admin/products/${productId}`, {
+  const response = await apiClient.get<AdminProductDetails>(`/site/admin/products/${productId}`, {
     params: { region },
   })
   return response.data
 }
 
 export async function createAdminProduct(payload: AdminProductPayload) {
-  const response = await apiClient.post<AdminProduct>('/site/admin/products', payload)
+  const response = await apiClient.post<AdminProductDetails>('/site/admin/products', payload)
   return response.data
 }
 
 export async function updateAdminProduct(productId: string, region: string, payload: AdminProductPayload) {
-  const response = await apiClient.put<AdminProduct>(`/site/admin/products/${productId}`, payload, {
+  const response = await apiClient.put<AdminProductDetails>(`/site/admin/products/${productId}`, payload, {
     params: { region },
   })
   return response.data
@@ -91,6 +91,16 @@ export async function deleteAdminProduct(productId: string, region: string) {
   const response = await apiClient.delete<{ message: string }>(`/site/admin/products/${productId}`, {
     params: { region },
   })
+  return response.data
+}
+
+export async function deleteAdminProductGroup(productId: string) {
+  const response = await apiClient.delete<{ message: string }>(`/site/admin/products/${productId}/all`)
+  return response.data
+}
+
+export async function deleteAdminProductFavorite(productId: string, favoriteId: number) {
+  const response = await apiClient.delete<{ message: string }>(`/site/admin/products/${productId}/favorites/${favoriteId}`)
   return response.data
 }
 

@@ -14,6 +14,7 @@ from app.site_admin.schemas import (
     AdminHelpContentResponse,
     AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
+    AdminProductDetailsResponse,
     AdminProductListResponse,
     AdminProductRecord,
     AdminProductUpdateRequest,
@@ -161,7 +162,7 @@ def list_site_admin_products(
         _raise_http_auth_error(error)
 
 
-@router.get("/products/{product_id}", response_model=AdminProductRecord, summary="Product details")
+@router.get("/products/{product_id}", response_model=AdminProductDetailsResponse, summary="Product details")
 def get_site_admin_product(
     product_id: str,
     region: str = Query(...),
@@ -175,7 +176,7 @@ def get_site_admin_product(
         _raise_http_auth_error(error)
 
 
-@router.post("/products", response_model=AdminProductRecord, summary="Create product")
+@router.post("/products", response_model=AdminProductDetailsResponse, summary="Create product")
 def create_site_admin_product(
     payload: AdminProductCreateRequest,
     db: Session = Depends(get_db),
@@ -188,7 +189,7 @@ def create_site_admin_product(
         _raise_http_auth_error(error)
 
 
-@router.put("/products/{product_id}", response_model=AdminProductRecord, summary="Update product")
+@router.put("/products/{product_id}", response_model=AdminProductDetailsResponse, summary="Update product")
 def update_site_admin_product(
     product_id: str,
     region: str = Query(...),
@@ -216,6 +217,35 @@ def delete_site_admin_product(
     except AuthServiceError as error:
         _raise_http_auth_error(error)
     return AdminActionResponse(message="Товар удалён.")
+
+
+@router.delete("/products/{product_id}/all", response_model=AdminActionResponse, summary="Delete product in all regions")
+def delete_site_admin_product_group(
+    product_id: str,
+    db: Session = Depends(get_db),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        deleted_count = service.delete_product_group(db, product_id=product_id)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+    return AdminActionResponse(message=f"Удалено строк товара: {deleted_count}.")
+
+
+@router.delete("/products/{product_id}/favorites/{favorite_id}", response_model=AdminActionResponse, summary="Delete product favorite")
+def delete_site_admin_product_favorite(
+    product_id: str,
+    favorite_id: int,
+    db: Session = Depends(get_db),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        service.delete_product_favorite(db, product_id=product_id, favorite_id=favorite_id)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+    return AdminActionResponse(message="Товар удалён из избранного пользователя.")
 
 
 @router.get("/purchases", response_model=AdminPurchaseListResponse, summary="List site purchases")

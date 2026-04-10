@@ -3548,12 +3548,12 @@ endblock %} {% block header_actions %}
           "region",
         );
         if (queryRegion) {
-          localStorage.setItem("selectedRegion", queryRegion);
+          localStorage.setItem("productDetailSelectedRegion", queryRegion);
         }
 
         // Получаем выбранный регион из URL или localStorage
         const selectedRegion =
-          queryRegion || localStorage.getItem("selectedRegion");
+          queryRegion || localStorage.getItem("productDetailSelectedRegion");
 
         // Строим URL с параметром региона, если он выбран
         let url = `/api/products/${this.productId}`;
@@ -4325,7 +4325,7 @@ endblock %} {% block header_actions %}
 
       try {
         // Используем тот же регион, что и для основного товара
-        const selectedRegion = localStorage.getItem("selectedRegion");
+        const selectedRegion = localStorage.getItem("productDetailSelectedRegion");
         let url = `/api/products/?category=${encodeURIComponent(this.product.category)}&limit=4&grouped=true`;
 
         if (selectedRegion) {
@@ -4612,7 +4612,7 @@ endblock %} {% block header_actions %}
       // Обработчик клика на карточку
       cardWrapper.onclick = () => {
         if (product.region) {
-          localStorage.setItem("selectedRegion", product.region);
+          localStorage.setItem("productDetailSelectedRegion", product.region);
         }
         window.location.href = this.buildProductUrl(
           product.id,
@@ -5171,6 +5171,7 @@ endblock %} {% block header_actions %}
       if (selectedOption) {
         selectedOption.classList.add("selected");
         this.selectedRegion = region;
+        localStorage.setItem("productDetailSelectedRegion", region);
 
         // Активируем кнопку подтверждения
         document.getElementById("confirmRegionBtn").disabled = false;

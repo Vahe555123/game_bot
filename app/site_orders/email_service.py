@@ -33,7 +33,13 @@ def _format_price_pair(local_price: float, currency_code: str, price_rub: float)
     return f"{local_price:.2f} {currency_code} • {price_rub:.2f} RUB"
 
 
-def _build_shell(title: str, intro: str, body_html: str, button_url: str | None = None, button_text: str | None = None) -> str:
+def _build_shell(
+    title: str,
+    intro: str,
+    body_html: str,
+    button_url: str | None = None,
+    button_text: str | None = None,
+) -> str:
     action_html = ""
     if button_url and button_text:
         action_html = f"""
@@ -327,9 +333,20 @@ def _details_table(rows: list[tuple[str, str]]) -> str:
     """
 
 
+def _build_purchase_rows(order_payload: dict, price_text: str) -> list[tuple[str, str]]:
+    return [
+        ("Номер заказа", order_payload["order_number"]),
+        ("Товар", order_payload["product_name"]),
+        ("Регион", order_payload["product_region"]),
+        ("Стоимость", price_text),
+        ("Email покупателя", order_payload.get("payment_email") or "Не указан"),
+        ("Статус", order_payload["status_label"]),
+    ]
+
+
 def send_purchase_created_email(*, email: str, order_payload: dict) -> None:
     if not email_is_configured():
-        raise EmailDeliveryError("SMTP РЅРµ РЅР°СЃС‚СЂРѕРµРЅ. РЈРєР°Р¶РёС‚Рµ SMTP_USERNAME Рё SMTP_APP_PASSWORD.")
+        raise EmailDeliveryError("SMTP не настроен. Укажите SMTP_USERNAME и SMTP_APP_PASSWORD.")
 
     price_text = _format_price_pair(
         order_payload["local_price"],
@@ -337,17 +354,8 @@ def send_purchase_created_email(*, email: str, order_payload: dict) -> None:
         order_payload["price_rub"],
     )
 
-    rows = [
-        ("РќРѕРјРµСЂ Р·Р°РєР°Р·Р°", order_payload["order_number"]),
-        ("РўРѕРІР°СЂ", order_payload["product_name"]),
-        ("Р РµРіРёРѕРЅ", order_payload["product_region"]),
-        ("РЎС‚РѕРёРјРѕСЃС‚СЊ", price_text),
-        ("Email РїРѕРєСѓРїРєРё", order_payload.get("payment_email") or "РќРµ СѓРєР°Р·Р°РЅ"),
-        ("РЎС‚Р°С‚СѓСЃ", order_payload["status_label"]),
-    ]
-
     body_html = (
-        _details_table(rows)
+        _details_table(_build_purchase_rows(order_payload, price_text))
         + """
         <div class="email-card email-card-info">
           <div class="email-card-text">
@@ -359,37 +367,41 @@ def send_purchase_created_email(*, email: str, order_payload: dict) -> None:
     )
 
     message = EmailMessage()
-    message["Subject"] = f'Р—Р°РєР°Р· {order_payload["order_number"]} СЃРѕР·РґР°РЅ'
+    message["Subject"] = f'Заказ {order_payload["order_number"]} создан'
     message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
     message["To"] = email
     message.set_content(
-        f'Р—Р°РєР°Р· {order_payload["order_number"]} СЃРѕР·РґР°РЅ.\n'
-        f'РўРѕРІР°СЂ: {order_payload["product_name"]}\n'
-        f'Р РµРіРёРѕРЅ: {order_payload["product_region"]}\n'
-        f'РЎС‚РѕРёРјРѕСЃС‚СЊ: {price_text}\n'
-        f'РЎСЃС‹Р»РєР° РЅР° РѕРїР»Р°С‚Сѓ: {order_payload.get("payment_url") or "-"}'
+        (
+            f'Заказ {order_payload["order_number"]} создан.\n'
+            f'Товар: {order_payload["product_name"]}\n'
+            f'Регион: {order_payload["product_region"]}\n'
+            f'Стоимость: {price_text}\n'
+            f'Ссылка на оплату: {order_payload.get("payment_url") or "-"}'
+        ),
+        charset="utf-8",
     )
     message.add_alternative(
         _build_shell(
-            "Р—Р°РєР°Р· СЃРѕР·РґР°РЅ",
-            "РњС‹ РїРѕРґРіРѕС‚РѕРІРёР»Рё РґР»СЏ РІР°СЃ Р·Р°РєР°Р· Рё СЃРѕС…СЂР°РЅРёР»Рё РµРіРѕ РІ Р»РёС‡РЅРѕРј РєР°Р±РёРЅРµС‚Рµ.",
+            "Заказ создан",
+            "Мы подготовили для вас заказ и сохранили его в личном кабинете.",
             body_html,
             button_url=order_payload.get("payment_url"),
-            button_text="РџРµСЂРµР№С‚Рё Рє РѕРїР»Р°С‚Рµ",
+            button_text="Перейти к оплате",
         ),
         subtype="html",
+        charset="utf-8",
     )
 
     try:
         _send_message(message)
     except Exception as error:
         logger.exception("Failed to send purchase created email to %s", email)
-        raise EmailDeliveryError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РїРёСЃСЊРјРѕ Рѕ СЃРѕР·РґР°РЅРёРё Р·Р°РєР°Р·Р°.") from error
+        raise EmailDeliveryError("Не удалось отправить письмо о создании заказа.") from error
 
 
 def send_purchase_fulfilled_email(*, email: str, order_payload: dict) -> None:
     if not email_is_configured():
-        raise EmailDeliveryError("SMTP РЅРµ РЅР°СЃС‚СЂРѕРµРЅ. РЈРєР°Р¶РёС‚Рµ SMTP_USERNAME Рё SMTP_APP_PASSWORD.")
+        raise EmailDeliveryError("SMTP не настроен. Укажите SMTP_USERNAME и SMTP_APP_PASSWORD.")
 
     delivery = order_payload.get("delivery") or {}
     delivery_items = delivery.get("items") or []
@@ -398,15 +410,6 @@ def send_purchase_fulfilled_email(*, email: str, order_payload: dict) -> None:
         order_payload["currency_code"],
         order_payload["price_rub"],
     )
-
-    rows = [
-        ("РќРѕРјРµСЂ Р·Р°РєР°Р·Р°", order_payload["order_number"]),
-        ("РўРѕРІР°СЂ", order_payload["product_name"]),
-        ("Р РµРіРёРѕРЅ", order_payload["product_region"]),
-        ("РЎС‚РѕРёРјРѕСЃС‚СЊ", price_text),
-        ("Email РїРѕРєСѓРїРєРё", order_payload.get("payment_email") or "РќРµ СѓРєР°Р·Р°РЅ"),
-        ("РЎС‚Р°С‚СѓСЃ", order_payload["status_label"]),
-    ]
 
     if delivery_items:
         items_html = "".join(
@@ -422,13 +425,13 @@ def send_purchase_fulfilled_email(*, email: str, order_payload: dict) -> None:
     else:
         delivery_items_html = ""
 
-    delivery_message = delivery.get("message") or "Р”Р°РЅРЅС‹Рµ РїРѕ Р·Р°РєР°Р·Сѓ РіРѕС‚РѕРІС‹."
+    delivery_message = delivery.get("message") or "Данные по заказу готовы."
 
     body_html = (
-        _details_table(rows)
+        _details_table(_build_purchase_rows(order_payload, price_text))
         + f"""
         <div class="email-card email-card-success">
-          <div class="email-card-title">{html.escape(delivery.get('title') or 'Р—Р°РєР°Р· РіРѕС‚РѕРІ')}</div>
+          <div class="email-card-title">{html.escape(delivery.get('title') or 'Заказ готов')}</div>
           <div class="email-card-text">{html.escape(delivery_message)}</div>
         </div>
         {delivery_items_html}
@@ -436,29 +439,33 @@ def send_purchase_fulfilled_email(*, email: str, order_payload: dict) -> None:
     )
 
     message = EmailMessage()
-    message["Subject"] = f'Р—Р°РєР°Р· {order_payload["order_number"]} РіРѕС‚РѕРІ'
+    message["Subject"] = f'Заказ {order_payload["order_number"]} готов'
     message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
     message["To"] = email
     message.set_content(
-        f'Р—Р°РєР°Р· {order_payload["order_number"]} РіРѕС‚РѕРІ.\n'
-        f'РўРѕРІР°СЂ: {order_payload["product_name"]}\n'
-        f'Р РµРіРёРѕРЅ: {order_payload["product_region"]}\n'
-        f'РЎС‚РѕРёРјРѕСЃС‚СЊ: {price_text}\n'
-        f'РЎРѕРѕР±С‰РµРЅРёРµ: {delivery_message}'
+        (
+            f'Заказ {order_payload["order_number"]} готов.\n'
+            f'Товар: {order_payload["product_name"]}\n'
+            f'Регион: {order_payload["product_region"]}\n'
+            f'Стоимость: {price_text}\n'
+            f'Сообщение: {delivery_message}'
+        ),
+        charset="utf-8",
     )
     message.add_alternative(
         _build_shell(
-            "Р—Р°РєР°Р· РіРѕС‚РѕРІ",
-            "РќРёР¶Рµ РјС‹ РѕС‚РїСЂР°РІРёР»Рё РІСЃРµ РґР°РЅРЅС‹Рµ РїРѕ РІР°С€РµРјСѓ Р·Р°РєР°Р·Сѓ.",
+            "Заказ готов",
+            "Ниже мы отправили все данные по вашему заказу.",
             body_html,
             button_url=order_payload.get("manager_contact_url"),
-            button_text="РЎРІСЏР·Р°С‚СЊСЃСЏ СЃ РјРµРЅРµРґР¶РµСЂРѕРј" if order_payload.get("manager_contact_url") else None,
+            button_text="Связаться с менеджером" if order_payload.get("manager_contact_url") else None,
         ),
         subtype="html",
+        charset="utf-8",
     )
 
     try:
         _send_message(message)
     except Exception as error:
         logger.exception("Failed to send purchase fulfilled email to %s", email)
-        raise EmailDeliveryError("РќРµ СѓРґР°Р»РѕСЃСЊ РѕС‚РїСЂР°РІРёС‚СЊ РїРёСЃСЊРјРѕ СЃ РґР°РЅРЅС‹РјРё Р·Р°РєР°Р·Р°.") from error
+        raise EmailDeliveryError("Не удалось отправить письмо с данными заказа.") from error

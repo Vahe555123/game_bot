@@ -43,7 +43,8 @@ def send_verification_email(email: str, code: str, *, purpose: str = "register")
             f"Код: {code}\n"
             f"Срок действия: {settings.AUTH_EMAIL_CODE_TTL_MINUTES} минут\n\n"
             "Если вы не запрашивали этот код, просто проигнорируйте письмо."
-        )
+        ),
+        charset="utf-8",
     )
 
     try:

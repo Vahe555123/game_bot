@@ -1,11 +1,10 @@
 import clsx from 'clsx'
-import { ArrowUpDown, BadgePercent, Gamepad2, Globe2, Layers3, RotateCcw, Sparkles, Users2 } from 'lucide-react'
-import type { ComponentType } from 'react'
+import { RotateCcw, Sparkles } from 'lucide-react'
 import type { CatalogFilterState } from '../../types/catalog'
 import {
   PLAYER_OPTIONS,
   PLATFORM_OPTIONS,
-  REGION_OPTIONS,
+  PRICE_CURRENCY_OPTIONS,
   SORT_OPTIONS,
   hasActiveCatalogFilters,
 } from '../../utils/catalogFilters'
@@ -19,20 +18,14 @@ type CatalogFiltersProps = {
 }
 
 type SelectFieldProps = {
-  icon: ComponentType<{ size?: number; className?: string }>
-  label: string
   value: string
   options: ReadonlyArray<{ value: string; label: string }>
   onChange: (value: string) => void
 }
 
-function SelectField({ icon: Icon, label, value, options, onChange }: SelectFieldProps) {
+function SelectField({ value, options, onChange }: SelectFieldProps) {
   return (
-    <label className="space-y-2">
-      <span className="flex items-center gap-2 text-sm font-semibold text-white">
-        <Icon size={16} className="text-brand-300" />
-        {label}
-      </span>
+    <label className="block">
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
@@ -56,90 +49,61 @@ export function CatalogFilters({
   className,
 }: CatalogFiltersProps) {
   const hasActiveFilters = hasActiveCatalogFilters(draftFilters)
-  const categoryOptions = [{ value: '', label: 'Все категории' }, ...categories.map((category) => ({ value: category, label: category }))]
+  const categoryOptions = [{ value: '', label: 'Все жанры игр' }, ...categories.map((category) => ({ value: category, label: category }))]
 
   return (
     <div className={clsx('space-y-4', className)}>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <SelectField
-          icon={ArrowUpDown}
-          label="Сортировка"
-          value={draftFilters.sort}
-          options={SORT_OPTIONS}
-          onChange={(sort) => onDraftChange({ sort })}
-        />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <SelectField value={draftFilters.sort} options={SORT_OPTIONS} onChange={(sort) => onDraftChange({ sort })} />
 
         <SelectField
-          icon={Layers3}
-          label="Категория"
           value={draftFilters.category}
           options={categoryOptions}
           onChange={(category) => onDraftChange({ category })}
         />
 
         <SelectField
-          icon={Globe2}
-          label="Регион"
-          value={draftFilters.region}
-          options={REGION_OPTIONS}
-          onChange={(region) => onDraftChange({ region })}
-        />
-
-        <SelectField
-          icon={Gamepad2}
-          label="Платформа"
           value={draftFilters.platform}
           options={PLATFORM_OPTIONS}
           onChange={(platform) => onDraftChange({ platform })}
         />
 
-        <SelectField
-          icon={Users2}
-          label="Игроки"
-          value={draftFilters.players}
-          options={PLAYER_OPTIONS}
-          onChange={(players) => onDraftChange({ players })}
-        />
+        <SelectField value={draftFilters.players} options={PLAYER_OPTIONS} onChange={(players) => onDraftChange({ players })} />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <label className="space-y-2">
-          <span className="flex items-center gap-2 text-sm font-semibold text-white">
-            <BadgePercent size={16} className="text-brand-300" />
-            Мин. цена
-          </span>
+        <label className="block">
           <input
             type="number"
             min="0"
             inputMode="numeric"
             value={draftFilters.minPrice}
             onChange={(event) => onDraftChange({ minPrice: event.target.value })}
-            placeholder="От"
+            placeholder="Мин. цена"
             className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl"
           />
         </label>
 
-        <label className="space-y-2">
-          <span className="flex items-center gap-2 text-sm font-semibold text-white">
-            <BadgePercent size={16} className="text-brand-300" />
-            Макс. цена
-          </span>
+        <label className="block">
           <input
             type="number"
             min="0"
             inputMode="numeric"
             value={draftFilters.maxPrice}
             onChange={(event) => onDraftChange({ maxPrice: event.target.value })}
-            placeholder="До"
+            placeholder="Макс. цена"
             className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl"
           />
         </label>
 
+        <SelectField
+          value={draftFilters.priceCurrency}
+          options={PRICE_CURRENCY_OPTIONS}
+          onChange={(priceCurrency) => onDraftChange({ priceCurrency })}
+        />
+
         <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
-          <span className="flex items-center gap-2">
-            <BadgePercent size={16} className="text-rose-300" />
-            Только со скидкой
-          </span>
+          <span>Только со скидкой</span>
           <input
             type="checkbox"
             checked={draftFilters.hasDiscount}
@@ -149,10 +113,7 @@ export function CatalogFilters({
         </label>
 
         <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
-          <span className="flex items-center gap-2">
-            <Gamepad2 size={16} className="text-amber-300" />
-            Доступно в PS Plus
-          </span>
+          <span>Доступно в PS Plus</span>
           <input
             type="checkbox"
             checked={draftFilters.hasPsPlus}
@@ -164,7 +125,7 @@ export function CatalogFilters({
         <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
           <span className="flex items-center gap-2">
             <Sparkles size={16} className="text-sky-300" />
-            Доступно в EA Access
+            Доступно в EA PLAY
           </span>
           <input
             type="checkbox"
@@ -178,7 +139,7 @@ export function CatalogFilters({
           type="button"
           onClick={onReset}
           className={clsx(
-            'btn-secondary min-h-[56px] w-full justify-center sm:col-span-2 lg:col-span-3 xl:col-span-1 xl:min-w-[150px]',
+            'btn-secondary min-h-[56px] w-full justify-center sm:col-span-2 lg:col-span-3 xl:col-span-6',
             !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
           )}
         >

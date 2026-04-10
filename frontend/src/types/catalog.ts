@@ -143,6 +143,7 @@ export type CatalogQuery = {
   search?: string
   category?: string
   region?: string
+  price_currency?: string
   platform?: string
   players?: string
   min_price?: number
@@ -160,6 +161,7 @@ export type CatalogFilterState = {
   search: string
   category: string
   region: string
+  priceCurrency: string
   platform: string
   players: string
   minPrice: string

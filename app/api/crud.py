@@ -393,6 +393,34 @@ class ProductCRUD:
         )
 
     @staticmethod
+    def _build_row_price_expression(db: Session, price_currency: Optional[str]):
+        normalized_currency = (price_currency or 'RUB').upper()
+        if normalized_currency == 'RUB':
+            return ProductCRUD._build_row_price_rub_expression(db)
+
+        currency_region_map = {
+            'TRY': ('TR', Product.price_try),
+            'TRL': ('TR', Product.price_try),
+            'INR': ('IN', Product.price_inr),
+            'UAH': ('UA', Product.price_uah),
+        }
+        region_code, price_column = currency_region_map.get(normalized_currency, (None, None))
+        if region_code is None or price_column is None:
+            return ProductCRUD._build_row_price_rub_expression(db)
+
+        return case(
+            (
+                and_(
+                    Product.region == region_code,
+                    price_column.isnot(None),
+                    price_column > 0,
+                ),
+                price_column,
+            ),
+            else_=None,
+        )
+
+    @staticmethod
     def get_by_id(db: Session, product_id: str, region: Optional[str] = None) -> Optional[Product]:
         """Получить товар по ID с учетом региона"""
         import logging
@@ -563,7 +591,14 @@ class ProductCRUD:
         categories = db.query(Product.category).filter(
             Product.category.isnot(None)
         ).distinct().all()
-        return sorted([cat[0] for cat in categories if cat[0]])
+        top_level_categories = set()
+        for category_value, in categories:
+            if not category_value:
+                continue
+            top_level = category_value.split(',', 1)[0].strip()
+            if top_level:
+                top_level_categories.add(top_level)
+        return sorted(top_level_categories)
 
     @staticmethod
     def get_regions(db: Session) -> List[str]:
@@ -1228,8 +1263,10 @@ class ProductCRUD:
             func.lower(func.coalesce(Product.main_name, Product.name, Product.id))
         ).label('sort_name')
         favorites_count_column = func.coalesce(favorites_subquery.c.favorites_count, 0).label('favorites_count')
-        min_price_rub_column = func.min(ProductCRUD._build_row_price_rub_expression(db)).label('min_price_rub')
-        null_prices_last_column = case((min_price_rub_column.is_(None), 1), else_=0)
+        price_filter_currency = (getattr(filters, 'price_currency', None) or 'RUB').upper()
+        row_price_column = ProductCRUD._build_row_price_expression(db, price_filter_currency)
+        min_price_filter_column = func.min(row_price_column).label('min_price_filter')
+        null_prices_last_column = case((min_price_filter_column.is_(None), 1), else_=0)
 
         grouped_query = (
             query.outerjoin(favorites_subquery, favorites_subquery.c.product_id == Product.id)
@@ -1237,30 +1274,30 @@ class ProductCRUD:
                 product_id_column,
                 sort_name_column,
                 favorites_count_column,
-                min_price_rub_column,
+                min_price_filter_column,
             )
             .group_by(Product.id, favorites_subquery.c.favorites_count)
         )
 
         if filters.min_price is not None:
-            grouped_query = grouped_query.having(min_price_rub_column >= filters.min_price)
+            grouped_query = grouped_query.having(min_price_filter_column >= filters.min_price)
 
         if filters.max_price is not None:
-            grouped_query = grouped_query.having(min_price_rub_column <= filters.max_price)
+            grouped_query = grouped_query.having(min_price_filter_column <= filters.max_price)
 
         total = db.query(func.count()).select_from(grouped_query.order_by(None).subquery()).scalar() or 0
 
         if sort_mode == 'price_desc':
             grouped_query = grouped_query.order_by(
                 null_prices_last_column.asc(),
-                min_price_rub_column.desc(),
+                min_price_filter_column.desc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
             )
         elif sort_mode == 'price_asc':
             grouped_query = grouped_query.order_by(
                 null_prices_last_column.asc(),
-                min_price_rub_column.asc(),
+                min_price_filter_column.asc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
             )

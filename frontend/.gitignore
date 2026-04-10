@@ -26,3 +26,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+
+
+products.db
+products.db-shm
+products.db-wal
+products.deploy.db
+promo.pkl
+result.pkl
