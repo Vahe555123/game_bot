@@ -1,4 +1,5 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { GuestOnly, RequireAdmin, RequireAuth } from './components/auth/RouteGuards'
 import { SiteLayout } from './components/layout/SiteLayout'
 import { AuthProvider } from './context/AuthContext'
@@ -13,11 +14,31 @@ import { ProfilePage } from './pages/ProfilePage'
 import { RegisterPage } from './pages/RegisterPage'
 import { VerifyEmailPage } from './pages/VerifyEmailPage'
 
+const MOBILE_VIEWPORT_CONTENT = 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover'
+
+function ViewportManager() {
+  const location = useLocation()
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+
+    const viewportMeta = document.querySelector('meta[name="viewport"]')
+    if (viewportMeta) {
+      viewportMeta.setAttribute('content', MOBILE_VIEWPORT_CONTENT)
+    }
+  }, [location.pathname, location.search, location.hash])
+
+  return null
+}
+
 function App() {
   return (
     <AuthProvider>
       <FavoritesProvider>
         <BrowserRouter>
+          <ViewportManager />
           <Routes>
             <Route element={<SiteLayout />}>
               <Route index element={<CatalogPage />} />

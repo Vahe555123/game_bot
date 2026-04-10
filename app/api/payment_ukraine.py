@@ -8,6 +8,7 @@ from typing import Dict, Optional, Tuple
 import logging
 from dataclasses import dataclass
 import re
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,14 @@ BROWSER_HEADERS = {
     "upgrade-insecure-requests": "1",
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
 }
+
+
+def get_fail_page_url() -> str:
+    configured_url = (settings.DIGISELLER_FAILPAGE_URL or settings.PUBLIC_APP_URL or "").strip()
+    if configured_url:
+        return configured_url
+
+    return "https://romanomak.ru"
 
 
 class UkrainePaymentAPIError(Exception):
@@ -123,11 +132,14 @@ class UkrainePaymentAPI:
         - Option_checkbox_3344172: согласие с риском блокировки (value=13242692)
         """
 
+        fail_page_url = get_fail_page_url()
+
         data = {
             # Фиксированные поля для товара
             "ID_D": UKRAINE_PRODUCT_ID,
             "Agent": AGENT_ID,
-            "FailPage": f"https://plati.market/itm/?idd={UKRAINE_PRODUCT_ID}",
+            "FailPage": fail_page_url,
+            "failpage": fail_page_url,
             "Lang": "ru-RU",
             "TypeCurr": "RUR",  # Валюта оплаты - рубли
             "_ow": "0",

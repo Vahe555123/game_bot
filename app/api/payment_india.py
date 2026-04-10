@@ -7,6 +7,7 @@ import aiohttp
 from typing import Dict, List, Optional, Tuple
 import logging
 from dataclasses import dataclass
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,14 @@ BROWSER_HEADERS = {
     "referer": "https://www.oplata.info/",
     "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 }
+
+
+def get_fail_page_url() -> str:
+    configured_url = (settings.DIGISELLER_FAILPAGE_URL or settings.PUBLIC_APP_URL or "").strip()
+    if configured_url:
+        return configured_url
+
+    return "https://romanomak.ru"
 
 
 class IndiaPaymentAPIError(Exception):
@@ -234,6 +243,7 @@ class IndiaPaymentAPI:
         """Создает данные для POST запроса к API оплаты"""
 
         import uuid
+        fail_page_url = get_fail_page_url()
 
         data = {
             "Lang": "ru-RU",
@@ -241,7 +251,8 @@ class IndiaPaymentAPI:
             "product_id": INDIA_CARD_PRODUCT_ID,
             "Agent": AGENT_ID,
             "AgentN": "",
-            "FailPage": f"https://x-box-store.ru/detail/{INDIA_CARD_PRODUCT_ID}",
+            "FailPage": fail_page_url,
+            "failpage": fail_page_url,
             "NoClearBuyerQueryString": "NoClear",
             "digiuid": str(uuid.uuid4()).upper(),
             "Curr_add": "",

@@ -16,6 +16,7 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -133,5 +134,13 @@ body::after {
 
   .auth-alert-info {
     @apply border-brand-300/25 bg-brand-500/10 text-brand-50;
+  }
+}
+
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }

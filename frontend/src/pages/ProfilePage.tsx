@@ -41,6 +41,7 @@ type PsnDraft = {
 
 type PurchaseDayFilterValue = 'all' | '7' | '30' | '90'
 
+
 const PROFILE_SECTIONS = [
   { id: 'favorites-section', label: 'Избранное', icon: Heart },
   { id: 'purchases-section', label: 'Покупки', icon: ShoppingBag },
@@ -54,6 +55,7 @@ const REGION_OPTIONS = [
   { value: 'UA', label: 'Украина' },
   { value: 'IN', label: 'Индия' },
 ] as const
+void REGION_OPTIONS
 
 const REGION_LABELS: Record<string, string> = {
   TR: 'Турция',
@@ -67,6 +69,7 @@ const PURCHASE_DAY_FILTERS: Array<{ value: PurchaseDayFilterValue; label: string
   { value: '30', label: '30 дней' },
   { value: '90', label: '90 дней' },
 ]
+void PURCHASE_DAY_FILTERS
 
 const EMPTY_SAVE_STATE: SaveState = {
   loading: false,
@@ -199,6 +202,7 @@ function PurchaseCard({
     </article>
   )
 }
+void PurchaseCard
 
 export function ProfilePage() {
   const navigate = useNavigate()
@@ -222,6 +226,11 @@ export function ProfilePage() {
   const [paymentSaveState, setPaymentSaveState] = useState<SaveState>(EMPTY_SAVE_STATE)
   const [psnSaveState, setPsnSaveState] = useState<SaveState>(EMPTY_SAVE_STATE)
   const [purchaseSaveState, setPurchaseSaveState] = useState<SaveState>(EMPTY_SAVE_STATE)
+  void orders
+  void purchasesLoading
+  void setPurchaseFilter
+  void regionSaveState
+  void purchaseSaveState
 
   useEffect(() => {
     let ignore = false
@@ -338,6 +347,7 @@ export function ProfilePage() {
       })
     }
   }
+  void saveRegion
 
   async function savePaymentEmail() {
     setPaymentSaveState({ loading: true, message: null, error: false })
@@ -456,7 +466,7 @@ export function ProfilePage() {
             </div>
           </SectionCard>
 
-          <SectionCard
+          {/* <SectionCard
             id="purchases-section"
             title="Покупки"
             description="Здесь сохраняются ваши заказы, даты покупок и быстрый переход к оплате."
@@ -506,9 +516,9 @@ export function ProfilePage() {
                 </div>
               )}
             </div>
-          </SectionCard>
+          </SectionCard> */}
 
-          <SectionCard
+          {/* <SectionCard
             id="region-section"
             title="Регион игр"
             description="Можно выбрать только один основной регион для каталога."
@@ -547,7 +557,7 @@ export function ProfilePage() {
                 {regionSaveState.loading ? 'Сохраняем...' : 'Сохранить регион'}
               </button>
             </div>
-          </SectionCard>
+          </SectionCard> */}
 
           <SectionCard
             id="psn-section"

@@ -722,6 +722,11 @@ export function ProductPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const requestedRegion = searchParams.get('region') || undefined
+  const catalogPath =
+    typeof (location.state as { catalogPath?: string } | null)?.catalogPath === 'string' &&
+    (location.state as { catalogPath?: string } | null)?.catalogPath?.startsWith('/catalog')
+      ? (location.state as { catalogPath?: string }).catalogPath
+      : null
 
   const { user, isAuthenticated, refreshUser } = useAuth()
   const { isFavorite, toggleFavorite } = useFavorites()
@@ -993,15 +998,17 @@ export function ProductPage() {
 
   return (
     <div className="container py-10 md:py-14">
-      <div className="mb-6">
-        <Link
-          to="/catalog"
-          className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white transition hover:border-brand-300/60 hover:bg-brand-500/10"
-        >
-          <ArrowLeft size={16} />
-          Назад в каталог
-        </Link>
-      </div>
+      {catalogPath ? (
+        <div className="mb-6">
+          <Link
+            to={catalogPath}
+            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-3 text-sm text-white transition hover:border-brand-300/60 hover:bg-brand-500/10"
+          >
+            <ArrowLeft size={16} />
+            Назад в каталог
+          </Link>
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">

@@ -1,6 +1,7 @@
 import aiohttp
 from typing import Dict, Optional
 import logging
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,14 @@ class PlatiMarketAPI:
     def __init__(self):
         """Инициализация API клиента"""
         pass
-    
+
+    def _get_fail_page_url(self) -> str:
+        configured_url = (settings.DIGISELLER_FAILPAGE_URL or settings.PUBLIC_APP_URL or "").strip()
+        if configured_url:
+            return configured_url
+
+        return "https://romanomak.ru"
+
     def _get_unit_cnt_for_trl_price(self, trl_price: float) -> str:
         """
         Определяет unit_cnt (курс конвертации) в зависимости от цены в турецких лирах
@@ -88,6 +96,8 @@ class PlatiMarketAPI:
             unit_cnt = "250"  # Базовый курс для товаров без TRL цены
             logger.info(f"📊 No TRL price provided → using default unit_cnt: {unit_cnt}")
         
+        fail_page_url = self._get_fail_page_url()
+
         return {
             # Пользовательские данные
             "Option_radio_209425": platform_id,  # ID платформы (PS4/PS5)
@@ -98,7 +108,8 @@ class PlatiMarketAPI:
             # Фиксированные поля для конкретного товара на plati.market
             "ID_D": "3401037",  # ID товара
             "Agent": "605064",  # ID агента/партнера
-            "FailPage": "https://plati.market/itm/purchasing-games-to-playstation-turkey-0/3401037?ai=605064",
+            "FailPage": fail_page_url,
+            "failpage": fail_page_url,
             "customerid": "1eb247c2d64a4f59ab729e24d9131fcb",  # ID сессии покупателя
             "vz": "d92d1031-a719-4670-8947-1e28cb40670f",  # Идентификатор визита
             "promocode": "",

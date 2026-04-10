@@ -7,6 +7,7 @@ import aiohttp
 from typing import Dict, List, Optional, Tuple
 import logging
 from dataclasses import dataclass
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,14 @@ BROWSER_HEADERS = {
 
 DEFAULT_TURKEY_TYPECURR = "API_5020_RUB"
 LOW_AMOUNT_TURKEY_TYPECURR = "API_17432_RUB"
+
+
+def get_fail_page_url() -> str:
+    configured_url = (settings.DIGISELLER_FAILPAGE_URL or settings.PUBLIC_APP_URL or "").strip()
+    if configured_url:
+        return configured_url
+
+    return "https://romanomak.ru"
 
 
 class TurkeyPaymentAPIError(Exception):
@@ -250,6 +259,7 @@ class TurkeyPaymentAPI:
         """Создает данные для POST запроса к API оплаты"""
         import uuid
         type_curr = self._get_type_curr_for_card(card)
+        fail_page_url = get_fail_page_url()
 
         data = {
             "Lang": "ru-RU",
@@ -257,7 +267,8 @@ class TurkeyPaymentAPI:
             "product_id": TURKEY_CARD_PRODUCT_ID,
             "Agent": AGENT_ID,
             "AgentN": "",
-            "FailPage": f"https://x-box-store.ru/detail/{TURKEY_CARD_PRODUCT_ID}",
+            "FailPage": fail_page_url,
+            "failpage": fail_page_url,
             "NoClearBuyerQueryString": "NoClear",
             "digiuid": str(uuid.uuid4()).upper(),
             "Curr_add": "",

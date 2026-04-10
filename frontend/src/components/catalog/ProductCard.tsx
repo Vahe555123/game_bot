@@ -1,6 +1,6 @@
 import { BadgePercent, Gamepad2 } from 'lucide-react'
 import type { MouseEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { useFavorites } from '../../context/FavoritesContext'
 import type { CatalogProduct } from '../../types/catalog'
 import { normalizeImageUrl } from '../../utils/format'
@@ -15,9 +15,11 @@ type ProductCardProps = {
 
 export function ProductCard({ product }: ProductCardProps) {
   const { isFavorite, toggleFavorite } = useFavorites()
+  const location = useLocation()
 
   const imageUrl = normalizeImageUrl(product.image)
   const productUrl = `/catalog/${product.id}${product.routeRegion ? `?region=${encodeURIComponent(product.routeRegion)}` : ''}`
+  const catalogPath = location.pathname === '/catalog' ? `${location.pathname}${location.search}${location.hash}` : null
   const regionalPrices = getVisibleRegionalPrices(product).slice(0, 3)
   const favoriteActive = isFavorite(product.id)
   const productTitle = getProductTitle(product)
@@ -35,6 +37,7 @@ export function ProductCard({ product }: ProductCardProps) {
     <article className="group relative h-full overflow-hidden rounded-[20px] border border-white/10 bg-slate-950/80 shadow-card transition duration-300 hover:-translate-y-1 hover:border-brand-300/40 hover:shadow-glow md:rounded-[24px]">
       <Link
         to={productUrl}
+        state={catalogPath ? { catalogPath } : undefined}
         aria-label={`Открыть ${productTitle}`}
         className="absolute inset-0 z-10 rounded-[20px] md:rounded-[24px]"
       />

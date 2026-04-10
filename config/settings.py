@@ -74,6 +74,7 @@ class Settings:
     AUTH_OAUTH_STATE_TTL_SECONDS: int = int(os.getenv("AUTH_OAUTH_STATE_TTL_SECONDS", 600))
     AUTH_TELEGRAM_LOGIN_TTL_SECONDS: int = int(os.getenv("AUTH_TELEGRAM_LOGIN_TTL_SECONDS", 300))
     PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", "http://localhost:5173").rstrip("/")
+    DIGISELLER_FAILPAGE_URL: str = os.getenv("DIGISELLER_FAILPAGE_URL", "").rstrip("/")
     AUTH_DEFAULT_REDIRECT_PATH: str = os.getenv("AUTH_DEFAULT_REDIRECT_PATH", "/profile")
 
     SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
