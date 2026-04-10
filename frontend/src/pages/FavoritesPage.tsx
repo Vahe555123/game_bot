@@ -9,10 +9,21 @@ import { mockProducts } from '../data/mockProducts'
 import { fetchProduct } from '../services/catalog'
 import type { CatalogProduct } from '../types/catalog'
 
-function sortFavoritesByDate(products: CatalogProduct[], orderedIds: string[]) {
+function hasCurrentDiscount(product: CatalogProduct) {
+  return product.hasDiscount || product.regionalPrices.some((price) => price.hasDiscount)
+}
+
+function sortFavoritesForDisplay(products: CatalogProduct[], orderedIds: string[]) {
   const orderMap = new Map(orderedIds.map((productId, index) => [productId, index]))
 
   return [...products].sort((left, right) => {
+    const leftHasDiscount = hasCurrentDiscount(left)
+    const rightHasDiscount = hasCurrentDiscount(right)
+
+    if (leftHasDiscount !== rightHasDiscount) {
+      return leftHasDiscount ? -1 : 1
+    }
+
     const leftOrder = orderMap.get(left.id) ?? Number.MAX_SAFE_INTEGER
     const rightOrder = orderMap.get(right.id) ?? Number.MAX_SAFE_INTEGER
     return leftOrder - rightOrder
@@ -20,7 +31,7 @@ function sortFavoritesByDate(products: CatalogProduct[], orderedIds: string[]) {
 }
 
 export function FavoritesPage() {
-  const { favorites } = useFavorites()
+  const { favorites, isFavoritesLoading } = useFavorites()
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
@@ -61,7 +72,7 @@ export function FavoritesPage() {
       const resolvedProducts = loadedProducts
         .map((result) => (result.status === 'fulfilled' ? result.value : null))
         .filter((product): product is CatalogProduct => Boolean(product))
-      setProducts(sortFavoritesByDate(resolvedProducts, orderedFavorites.map((entry) => entry.productId)))
+      setProducts(sortFavoritesForDisplay(resolvedProducts, orderedFavorites.map((entry) => entry.productId)))
       setIsLoading(false)
     })()
 
@@ -84,7 +95,13 @@ export function FavoritesPage() {
       />
 
       <div className="mt-8">
-        {!orderedFavorites.length ? (
+        {isFavoritesLoading && !orderedFavorites.length ? (
+          <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <ProductSkeleton key={index} />
+            ))}
+          </div>
+        ) : !orderedFavorites.length ? (
           <div className="panel-soft rounded-[32px] px-6 py-14 text-center">
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-rose-500/15 text-rose-200">
               <Heart className="h-8 w-8" />
@@ -107,7 +124,7 @@ export function FavoritesPage() {
               </div>
             </div>
 
-            <div className="mt-6 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:gap-4 xl:grid-cols-3">
+            <div className="mt-6 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
               {isLoading
                 ? Array.from({ length: Math.min(orderedFavorites.length, 6) }).map((_, index) => (
                     <ProductSkeleton key={index} />

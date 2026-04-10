@@ -24,9 +24,12 @@ export function FavoriteButton({
       className={clsx(
         'inline-flex items-center justify-center border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-200/70',
         variant === 'card'
-          ? 'h-9 w-9 rounded-full border-white/12 bg-slate-950/75 text-white shadow-lg backdrop-blur-md hover:border-rose-300/60 hover:bg-slate-950 md:h-10 md:w-10'
-          : 'h-12 w-12 rounded-2xl border-white/15 bg-slate-950/70 text-white shadow-lg backdrop-blur-md hover:border-rose-300/60 hover:bg-slate-950',
-        active && 'border-rose-300/40 bg-rose-500 text-white shadow-[0_10px_30px_rgba(244,63,94,0.35)]',
+          ? active
+            ? 'h-9 w-9 rounded-full border-rose-300/50 bg-slate-950/95 text-rose-500 shadow-[0_10px_30px_rgba(244,63,94,0.28)] md:h-10 md:w-10'
+            : 'h-9 w-9 rounded-full border-white/12 bg-slate-950/75 text-white shadow-lg backdrop-blur-md hover:border-rose-300/60 hover:bg-slate-950 md:h-10 md:w-10'
+          : active
+            ? 'h-12 w-12 rounded-2xl border-rose-300/50 bg-slate-950/95 text-rose-500 shadow-[0_10px_30px_rgba(244,63,94,0.28)]'
+            : 'h-12 w-12 rounded-2xl border-white/15 bg-slate-950/70 text-white shadow-lg backdrop-blur-md hover:border-rose-300/60 hover:bg-slate-950',
         className,
       )}
     >

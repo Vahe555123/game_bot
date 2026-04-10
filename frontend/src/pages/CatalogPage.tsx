@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { CatalogFilters } from '../components/catalog/CatalogFilters'
 import { ProductCard } from '../components/catalog/ProductCard'
 import { ProductSkeleton } from '../components/catalog/ProductSkeleton'
+import { useAuth } from '../context/AuthContext'
 import { fetchCatalog, fetchCategories } from '../services/catalog'
 import type { CatalogFilterState, CatalogProduct } from '../types/catalog'
 import { sanitizeCatalogFilters } from '../utils/catalogFilters'
@@ -14,6 +15,7 @@ const DEFAULT_FILTERS: CatalogFilterState = {
   sort: 'popular',
   search: '',
   category: '',
+  productKind: 'all',
   region: '',
   priceCurrency: 'RUB',
   platform: '',
@@ -25,7 +27,21 @@ const DEFAULT_FILTERS: CatalogFilterState = {
   hasEaAccess: false,
 }
 
-function parseFilters(searchParams: URLSearchParams): CatalogFilterState {
+const CATALOG_PRODUCT_KIND_STORAGE_PREFIX = 'catalog_product_kind'
+
+function getProductKindStorageKey(userId?: string | null) {
+  return `${CATALOG_PRODUCT_KIND_STORAGE_PREFIX}:${userId || 'guest'}`
+}
+
+function readStoredProductKind(storageKey: string) {
+  if (typeof window === 'undefined') {
+    return DEFAULT_FILTERS.productKind
+  }
+
+  return window.localStorage.getItem(storageKey) || DEFAULT_FILTERS.productKind
+}
+
+function parseFilters(searchParams: URLSearchParams, storedProductKind = DEFAULT_FILTERS.productKind): CatalogFilterState {
   const pageValue = Number(searchParams.get('page') || '1')
 
   return sanitizeCatalogFilters({
@@ -34,6 +50,7 @@ function parseFilters(searchParams: URLSearchParams): CatalogFilterState {
     sort: searchParams.get('sort') || 'popular',
     search: searchParams.get('search') || '',
     category: searchParams.get('category') || '',
+    productKind: searchParams.get('productKind') || storedProductKind,
     region: '',
     priceCurrency: searchParams.get('priceCurrency') || 'RUB',
     platform: searchParams.get('platform') || '',
@@ -52,6 +69,7 @@ function buildSearchParams(filters: CatalogFilterState) {
   if (filters.sort && filters.sort !== 'popular') next.set('sort', filters.sort)
   if (filters.search) next.set('search', filters.search)
   if (filters.category) next.set('category', filters.category)
+  if (filters.productKind && filters.productKind !== 'all') next.set('productKind', filters.productKind)
   if (filters.priceCurrency && filters.priceCurrency !== 'RUB') next.set('priceCurrency', filters.priceCurrency)
   if (filters.platform) next.set('platform', filters.platform)
   if (filters.players) next.set('players', filters.players)
@@ -71,6 +89,7 @@ function areFiltersEqual(left: CatalogFilterState, right: CatalogFilterState) {
     left.sort === right.sort &&
     left.search === right.search &&
     left.category === right.category &&
+    left.productKind === right.productKind &&
     left.priceCurrency === right.priceCurrency &&
     left.platform === right.platform &&
     left.players === right.players &&
@@ -85,6 +104,7 @@ function areFiltersEqual(left: CatalogFilterState, right: CatalogFilterState) {
 function countActiveFilters(filters: CatalogFilterState) {
   return [
     filters.category,
+    filters.productKind !== 'all',
     filters.priceCurrency !== 'RUB',
     filters.platform,
     filters.players,
@@ -131,12 +151,12 @@ function dedupeCatalogProducts(products: CatalogProduct[]) {
   return result
 }
 
-const COMPACT_FILTERS_COLLAPSE_SCROLL = 100
-const COMPACT_FILTERS_RESTORE_SCROLL = 48
-
 export function CatalogPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const filters = useMemo(() => parseFilters(searchParams), [searchParams])
+  const { user } = useAuth()
+  const productKindStorageKey = useMemo(() => getProductKindStorageKey(user?.id), [user?.id])
+  const storedProductKind = useMemo(() => readStoredProductKind(productKindStorageKey), [productKindStorageKey])
+  const filters = useMemo(() => parseFilters(searchParams, storedProductKind), [searchParams, storedProductKind])
   const filtersKey = useMemo(() => buildSearchParams({ ...filters, page: 1 }).toString(), [filters])
 
   const [draftSearch, setDraftSearch] = useState(filters.search)
@@ -144,9 +164,7 @@ export function CatalogPage() {
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false)
-  const [isCompactFiltersVisible, setIsCompactFiltersVisible] = useState(false)
-  const [isCompactFiltersOpen, setIsCompactFiltersOpen] = useState(false)
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [total, setTotal] = useState(0)
@@ -154,68 +172,12 @@ export function CatalogPage() {
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null)
   const previousFiltersKeyRef = useRef(filtersKey)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const inlineFiltersRef = useRef<HTMLElement | null>(null)
-  const [inlineFiltersHeight, setInlineFiltersHeight] = useState(0)
   const activeFiltersCount = countActiveFilters(filters)
-  const shouldShowInlineFilters = !isCompactFiltersVisible
-  const shouldShowFiltersPanel = shouldShowInlineFilters || isCompactFiltersOpen
 
   useEffect(() => {
     setDraftSearch(filters.search)
     setDraftFilters(filters)
   }, [filters])
-
-  useEffect(() => {
-    function handleScroll() {
-      setIsCompactFiltersVisible((current) => {
-        const shouldCollapse = current
-          ? window.scrollY > COMPACT_FILTERS_RESTORE_SCROLL
-          : window.scrollY > COMPACT_FILTERS_COLLAPSE_SCROLL
-
-        return current !== shouldCollapse ? shouldCollapse : current
-      })
-
-      setIsCompactFiltersOpen((current) =>
-        current && window.scrollY <= COMPACT_FILTERS_RESTORE_SCROLL ? false : current,
-      )
-    }
-
-    handleScroll()
-    window.addEventListener('scroll', handleScroll, { passive: true })
-
-    return () => window.removeEventListener('scroll', handleScroll)
-  }, [])
-
-  useEffect(() => {
-    if (!shouldShowInlineFilters) {
-      return undefined
-    }
-
-    const node = inlineFiltersRef.current
-
-    if (!node) {
-      return undefined
-    }
-
-    const inlineFiltersNode = node
-
-    function syncInlineFiltersHeight() {
-      const nextHeight = inlineFiltersNode.offsetHeight
-      setInlineFiltersHeight((current) => (current !== nextHeight ? nextHeight : current))
-    }
-
-    syncInlineFiltersHeight()
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', syncInlineFiltersHeight)
-      return () => window.removeEventListener('resize', syncInlineFiltersHeight)
-    }
-
-    const resizeObserver = new ResizeObserver(() => syncInlineFiltersHeight())
-    resizeObserver.observe(inlineFiltersNode)
-
-    return () => resizeObserver.disconnect()
-  }, [shouldShowInlineFilters, draftFilters, categories, draftSearch, total, activeFiltersCount, isMobileFiltersOpen])
 
   useEffect(() => {
     let ignore = false
@@ -268,12 +230,11 @@ export function CatalogPage() {
 
     const timeoutId = window.setTimeout(() => {
       setSearchParams(buildSearchParams(nextFilters), { replace: true })
-      setIsMobileFiltersOpen(false)
-      setIsCompactFiltersOpen(false)
+      persistProductKind(nextFilters.productKind)
     }, 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [draftFilters, draftSearch, filters, setSearchParams])
+  }, [draftFilters, draftSearch, filters, productKindStorageKey, setSearchParams])
 
   useEffect(() => {
     const node = loadMoreRef.current
@@ -332,6 +293,7 @@ export function CatalogPage() {
           sort: filters.sort,
           search: filters.search || undefined,
           category: filters.category || undefined,
+          product_kind: filters.productKind !== DEFAULT_FILTERS.productKind ? filters.productKind : undefined,
           price_currency: filters.priceCurrency || undefined,
           platform: filters.platform || undefined,
           players: filters.players || undefined,
@@ -382,6 +344,35 @@ export function CatalogPage() {
     }))
   }
 
+  function persistProductKind(productKind: string) {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (productKind && productKind !== DEFAULT_FILTERS.productKind) {
+      window.localStorage.setItem(productKindStorageKey, productKind)
+      return
+    }
+
+    window.localStorage.removeItem(productKindStorageKey)
+  }
+
+  function applyDraftFilters({ close = false } = {}) {
+    const nextFilters = {
+      ...draftFilters,
+      search: draftSearch.trim(),
+      page: 1,
+      limit: DEFAULT_FILTERS.limit,
+    }
+
+    persistProductKind(nextFilters.productKind)
+    setSearchParams(buildSearchParams(nextFilters), { replace: true })
+
+    if (close) {
+      setIsFiltersOpen(false)
+    }
+  }
+
   function resetDraftFilters() {
     const nextFilters = {
       ...DEFAULT_FILTERS,
@@ -389,90 +380,54 @@ export function CatalogPage() {
       limit: filters.limit,
     }
 
+    persistProductKind(nextFilters.productKind)
     setDraftSearch('')
     setDraftFilters(nextFilters)
     setSearchParams(buildSearchParams(nextFilters), { replace: true })
-    setIsMobileFiltersOpen(false)
-    setIsCompactFiltersOpen(false)
+    setIsFiltersOpen(false)
   }
 
   return (
     <div className="container py-4 md:py-6">
-      {isCompactFiltersOpen ? (
-        <div
-          className="fixed inset-0 z-30 bg-slate-950/55 backdrop-blur-[2px]"
-          onClick={() => setIsCompactFiltersOpen(false)}
-        />
-      ) : null}
+      <section className="sticky top-[5.25rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-24 md:rounded-[30px] md:p-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <label className="input-shell flex-1">
+            <Search size={18} className="text-brand-300" />
+            <input
+              value={draftSearch}
+              onChange={(event) => setDraftSearch(event.target.value)}
+              placeholder="Поиск игр и подписок..."
+              className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
+            />
+          </label>
 
-      {isCompactFiltersVisible && inlineFiltersHeight > 0 ? <div aria-hidden style={{ height: inlineFiltersHeight }} /> : null}
-
-      {shouldShowFiltersPanel ? (
-        <section
-          ref={shouldShowInlineFilters ? inlineFiltersRef : undefined}
-          className={
-            shouldShowInlineFilters
-              ? 'sticky top-[5.25rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-24 md:rounded-[30px] md:p-5'
-              : 'fixed inset-x-4 top-[5.25rem] z-40 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-[24px] border border-white/10 bg-slate-950/96 p-3 shadow-card backdrop-blur-xl md:inset-x-6 md:top-24 md:rounded-[30px] md:p-5 lg:left-1/2 lg:right-auto lg:w-[min(980px,calc(100vw-3rem))] lg:-translate-x-1/2'
-          }
-        >
-          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <label className="input-shell flex-1">
-              <Search size={18} className="text-brand-300" />
-              <input
-                value={draftSearch}
-                onChange={(event) => setDraftSearch(event.target.value)}
-                placeholder="Поиск игр и подписок..."
-                className="w-full bg-transparent text-sm text-white placeholder:text-slate-500 focus:outline-none"
-              />
-            </label>
-
-            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto md:gap-3">
-              <div className="w-full rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:w-auto md:px-4 md:text-sm">
-                <span className="font-semibold text-white">{total}</span> товаров
-                {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setIsMobileFiltersOpen((value) => !value)}
-                className="btn-secondary xl:hidden"
-              >
-                <SlidersHorizontal size={16} />
-                Фильтры
-              </button>
-
-              {!shouldShowInlineFilters ? (
-                <button type="button" onClick={() => setIsCompactFiltersOpen(false)} className="btn-secondary">
-                  Скрыть
-                </button>
-              ) : null}
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto md:gap-3">
+            <div className="w-full rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:w-auto md:px-4 md:text-sm">
+              <span className="font-semibold text-white">{total}</span> товаров
+              {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
             </div>
-          </div>
 
+            <button type="button" onClick={() => setIsFiltersOpen((value) => !value)} className="btn-secondary">
+              <SlidersHorizontal size={16} />
+              Фильтр
+              {activeFiltersCount > 0 ? (
+                <span className="rounded-full bg-brand-400/20 px-2 py-0.5 text-xs text-brand-100">{activeFiltersCount}</span>
+              ) : null}
+            </button>
+          </div>
+        </div>
+
+        {isFiltersOpen ? (
           <CatalogFilters
             categories={categories}
             draftFilters={draftFilters}
             onDraftChange={updateDraftFilters}
             onReset={resetDraftFilters}
-            className={isMobileFiltersOpen || shouldShowInlineFilters || isCompactFiltersOpen ? 'mt-4 block' : 'mt-4 hidden xl:block'}
+            onApply={() => applyDraftFilters({ close: true })}
+            className="mt-4"
           />
-        </section>
-      ) : null}
-
-      {isCompactFiltersVisible && !isCompactFiltersOpen ? (
-        <button
-          type="button"
-          onClick={() => setIsCompactFiltersOpen(true)}
-          className="fixed bottom-4 right-4 z-40 inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-950/95 px-4 py-3 text-sm font-semibold text-white shadow-card backdrop-blur-xl md:bottom-6 md:right-6"
-        >
-          <SlidersHorizontal size={18} className="text-brand-300" />
-          Фильтры
-          {activeFiltersCount > 0 ? (
-            <span className="rounded-full bg-brand-400/20 px-2 py-0.5 text-xs text-brand-100">{activeFiltersCount}</span>
-          ) : null}
-        </button>
-      ) : null}
+        ) : null}
+      </section>
 
       {catalogNotice ? (
         <div className="mt-4 rounded-[22px] border border-amber-300/20 bg-amber-500/10 px-4 py-3 text-sm leading-7 text-amber-50">

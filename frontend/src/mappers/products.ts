@@ -8,7 +8,6 @@ import type {
   RegionInfo,
 } from '../types/catalog'
 import { formatCurrency } from '../utils/format'
-import { getBestLocalizationPresentation } from '../utils/productPresentation'
 
 const regionMeta: Record<string, { code: string; symbol: string; name: string }> = {
   TR: { code: 'TRY', symbol: '₺', name: 'Турция' },
@@ -104,11 +103,11 @@ function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | nu
 export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct {
   const regionalPrices = (raw.regional_prices || []).map(normalizeRegionalPrice)
   const primaryRegionalPrice = pickPrimaryRegionalPrice(regionalPrices)
+  const normalizedRawRegion = (raw.region || '').trim().toUpperCase() || null
+  const routeRegionalPrice =
+    regionalPrices.find((price) => price.region === normalizedRawRegion) ?? primaryRegionalPrice
   const regionInfo = normalizeRegionInfo(raw.region, raw.region_info)
   const price = resolveDisplayPrice(raw, regionInfo, primaryRegionalPrice)
-  const aggregatedLocalization = regionalPrices.length
-    ? getBestLocalizationPresentation(regionalPrices.map((item) => item.localizationName))
-    : null
 
   return {
     id: raw.id,
@@ -116,7 +115,7 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     mainName: raw.main_name || raw.name || 'Без названия',
     category: raw.category ?? null,
     region: raw.region ?? null,
-    routeRegion: raw.region ?? primaryRegionalPrice?.region ?? null,
+    routeRegion: normalizedRawRegion ?? primaryRegionalPrice?.region ?? null,
     type: raw.type ?? null,
     image: raw.image ?? null,
     platforms: raw.platforms ?? null,
@@ -125,10 +124,7 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     edition: raw.edition ?? null,
     description: raw.description ?? null,
     localization: raw.localization ?? null,
-    localizationName:
-      aggregatedLocalization && aggregatedLocalization.status !== 'unknown'
-        ? aggregatedLocalization.shortLabel
-        : raw.localization_name ?? primaryRegionalPrice?.localizationName ?? null,
+    localizationName: routeRegionalPrice?.localizationName ?? raw.localization_name ?? primaryRegionalPrice?.localizationName ?? null,
     hasDiscount: Boolean(raw.has_discount),
     discount: raw.discount ?? null,
     discountPercent: raw.discount_percent ?? primaryRegionalPrice?.discountPercent ?? null,

@@ -5,7 +5,7 @@
   CreditCard,
   ExternalLink,
   Gamepad2,
-  Languages,
+  Globe,
   LoaderCircle,
   ShieldCheck,
   Star,
@@ -14,8 +14,9 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { buildAuthModalPath, buildBaseAuthPath } from '../components/auth/authModalState'
 import { FavoriteButton } from '../components/catalog/FavoriteButton'
-import { LocalizationBadge } from '../components/catalog/LocalizationBadge'
+import { PsPlusSavingsBadge } from '../components/catalog/PsPlusSavingsBadge'
 import { RegionalPriceList } from '../components/catalog/RegionalPriceList'
+import { PasswordInput } from '../components/forms/PasswordInput'
 import { useAuth } from '../context/AuthContext'
 import { useFavorites } from '../context/FavoritesContext'
 import { mockProducts } from '../data/mockProducts'
@@ -34,7 +35,7 @@ import {
   resolveRegionPresentation,
 } from '../utils/format'
 import {
-  getProductLocalizationPresentation,
+  getProductPsPlusSavingsPercent,
   getProductTitle,
   getVisibleRegionalPrices,
 } from '../utils/productPresentation'
@@ -43,7 +44,6 @@ type CheckoutFieldName = 'purchase_email' | 'psn_email' | 'psn_password'
 
 type CheckoutFormState = {
   purchaseEmail: string
-  platform: '' | 'PS4' | 'PS5'
   psnEmail: string
   psnPassword: string
   backupCode: string
@@ -63,7 +63,6 @@ type CheckoutPaymentSummary = {
 
 const EMPTY_CHECKOUT_FORM: CheckoutFormState = {
   purchaseEmail: '',
-  platform: '',
   psnEmail: '',
   psnPassword: '',
   backupCode: '',
@@ -71,23 +70,36 @@ const EMPTY_CHECKOUT_FORM: CheckoutFormState = {
 
 function buildCheckoutForm(
   profile: SiteProfileResponse | null,
-  fallbackUser?: { payment_email?: string | null; platform?: string | null; psn_email?: string | null } | null,
+  fallbackUser?: { payment_email?: string | null; psn_email?: string | null } | null,
 ): CheckoutFormState {
   const uaAccount = profile?.psn_accounts?.UA
-  const resolvedPlatform =
-    uaAccount?.platform === 'PS4' || uaAccount?.platform === 'PS5'
-      ? uaAccount.platform
-      : fallbackUser?.platform === 'PS4' || fallbackUser?.platform === 'PS5'
-        ? fallbackUser.platform
-        : ''
 
   return {
     purchaseEmail: profile?.user.payment_email ?? fallbackUser?.payment_email ?? '',
-    platform: resolvedPlatform,
     psnEmail: uaAccount?.psn_email ?? fallbackUser?.psn_email ?? '',
-    psnPassword: '',
+    psnPassword: uaAccount?.psn_password ?? '',
     backupCode: '',
   }
+}
+
+function formatDiscountEndDate(value?: string | null) {
+  const source = value?.trim()
+  if (!source) {
+    return null
+  }
+
+  const isoDateMatch = source.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (isoDateMatch) {
+    const [, year, month, day] = isoDateMatch
+    return `${day}.${month}.${year}`
+  }
+
+  const parsedDate = new Date(source)
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null
+  }
+
+  return parsedDate.toLocaleDateString('ru-RU')
 }
 
 function getMissingCheckoutFields(
@@ -118,7 +130,7 @@ function getMissingCheckoutFields(
 }
 
 function buildHighlights(product: CatalogProduct) {
-  const localization = getProductLocalizationPresentation(product)
+  const region = resolveRegionPresentation(product.routeRegion || product.region, product.regionInfo?.name)
 
   return [
     {
@@ -132,9 +144,9 @@ function buildHighlights(product: CatalogProduct) {
       icon: Gamepad2,
     },
     {
-      label: 'Локализация',
-      value: localization.fullLabel,
-      icon: Languages,
+      label: 'Регион',
+      value: region.name,
+      icon: Globe,
     },
   ]
 }
@@ -360,6 +372,7 @@ function CheckoutDialog({
   const paymentCurrencyCode = paymentSummary?.currencyCode ?? checkoutOrder?.currency_code ?? null
   const paymentDirectCardUrl = paymentSummary?.directCardUrl ?? null
   const hasGamePrice = paymentGamePrice !== null
+  const psPlusSavingsPercent = selectedPrice?.psPlusDiscountPercent ?? null
   const fieldClassName = (fieldName: CheckoutFieldName) =>
     `auth-input ${missingFields.includes(fieldName) ? 'border-rose-400/40 bg-rose-500/10' : ''}`
 
@@ -430,9 +443,11 @@ function CheckoutDialog({
                     className="mt-1 h-4 w-4 rounded border-white/10 bg-slate-950/50 text-brand-400"
                   />
                   <span>
-                    <span className="block text-sm font-semibold text-white">Использовать цену PS Plus</span>
+                    <span className="block text-sm font-semibold text-white">У Вас есть активная подписка PS Plus на этом аккаунте?</span>
                     <span className="mt-1 block text-sm leading-7 text-slate-400">
-                      Для выбранного региона доступна отдельная цена подписчика.
+                      {psPlusSavingsPercent
+                        ? `Сэкономьте ${psPlusSavingsPercent} процентов с Playstation Plus.`
+                        : 'Для выбранного региона доступна отдельная цена подписчика.'}
                     </span>
                   </span>
                 </label>
@@ -472,24 +487,6 @@ function CheckoutDialog({
                   {isUkraineCheckout ? (
                     <>
                       <div>
-                        <label className="mb-2 block text-sm font-medium text-slate-200">Платформа</label>
-                        <select
-                          value={checkoutForm.platform}
-                          onChange={(event) =>
-                            onCheckoutFormChange(
-                              'platform',
-                              (event.target.value as CheckoutFormState['platform']) || '',
-                            )
-                          }
-                          className="auth-input"
-                        >
-                          <option value="">Из профиля / по умолчанию</option>
-                          <option value="PS5">PlayStation 5</option>
-                          <option value="PS4">PlayStation 4</option>
-                        </select>
-                      </div>
-
-                      <div>
                         <label className="mb-2 block text-sm font-medium text-slate-200">PSN Email</label>
                         <input
                           type="email"
@@ -502,28 +499,28 @@ function CheckoutDialog({
 
                       <div>
                         <label className="mb-2 block text-sm font-medium text-slate-200">PSN Пароль</label>
-                        <input
-                          type="password"
+                        <PasswordInput
                           value={checkoutForm.psnPassword}
-                          onChange={(event) => onCheckoutFormChange('psnPassword', event.target.value)}
+                          onChange={(value) => onCheckoutFormChange('psnPassword', value)}
                           className={fieldClassName('psn_password')}
-                          placeholder={hasSavedUaPassword ? 'Оставьте пустым, если пароль уже сохранён' : 'Введите PSN пароль'}
+                          placeholder={hasSavedUaPassword ? 'Сохранённый PSN пароль' : 'Введите PSN пароль'}
+                          autoComplete="current-password"
                         />
                       </div>
 
                       <div>
                         <label className="mb-2 block text-sm font-medium text-slate-200">Резервный код 2FA</label>
-                        <input
-                          type="password"
+                        <PasswordInput
                           value={checkoutForm.backupCode}
-                          onChange={(event) => onCheckoutFormChange('backupCode', event.target.value)}
+                          onChange={(value) => onCheckoutFormChange('backupCode', value)}
                           className="auth-input"
                           placeholder="Введите код для этой покупки"
+                          autoComplete="one-time-code"
                         />
                       </div>
 
                       <div className="md:col-span-2 rounded-[20px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm leading-7 text-slate-400">
-                        Email для покупки, PSN email, платформа и пароль сохранятся в профиле после продолжения покупки.
+                        Email для покупки, PSN email и пароль сохранятся в профиле после продолжения покупки.
                         Резервный код используется только для текущего заказа и не сохраняется.
                       </div>
                     </>
@@ -750,7 +747,6 @@ export function ProductPage() {
     setCheckoutForm(
       buildCheckoutForm(profileResponse, {
         payment_email: user?.payment_email,
-        platform: user?.platform,
         psn_email: user?.psn_email,
       }),
     )
@@ -792,11 +788,11 @@ export function ProductPage() {
   }, [productId, requestedRegion])
 
   const coverUrl = normalizeImageUrl(product?.image)
-  const region = resolveRegionPresentation(product?.routeRegion || product?.region, product?.regionInfo?.name)
   const highlights = useMemo(() => (product ? buildHighlights(product) : []), [product])
   const regionalPrices = useMemo(() => (product ? getVisibleRegionalPrices(product).slice(0, 3) : []), [product])
   const favoriteActive = product ? isFavorite(product.id) : false
   const productTitle = product ? getProductTitle(product) : 'Товар'
+  const psPlusSavingsPercent = product ? getProductPsPlusSavingsPercent(product) : null
   const playersLabel = useMemo(() => (product ? resolvePlayersLabel(product) : null), [product])
   const infoItems = useMemo(() => (product ? buildInfoItems(product) : []), [product])
   const availableCheckoutRegions = useMemo(() => regionalPrices.map((price) => price.region), [regionalPrices])
@@ -927,7 +923,6 @@ export function ProductPage() {
         region: checkoutRegion,
         use_ps_plus: usePsPlusCheckout && canUsePsPlus,
         purchase_email: purchaseEmail || undefined,
-        platform: checkoutRegion === 'UA' ? checkoutForm.platform || undefined : undefined,
         psn_email: checkoutRegion === 'UA' ? psnEmail || undefined : undefined,
         psn_password: checkoutRegion === 'UA' ? checkoutForm.psnPassword.trim() || undefined : undefined,
         backup_code: checkoutRegion === 'UA' ? checkoutForm.backupCode.trim() || undefined : undefined,
@@ -1037,16 +1032,19 @@ export function ProductPage() {
 
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-transparent" />
 
-                <div className="absolute left-5 top-5 flex flex-wrap gap-2">
-                  <span className="pill bg-slate-950/70 text-brand-50">{region.label}</span>
+                <div className="absolute left-5 right-20 top-5 flex flex-wrap gap-2">
                   {product.hasDiscount ? (
-                    <span className="pill border-rose-400/20 bg-rose-500/20 text-rose-100">
+                    <span className="pill border-rose-400/40 bg-rose-500 px-3 py-1.5 text-[11px] text-white shadow-lg shadow-rose-950/30">
                       <BadgePercent size={12} />
                       {product.discountPercent ? `-${product.discountPercent}%` : 'Скидка'}
                     </span>
                   ) : null}
-                  {product.hasPsPlus ? (
-                    <span className="pill border-amber-300/20 bg-amber-400/20 text-amber-50">PS Plus</span>
+                  {psPlusSavingsPercent ? (
+                    <PsPlusSavingsBadge percent={psPlusSavingsPercent} className="px-3 py-1.5 text-[11px]" />
+                  ) : product.hasPsPlus ? (
+                    <span className="pill border-amber-300/50 bg-amber-400 px-3 py-1.5 text-[11px] text-slate-950 shadow-lg shadow-amber-950/20">
+                      PS Plus
+                    </span>
                   ) : null}
                 </div>
 
@@ -1078,7 +1076,6 @@ export function ProductPage() {
                   {playersLabel ? (
                     <span className="pill border-white/10 bg-white/5 text-slate-200">Игроки: {playersLabel}</span>
                   ) : null}
-                  <LocalizationBadge localizationName={getProductLocalizationPresentation(product).shortLabel} />
                   {product.hasEaAccess ? (
                     <span className="pill border-sky-300/20 bg-sky-500/15 text-sky-50">EA Access</span>
                   ) : null}
@@ -1088,6 +1085,9 @@ export function ProductPage() {
               <div className="panel-soft rounded-[28px] p-6">
                 <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Цены</p>
                 <RegionalPriceList prices={regionalPrices} variant="detail" className="mt-4" />
+                {formatDiscountEndDate(product.discountEnd) ? (
+                  <p className="mt-5 text-sm text-amber-100/90">Скидка действует до {formatDiscountEndDate(product.discountEnd)}.</p>
+                ) : null}
                 <button type="button" className="btn-primary mt-6 w-full sm:w-auto" onClick={openCheckout}>
                   <CreditCard size={16} />
                   {isAuthenticated ? 'Купить' : 'Войти и купить'}

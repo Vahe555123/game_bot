@@ -1,10 +1,11 @@
 import clsx from 'clsx'
-import { RotateCcw, Sparkles } from 'lucide-react'
+import { Check, RotateCcw, Sparkles } from 'lucide-react'
 import type { CatalogFilterState } from '../../types/catalog'
 import {
   PLAYER_OPTIONS,
   PLATFORM_OPTIONS,
   PRICE_CURRENCY_OPTIONS,
+  PRODUCT_KIND_OPTIONS,
   SORT_OPTIONS,
   hasActiveCatalogFilters,
 } from '../../utils/catalogFilters'
@@ -14,6 +15,7 @@ type CatalogFiltersProps = {
   draftFilters: CatalogFilterState
   onDraftChange: (partial: Partial<CatalogFilterState>) => void
   onReset: () => void
+  onApply: () => void
   className?: string
 }
 
@@ -46,6 +48,7 @@ export function CatalogFilters({
   draftFilters,
   onDraftChange,
   onReset,
+  onApply,
   className,
 }: CatalogFiltersProps) {
   const hasActiveFilters = hasActiveCatalogFilters(draftFilters)
@@ -53,8 +56,14 @@ export function CatalogFilters({
 
   return (
     <div className={clsx('space-y-4', className)}>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <SelectField value={draftFilters.sort} options={SORT_OPTIONS} onChange={(sort) => onDraftChange({ sort })} />
+
+        <SelectField
+          value={draftFilters.productKind}
+          options={PRODUCT_KIND_OPTIONS}
+          onChange={(productKind) => onDraftChange({ productKind })}
+        />
 
         <SelectField
           value={draftFilters.category}
@@ -135,17 +144,24 @@ export function CatalogFilters({
           />
         </label>
 
-        <button
-          type="button"
-          onClick={onReset}
-          className={clsx(
-            'btn-secondary min-h-[56px] w-full justify-center sm:col-span-2 lg:col-span-3 xl:col-span-6',
-            !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
-          )}
-        >
-          <RotateCcw size={16} />
-          Сбросить
-        </button>
+        <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-3 xl:col-span-6">
+          <button
+            type="button"
+            onClick={onReset}
+            className={clsx(
+              'btn-secondary min-h-[56px] w-full justify-center',
+              !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
+            )}
+          >
+            <RotateCcw size={16} />
+            Сбросить
+          </button>
+
+          <button type="button" onClick={onApply} className="btn-primary min-h-[56px] w-full justify-center">
+            <Check size={16} />
+            Применить
+          </button>
+        </div>
       </div>
     </div>
   )

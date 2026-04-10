@@ -1,5 +1,5 @@
-import { Globe, LoaderCircle, MessageCircleMore } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Globe, LoaderCircle } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { getAuthProviders, getOAuthStartUrl, telegramLogin } from '../../services/auth'
@@ -122,14 +122,6 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
     window.location.href = getOAuthStartUrl(provider, nextPath)
   }
 
-  const enabledProvidersCount = useMemo(() => {
-    if (!providers) {
-      return 0
-    }
-
-    return [providers.google_enabled, providers.vk_enabled, providers.telegram_enabled].filter(Boolean).length
-  }, [providers])
-
   if (isLoading) {
     return (
       <div className="rounded-[24px] border border-white/10 bg-white/[0.03] p-5 text-sm text-slate-300">
@@ -145,12 +137,6 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
     return null
   }
 
-  const gridClass = compact
-    ? enabledProvidersCount >= 3
-      ? 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3'
-      : 'grid gap-3 sm:grid-cols-2'
-    : 'grid gap-3 md:grid-cols-2'
-
   return (
     <div className="space-y-4 rounded-[26px] border border-white/10 bg-white/[0.03] p-5">
       <div>
@@ -162,14 +148,18 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
         </p>
       </div>
 
-      <div className={gridClass}>
-        {providers.google_enabled ? (
-          <ProviderButton
-            label="Войти через Google"
-            onClick={() => beginProviderLogin('google')}
-            icon={<Globe size={18} />}
-            compact={compact}
-          />
+      <div className="space-y-3">
+        {providers.telegram_enabled ? (
+          <div className="rounded-[22px] border border-white/10 bg-white/[0.04] px-4 py-3">
+            <div ref={telegramContainerRef} className="flex min-h-[52px] items-center justify-center overflow-hidden" />
+
+            {isTelegramLoading ? (
+              <div className="mt-3 flex items-center gap-2 text-sm text-slate-300">
+                <LoaderCircle size={16} className="animate-spin text-brand-200" />
+                <span>Подтверждаем вход через Telegram...</span>
+              </div>
+            ) : null}
+          </div>
         ) : null}
 
         {providers.vk_enabled ? (
@@ -181,33 +171,13 @@ export function SocialAuthPanel({ nextPath = '/profile', compact = false }: Soci
           />
         ) : null}
 
-        {providers.telegram_enabled ? (
-          <div
-            className={`rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 ${
-              compact ? '' : 'md:col-span-2'
-            }`}
-          >
-            {compact ? (
-              <div className="mb-2 flex items-center justify-center gap-2 text-sm font-semibold text-white">
-                <MessageCircleMore size={16} />
-                <span>Telegram</span>
-              </div>
-            ) : (
-              <div className="mb-3 flex items-center gap-3 text-sm font-semibold text-white">
-                <MessageCircleMore size={18} />
-                <span>Войти через Telegram</span>
-              </div>
-            )}
-
-            <div ref={telegramContainerRef} className="flex min-h-[52px] items-center justify-center overflow-hidden" />
-
-            {isTelegramLoading ? (
-              <div className="mt-3 flex items-center gap-2 text-sm text-slate-300">
-                <LoaderCircle size={16} className="animate-spin text-brand-200" />
-                <span>Подтверждаем вход через Telegram...</span>
-              </div>
-            ) : null}
-          </div>
+        {providers.google_enabled ? (
+          <ProviderButton
+            label="Войти через Google"
+            onClick={() => beginProviderLogin('google')}
+            icon={<Globe size={18} />}
+            compact={compact}
+          />
         ) : null}
       </div>
 

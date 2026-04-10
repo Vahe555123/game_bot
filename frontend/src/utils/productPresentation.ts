@@ -71,6 +71,50 @@ export function getVisibleRegionalPrices(product: CatalogProduct) {
   ]
 }
 
+function normalizeRegionCode(value?: string | null) {
+  return value?.trim().toUpperCase() || null
+}
+
+export function getProductPsPlusSavingsPercent(
+  product: Pick<CatalogProduct, 'regionalPrices' | 'routeRegion' | 'region'>,
+) {
+  const regionalPricesWithSavings = sortRegionalPrices(product.regionalPrices).filter(
+    (price) => typeof price.psPlusDiscountPercent === 'number' && price.psPlusDiscountPercent > 0,
+  )
+
+  if (!regionalPricesWithSavings.length) {
+    return null
+  }
+
+  const preferredRegions = [product.routeRegion, product.region]
+    .map((region) => normalizeRegionCode(region))
+    .filter((region): region is string => Boolean(region))
+
+  for (const preferredRegion of preferredRegions) {
+    const matchedPrice = regionalPricesWithSavings.find(
+      (price) => normalizeRegionCode(price.region) === preferredRegion,
+    )
+
+    if (matchedPrice?.psPlusDiscountPercent) {
+      return matchedPrice.psPlusDiscountPercent
+    }
+  }
+
+  return regionalPricesWithSavings.reduce<number | null>((bestSavings, price) => {
+    const currentSavings = price.psPlusDiscountPercent ?? null
+
+    if (currentSavings === null) {
+      return bestSavings
+    }
+
+    if (bestSavings === null || currentSavings > bestSavings) {
+      return currentSavings
+    }
+
+    return bestSavings
+  }, null)
+}
+
 export function getProductTitle(product: Pick<CatalogProduct, 'name' | 'mainName' | 'edition'>) {
   const fullName = product.name?.trim()
 

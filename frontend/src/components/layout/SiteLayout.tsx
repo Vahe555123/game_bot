@@ -21,8 +21,13 @@ const COUNTRY_PARTNER_LINKS = [
 ] as const
 
 const SUBSCRIPTIONS_PARTNER_LINK = {
-  label: 'Подписки',
-  href: 'https://romanomak.ru/category/139773',
+  label: 'EA Play',
+  href: 'https://romanomak.ru/category/124950',
+} as const
+
+const PS_PLUS_PARTNER_LINK = {
+  label: 'PS PLUS',
+  href: 'https://romanomak.ru/category/120182',
 } as const
 
 const DESKTOP_DROPDOWN_ITEM_CLASS =
@@ -156,7 +161,7 @@ function DesktopCountriesDropdown() {
         onClick={() => setOpen((value) => !value)}
       >
         <Globe2 size={16} className="shrink-0 text-brand-200/90" aria-hidden />
-        <span>Страны</span>
+        <span>Коды пополнения баланса</span>
         <ChevronDown
           size={16}
           className={clsx('shrink-0 opacity-70 transition-transform duration-200', open && 'rotate-180')}
@@ -169,7 +174,7 @@ function DesktopCountriesDropdown() {
           className="absolute left-0 top-[calc(100%+0.5rem)] z-[60] min-w-[min(100vw-2rem,240px)] rounded-2xl border border-white/10 bg-slate-950/95 p-1.5 shadow-card backdrop-blur-xl ring-1 ring-white/[0.04]"
           role="menu"
         >
-          <p className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Магазин по региону</p>
+          <p className="px-3 pb-1 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Выберите регион</p>
           <div className="flex flex-col gap-0.5">
             {COUNTRY_PARTNER_LINKS.map((item) => (
               <a
@@ -243,23 +248,17 @@ export function SiteLayout() {
             </div>
           </Link>
 
-          <div className="hidden min-w-0 flex-1 items-center justify-between gap-3 lg:flex xl:gap-4">
-            <nav className="flex min-w-0 flex-1 items-center gap-0.5 overflow-visible xl:gap-1">
-              <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:gap-1">
+          <div className="hidden min-w-0 flex-1 items-center justify-end gap-3 lg:flex xl:gap-4">
+            <nav className="flex min-w-0 flex-1 items-center justify-end gap-0.5 overflow-visible xl:gap-1">
+              <div className="flex min-w-0 items-center justify-end gap-0.5 xl:gap-1">
                 <ActionLink to="/catalog?hasDiscount=true" className={DESKTOP_NAV_LINK_CLASS}>
                   Скидки
                 </ActionLink>
-                <ActionLink to="/catalog?hasPsPlus=true" className={DESKTOP_NAV_LINK_CLASS}>
+                <ActionLink href={PS_PLUS_PARTNER_LINK.href} external className={DESKTOP_NAV_LINK_CLASS}>
                   <PsPlusMark />
-                  <span>PS PLUS</span>
+                  <span>{PS_PLUS_PARTNER_LINK.label}</span>
                 </ActionLink>
-              </div>
-
-              <div className="shrink-0">
                 <DesktopCountriesDropdown />
-              </div>
-
-              <div className="flex shrink-0 items-center gap-0.5 xl:gap-1">
                 <ActionLink href={SUBSCRIPTIONS_PARTNER_LINK.href} external className={DESKTOP_NAV_LINK_CLASS}>
                   {SUBSCRIPTIONS_PARTNER_LINK.label}
                 </ActionLink>
@@ -328,9 +327,9 @@ export function SiteLayout() {
                 Скидки
               </ActionLink>
 
-              <ActionLink to="/catalog?hasPsPlus=true" className={MOBILE_MENU_LINK_CLASS} onClick={closeMobileMenu}>
+              <ActionLink href={PS_PLUS_PARTNER_LINK.href} external className={MOBILE_MENU_LINK_CLASS} onClick={closeMobileMenu}>
                 <PsPlusMark />
-                <span>PS PLUS</span>
+                <span>{PS_PLUS_PARTNER_LINK.label}</span>
               </ActionLink>
 
               <div className="overflow-hidden rounded-[18px] border border-white/10 bg-white/[0.02]">
@@ -341,7 +340,7 @@ export function SiteLayout() {
                   onClick={() => setMobileCountriesOpen((value) => !value)}
                 >
                   <Globe2 size={18} className="shrink-0 text-brand-200/90" aria-hidden />
-                  <span className="min-w-0 flex-1">Страны</span>
+                  <span className="min-w-0 flex-1">Коды пополнения баланса</span>
                   <ChevronDown
                     size={18}
                     className={clsx('shrink-0 text-slate-400 transition-transform', mobileCountriesOpen && 'rotate-180')}

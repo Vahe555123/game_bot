@@ -47,7 +47,6 @@ export type CreatePurchaseCheckoutPayload = {
   region: string
   use_ps_plus?: boolean
   purchase_email?: string
-  platform?: 'PS4' | 'PS5'
   psn_email?: string
   psn_password?: string
   backup_code?: string

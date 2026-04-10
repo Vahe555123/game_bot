@@ -4,9 +4,10 @@ import { Link, useLocation } from 'react-router-dom'
 import { useFavorites } from '../../context/FavoritesContext'
 import type { CatalogProduct } from '../../types/catalog'
 import { normalizeImageUrl } from '../../utils/format'
-import { getProductTitle, getVisibleRegionalPrices } from '../../utils/productPresentation'
+import { getProductPsPlusSavingsPercent, getProductTitle, getVisibleRegionalPrices } from '../../utils/productPresentation'
 import { FavoriteButton } from './FavoriteButton'
 import { LocalizationBadge } from './LocalizationBadge'
+import { PsPlusSavingsBadge } from './PsPlusSavingsBadge'
 import { RegionalPriceList } from './RegionalPriceList'
 
 type ProductCardProps = {
@@ -23,6 +24,7 @@ export function ProductCard({ product }: ProductCardProps) {
   const regionalPrices = getVisibleRegionalPrices(product).slice(0, 3)
   const favoriteActive = isFavorite(product.id)
   const productTitle = getProductTitle(product)
+  const psPlusSavingsPercent = getProductPsPlusSavingsPercent(product)
 
   function handleFavoriteClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -61,14 +63,16 @@ export function ProductCard({ product }: ProductCardProps) {
 
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/20 to-transparent" />
 
-        <div className="absolute left-2.5 top-2.5 flex flex-wrap gap-1.5 md:left-4 md:top-4 md:gap-2">
+        <div className="absolute left-2.5 right-14 top-2.5 flex flex-wrap gap-1.5 md:left-4 md:right-16 md:top-4 md:gap-2">
           {product.hasDiscount ? (
             <span className="pill border-rose-400/40 bg-rose-500 px-2.5 py-1 text-[11px] text-white shadow-lg shadow-rose-950/30">
               <BadgePercent size={12} />
               {product.discountPercent ? `-${product.discountPercent}%` : 'Скидка'}
             </span>
           ) : null}
-          {product.hasPsPlus ? (
+          {psPlusSavingsPercent ? (
+            <PsPlusSavingsBadge percent={psPlusSavingsPercent} className="px-2.5 py-1 text-[11px]" />
+          ) : product.hasPsPlus ? (
             <span className="pill border-amber-300/50 bg-amber-400 px-2.5 py-1 text-[11px] text-slate-950 shadow-lg shadow-amber-950/20">
               PS Plus
             </span>

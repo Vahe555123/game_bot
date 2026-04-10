@@ -36,6 +36,14 @@ export const PRICE_CURRENCY_OPTIONS = [
 
 const PRICE_CURRENCY_OPTION_VALUES = new Set(PRICE_CURRENCY_OPTIONS.map((option) => option.value))
 
+export const PRODUCT_KIND_OPTIONS = [
+  { value: 'all', label: 'Игры и DLC' },
+  { value: 'games', label: 'Игры' },
+  { value: 'dlc', label: 'Только DLC / Дополнения' },
+] as const
+
+const PRODUCT_KIND_OPTION_VALUES = new Set(PRODUCT_KIND_OPTIONS.map((option) => option.value))
+
 export function normalizeRegionFilterValue(value: string) {
   switch ((value || '').toLowerCase()) {
     case 'en-tr':
@@ -83,6 +91,7 @@ export function sanitizeCatalogFilters(filters: CatalogFilterState, categories: 
   return {
     ...filters,
     sort: sanitizeSelectValue(filters.sort, SORT_OPTION_VALUES) || 'popular',
+    productKind: sanitizeSelectValue(filters.productKind, PRODUCT_KIND_OPTION_VALUES) || 'all',
     region: '',
     priceCurrency: sanitizeSelectValue(filters.priceCurrency, PRICE_CURRENCY_OPTION_VALUES) || 'RUB',
     platform: sanitizeSelectValue(filters.platform, PLATFORM_OPTION_VALUES),
@@ -98,6 +107,7 @@ export function hasActiveCatalogFilters(filters: CatalogFilterState) {
   return Boolean(
     filters.category ||
       (filters.priceCurrency && filters.priceCurrency !== 'RUB') ||
+      (filters.productKind && filters.productKind !== 'all') ||
       filters.platform ||
       filters.players ||
       filters.minPrice ||

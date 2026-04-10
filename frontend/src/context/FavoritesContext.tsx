@@ -1,15 +1,18 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { addSiteFavorite, listSiteFavorites, removeSiteFavorite } from '../services/favorites'
 import { useAuth } from './AuthContext'
 import type { FavoriteEntry, FavoriteTogglePayload } from './favoritesStorage'
-import { parseFavorites, toggleFavoriteEntry } from './favoritesStorage'
+import { addFavoriteEntry, mergeFavoriteCollections, parseFavorites, removeFavoriteEntry, toggleFavoriteEntry } from './favoritesStorage'
 
 type FavoritesContextValue = {
   favorites: FavoriteEntry[]
+  isFavoritesLoading: boolean
   isFavorite: (productId: string) => boolean
   toggleFavorite: (payload: FavoriteTogglePayload) => void
 }
 
 const STORAGE_PREFIX = 'site_favorites'
+const GUEST_STORAGE_KEY = `${STORAGE_PREFIX}:guest`
 const FavoritesContext = createContext<FavoritesContextValue | null>(null)
 
 export function FavoritesProvider({ children }: { children: ReactNode }) {
@@ -17,18 +20,66 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   const storageKey = `${STORAGE_PREFIX}:${user?.id ?? 'guest'}`
 
   const [favorites, setFavorites] = useState<FavoriteEntry[]>([])
+  const [isFavoritesLoading, setIsFavoritesLoading] = useState(true)
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
 
   useEffect(() => {
-    if (isAuthLoading) {
+    if (isAuthLoading || typeof window === 'undefined') {
       return
     }
 
-    const rawValue = window.localStorage.getItem(storageKey)
-    const storedFavorites = parseFavorites(rawValue)
-    setFavorites(storedFavorites)
-    setLoadedKey(storageKey)
-  }, [isAuthLoading, storageKey])
+    let ignore = false
+    const localStorageKeys = user?.id ? Array.from(new Set([storageKey, GUEST_STORAGE_KEY])) : [storageKey]
+    setIsFavoritesLoading(true)
+
+    ;(async () => {
+      const localFavorites = mergeFavoriteCollections(
+        localStorageKeys.map((key) => parseFavorites(window.localStorage.getItem(key))),
+      )
+
+      let nextFavorites = localFavorites
+
+      if (user?.telegram_id != null) {
+        try {
+          let remoteFavorites = await listSiteFavorites()
+          const remoteIds = new Set(remoteFavorites.map((entry) => entry.productId))
+          const missingRemoteFavorites = localFavorites.filter((entry) => !remoteIds.has(entry.productId))
+
+          if (missingRemoteFavorites.length) {
+            await Promise.allSettled(
+              missingRemoteFavorites.map((entry) =>
+                addSiteFavorite({
+                  productId: entry.productId,
+                  region: entry.region,
+                }),
+              ),
+            )
+            remoteFavorites = mergeFavoriteCollections([remoteFavorites, missingRemoteFavorites])
+          }
+
+          nextFavorites = mergeFavoriteCollections([remoteFavorites, localFavorites])
+        } catch {
+          nextFavorites = localFavorites
+        }
+      }
+
+      if (ignore) {
+        return
+      }
+
+      setFavorites(nextFavorites)
+      setLoadedKey(storageKey)
+      setIsFavoritesLoading(false)
+
+      if (storageKey !== GUEST_STORAGE_KEY && localStorageKeys.includes(GUEST_STORAGE_KEY)) {
+        window.localStorage.removeItem(GUEST_STORAGE_KEY)
+      }
+    })()
+
+    return () => {
+      ignore = true
+    }
+  }, [isAuthLoading, storageKey, user?.id, user?.telegram_id])
 
   useEffect(() => {
     if (!loadedKey || loadedKey !== storageKey || typeof window === 'undefined') {
@@ -43,13 +94,35 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
   }
 
   function toggleFavorite(payload: FavoriteTogglePayload) {
+    const favoriteAlreadyExists = isFavorite(payload.productId)
     setFavorites((current) => toggleFavoriteEntry(current, payload))
+
+    if (user?.telegram_id == null) {
+      return
+    }
+
+    void (async () => {
+      try {
+        if (favoriteAlreadyExists) {
+          await removeSiteFavorite(payload.productId)
+          return
+        }
+
+        const savedFavorite = await addSiteFavorite(payload)
+        setFavorites((current) => mergeFavoriteCollections([current, [savedFavorite]]))
+      } catch {
+        setFavorites((current) =>
+          favoriteAlreadyExists ? addFavoriteEntry(current, payload) : removeFavoriteEntry(current, payload.productId),
+        )
+      }
+    })()
   }
 
   return (
     <FavoritesContext.Provider
       value={{
         favorites,
+        isFavoritesLoading,
         isFavorite,
         toggleFavorite,
       }}

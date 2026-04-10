@@ -36,15 +36,6 @@ function RegionalPriceRow({
       )}
     >
       <div className="flex items-center gap-2.5 md:gap-3">
-        <span
-          className={clsx(
-            'flex shrink-0 items-center justify-center rounded-full border border-white/10 bg-brand-500/15 font-black text-brand-50',
-            variant === 'card' ? 'h-7 min-w-7 text-[10px] md:h-8 md:min-w-8 md:text-[11px]' : 'h-10 min-w-10 text-xs',
-          )}
-        >
-          {price.label || price.region}
-        </span>
-
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">

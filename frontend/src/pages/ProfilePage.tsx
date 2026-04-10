@@ -12,6 +12,7 @@ import {
 import { useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { buildAuthModalPath } from '../components/auth/authModalState'
+import { PasswordInput } from '../components/forms/PasswordInput'
 import { useAuth } from '../context/AuthContext'
 import { useFavorites } from '../context/FavoritesContext'
 import { getProfile, updateProfilePreferences, updateProfilePsnAccount } from '../services/auth'
@@ -34,7 +35,6 @@ type SaveState = {
 }
 
 type PsnDraft = {
-  platform: '' | 'PS4' | 'PS5'
   psn_email: string
   psn_password: string
 }
@@ -98,9 +98,8 @@ function createEmptyAccount(region: SitePSNRegion): SitePSNAccount {
 
 function buildPsnDraft(account: SitePSNAccount | undefined): PsnDraft {
   return {
-    platform: account?.platform ?? '',
     psn_email: account?.psn_email ?? '',
-    psn_password: '',
+    psn_password: account?.psn_password ?? '',
   }
 }
 
@@ -312,14 +311,12 @@ export function ProfilePage() {
     setPaymentEmailDraft(nextProfile.user.payment_email ?? '')
     setPsnDrafts((current) => ({
       UA: {
-        platform: nextProfile.psn_accounts.UA.platform ?? current.UA.platform,
         psn_email: nextProfile.psn_accounts.UA.psn_email ?? current.UA.psn_email,
-        psn_password: '',
+        psn_password: nextProfile.psn_accounts.UA.psn_password ?? current.UA.psn_password,
       },
       TR: {
-        platform: nextProfile.psn_accounts.TR.platform ?? current.TR.platform,
         psn_email: nextProfile.psn_accounts.TR.psn_email ?? current.TR.psn_email,
-        psn_password: '',
+        psn_password: nextProfile.psn_accounts.TR.psn_password ?? current.TR.psn_password,
       },
     }))
   }
@@ -386,7 +383,6 @@ export function ProfilePage() {
   async function savePsnAccount() {
     const draft = psnDrafts[activePsnRegion]
     const payload: ProfilePSNAccountPayload = {
-      platform: draft.platform || null,
       psn_email: draft.psn_email.trim() || null,
       psn_password: draft.psn_password.trim() || null,
     }
@@ -595,23 +591,6 @@ export function ProfilePage() {
             <div className="mt-6 space-y-5">
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label className="mb-2 block text-sm font-medium text-slate-200">Платформа</label>
-                  <select
-                    value={currentDraft.platform}
-                    onChange={(event) =>
-                      updatePsnDraft(activePsnRegion, {
-                        platform: (event.target.value as PsnDraft['platform']) || '',
-                      })
-                    }
-                    className="auth-input"
-                  >
-                    <option value="">Выберите платформу</option>
-                    <option value="PS5">PlayStation 5</option>
-                    <option value="PS4">PlayStation 4</option>
-                  </select>
-                </div>
-
-                <div>
                   <label className="mb-2 block text-sm font-medium text-slate-200">PSN Email</label>
                   <input
                     type="email"
@@ -628,16 +607,16 @@ export function ProfilePage() {
 
                 <div>
                   <label className="mb-2 block text-sm font-medium text-slate-200">PSN Пароль</label>
-                  <input
-                    type="password"
+                  <PasswordInput
                     value={currentDraft.psn_password}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       updatePsnDraft(activePsnRegion, {
-                        psn_password: event.target.value,
+                        psn_password: value,
                       })
                     }
                     className="auth-input"
-                    placeholder={currentAccount.has_password ? 'Пароль уже сохранен' : 'Введите пароль'}
+                    placeholder={currentAccount.has_password ? 'Сохранённый PSN пароль' : 'Введите пароль'}
+                    autoComplete="current-password"
                   />
                 </div>
 

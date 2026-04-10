@@ -4,6 +4,7 @@ import {
   getBestLocalizationPresentation,
   getLocalizationPresentation,
   getProductLocalizationPresentation,
+  getProductPsPlusSavingsPercent,
   getProductTitle,
   getVisibleRegionalPrices,
   shouldShowOldPrice,
@@ -60,6 +61,32 @@ describe('getProductTitle', () => {
         edition: 'Game of the Year Edition',
       }),
     ).toBe('Far Cry 6 Game of the Year Edition')
+  })
+})
+
+describe('getProductPsPlusSavingsPercent', () => {
+  it('prefers the current route region when it has a PS Plus discount', () => {
+    const product = buildProduct({
+      routeRegion: 'IN',
+      regionalPrices: [
+        buildRegionalPrice('TR', 'РўСѓСЂС†РёСЏ', 1499, null, { psPlusDiscountPercent: 40 }),
+        buildRegionalPrice('IN', 'РРЅРґРёСЏ', 1799, null, { psPlusDiscountPercent: 25 }),
+      ],
+    })
+
+    expect(getProductPsPlusSavingsPercent(product)).toBe(25)
+  })
+
+  it('falls back to the highest PS Plus discount when the preferred region has none', () => {
+    const product = buildProduct({
+      routeRegion: 'UA',
+      regionalPrices: [
+        buildRegionalPrice('TR', 'РўСѓСЂС†РёСЏ', 1499, null, { psPlusDiscountPercent: 40 }),
+        buildRegionalPrice('IN', 'РРЅРґРёСЏ', 1799, null, { psPlusDiscountPercent: 25 }),
+      ],
+    })
+
+    expect(getProductPsPlusSavingsPercent(product)).toBe(40)
   })
 })
 
@@ -143,7 +170,13 @@ describe('shouldShowOldPrice', () => {
   })
 })
 
-function buildRegionalPrice(region: string, name: string, priceRub: number, localizationName: string | null = null): ProductRegionPrice {
+function buildRegionalPrice(
+  region: string,
+  name: string,
+  priceRub: number,
+  localizationName: string | null = null,
+  overrides: Partial<ProductRegionPrice> = {},
+): ProductRegionPrice {
   return {
     region,
     label: region,
@@ -160,6 +193,7 @@ function buildRegionalPrice(region: string, name: string, priceRub: number, loca
     discountPercent: null,
     psPlusDiscountPercent: null,
     localizationName,
+    ...overrides,
   }
 }
 

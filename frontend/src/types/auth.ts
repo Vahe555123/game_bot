@@ -33,6 +33,7 @@ export type SitePSNAccount = {
   region: SitePSNRegion
   platform?: 'PS4' | 'PS5' | null
   psn_email?: string | null
+  psn_password?: string | null
   has_password: boolean
   has_backup_code: boolean
   updated_at?: string | null

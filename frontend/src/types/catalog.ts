@@ -142,6 +142,7 @@ export type CatalogQuery = {
   sort?: string
   search?: string
   category?: string
+  product_kind?: string
   region?: string
   price_currency?: string
   platform?: string
@@ -160,6 +161,7 @@ export type CatalogFilterState = {
   sort: string
   search: string
   category: string
+  productKind: string
   region: string
   priceCurrency: string
   platform: string
