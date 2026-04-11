@@ -394,7 +394,7 @@ export function CatalogPage() {
 
   return (
     <div className="container py-4 md:py-6">
-      <section className="sticky top-[8.5rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-36 md:rounded-[30px] md:p-5">
+      <section className="sticky top-[5.25rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-24 md:rounded-[30px] md:p-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <label className="input-shell flex-1">
             <Search size={18} className="text-brand-300" />

@@ -260,7 +260,7 @@ export function SiteLayout() {
   const currentSort = currentCatalogParams.get('sort') || 'popular'
   const isCatalogPage = location.pathname === '/' || location.pathname === '/catalog'
   const isCatalogFiltersOpen = isCatalogPage && currentCatalogParams.get('filters') === 'open'
-  const showCatalogControls = !location.pathname.startsWith('/admin')
+  const showCatalogControls = !isCatalogPage && !location.pathname.startsWith('/admin')
 
   useEffect(() => {
     setGlobalSearch(new URLSearchParams(location.search).get('search') || '')
