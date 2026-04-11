@@ -22,7 +22,7 @@ import { AuthModal } from '../auth/AuthModal'
 import { buildAuthModalPath, buildBaseAuthPath, normalizeAuthModalView } from '../auth/authModalState'
 
 const DESKTOP_NAV_LINK_CLASS =
-  'inline-flex items-center gap-2 rounded-full px-2.5 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/[0.06] hover:text-white xl:px-3'
+  'inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full px-2.5 py-2 text-sm font-medium text-slate-300 transition hover:bg-white/[0.06] hover:text-white xl:px-3'
 const DESKTOP_ACTION_BUTTON_CLASS = 'btn-secondary min-h-[44px] px-3 xl:px-4'
 const MOBILE_MENU_LINK_CLASS =
   'flex min-h-[48px] items-center justify-start gap-3 rounded-[18px] border border-white/10 bg-white/[0.03] px-4 py-3 text-left text-sm font-medium text-slate-100 transition hover:border-brand-300/50 hover:bg-brand-500/10'
@@ -241,6 +241,7 @@ export function SiteLayout() {
   const [isOpen, setIsOpen] = useState(false)
   const [mobileCountriesOpen, setMobileCountriesOpen] = useState(false)
   const [isSupportOpen, setIsSupportOpen] = useState(false)
+  const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false)
   const { isAuthenticated, user } = useAuth()
   const { favorites } = useFavorites()
   const location = useLocation()
@@ -281,6 +282,10 @@ export function SiteLayout() {
   }
 
   function submitGlobalSearch() {
+    if (!globalSearch.trim()) {
+      setIsGlobalSearchOpen(false)
+    }
+
     navigate(buildCatalogSearch(globalSearch, location.search))
   }
 
@@ -384,7 +389,7 @@ export function SiteLayout() {
 
           <button
             type="button"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white lg:hidden"
+            className="ml-auto flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white lg:hidden"
             onClick={() => setIsOpen((value) => !value)}
             aria-label="Открыть меню"
           >
@@ -393,9 +398,27 @@ export function SiteLayout() {
         </div>
 
         {showCatalogControls ? (
-          <div className="border-t border-white/[0.06] bg-slate-950/35">
-            <div className="container flex items-center gap-2 pb-3 lg:pb-4">
-              <label className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white transition focus-within:border-brand-300/50 md:rounded-full md:px-4">
+          <div className="border-t border-white/[0.06] bg-gradient-to-b from-slate-950/60 to-slate-950/20">
+            <div className="container flex flex-wrap items-center justify-end gap-2 py-3 md:flex-nowrap md:justify-center lg:py-4">
+              <button
+                type="button"
+                onClick={() => setIsGlobalSearchOpen((value) => !value)}
+                className={clsx(
+                  'inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-2xl border px-3 text-white transition md:hidden',
+                  isGlobalSearchOpen ? 'border-brand-300/50 bg-brand-500/20' : 'border-white/10 bg-white/5',
+                )}
+                aria-label="Открыть поиск"
+                aria-pressed={isGlobalSearchOpen}
+              >
+                <Search size={18} />
+              </button>
+
+              <label
+                className={clsx(
+                  'min-h-[44px] min-w-0 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white shadow-[0_18px_45px_rgba(8,18,34,0.22)] transition focus-within:border-brand-300/50 focus-within:bg-white/[0.07] md:flex md:flex-1 md:rounded-full md:px-4',
+                  isGlobalSearchOpen ? 'order-2 flex basis-full' : 'hidden',
+                )}
+              >
                 <Search size={16} className="shrink-0 text-brand-200" />
                 <input
                   value={globalSearch}
@@ -415,7 +438,7 @@ export function SiteLayout() {
                 type="button"
                 onClick={toggleGlobalFilters}
                 className={clsx(
-                  'inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 text-sm font-semibold text-white transition md:rounded-full md:px-4',
+                  'inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 text-sm font-semibold text-white shadow-[0_18px_45px_rgba(8,18,34,0.18)] transition md:rounded-full md:px-4',
                   isCatalogFiltersOpen ? 'border-brand-300/50 bg-brand-500/20' : 'border-white/10 bg-white/5 hover:border-brand-300/50',
                 )}
               >

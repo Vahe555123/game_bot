@@ -1,4 +1,5 @@
 import { Search, SlidersHorizontal } from 'lucide-react'
+import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { CatalogFilters } from '../components/catalog/CatalogFilters'
@@ -166,6 +167,7 @@ export function CatalogPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
   const [isFiltersOpen, setIsFiltersOpen] = useState(searchParams.get('filters') === 'open')
+  const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false)
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [total, setTotal] = useState(0)
@@ -390,13 +392,14 @@ export function CatalogPage() {
     setDraftFilters(nextFilters)
     setSearchParams(buildSearchParams(nextFilters), { replace: true })
     setIsFiltersOpen(false)
+    setIsMobileSearchOpen(false)
   }
 
   return (
-    <div className="container py-4 md:py-6">
-      <section className="sticky top-[5.25rem] z-30 rounded-[24px] border border-white/10 bg-slate-950/92 p-3 shadow-card backdrop-blur-xl md:top-24 md:rounded-[30px] md:p-5">
+    <div className="container pb-4 pt-6 md:pb-6 md:pt-8">
+      <section className="sticky top-[5.75rem] z-30 rounded-[26px] border border-white/10 bg-gradient-to-br from-slate-950/95 via-slate-900/92 to-sky-950/76 p-3 shadow-[0_24px_80px_rgba(8,18,34,0.38)] ring-1 ring-brand-300/10 backdrop-blur-xl md:top-28 md:rounded-[32px] md:p-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <label className="input-shell flex-1">
+          <label className={clsx('input-shell flex-1 shadow-[0_18px_50px_rgba(8,18,34,0.2)] sm:flex', isMobileSearchOpen ? 'flex' : 'hidden')}>
             <Search size={18} className="text-brand-300" />
             <input
               value={draftSearch}
@@ -406,8 +409,21 @@ export function CatalogPage() {
             />
           </label>
 
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto md:gap-3">
-            <div className="w-full rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:w-auto md:px-4 md:text-sm">
+          <div className="flex w-full items-center justify-end gap-2 sm:w-auto md:gap-3">
+            <button
+              type="button"
+              onClick={() => setIsMobileSearchOpen((value) => !value)}
+              className={clsx(
+                'inline-flex min-h-[44px] shrink-0 items-center justify-center rounded-2xl border px-3 text-white transition sm:hidden',
+                isMobileSearchOpen ? 'border-brand-300/50 bg-brand-500/20' : 'border-white/10 bg-white/5',
+              )}
+              aria-label="Открыть поиск"
+              aria-pressed={isMobileSearchOpen}
+            >
+              <Search size={18} />
+            </button>
+
+            <div className="mr-auto rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:mr-0 sm:w-auto md:px-4 md:text-sm">
               <span className="font-semibold text-white">{total}</span> товаров
               {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
             </div>
