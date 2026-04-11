@@ -201,6 +201,7 @@ class SitePSNAccountPublic(BaseModel):
     region: str
     platform: Optional[str] = None
     psn_email: Optional[str] = None
+    psn_password: Optional[str] = None
     has_password: bool = False
     has_backup_code: bool = False
     updated_at: Optional[datetime] = None

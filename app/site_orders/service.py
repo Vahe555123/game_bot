@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from html import unescape
 from typing import Any, Optional
 
 from bson.errors import InvalidId
@@ -17,6 +18,7 @@ from app.api.payment_ukraine import UkrainePaymentAPIError, ukraine_payment_api
 from app.auth.exceptions import AuthServiceError
 from app.auth.mongo import get_auth_users_collection
 from app.auth.service import resolve_user_identifier
+from app.auth.telegram_sync import sync_telegram_user_from_site
 from app.models.currency_rate import CurrencyRate
 from app.models.product import Product
 from app.models.purchase_order import SitePurchaseOrder
@@ -105,6 +107,11 @@ def generate_order_number(*, now: Optional[datetime] = None) -> str:
     return f"PS-{current_time:%Y%m%d}-{secrets.token_hex(3).upper()}"
 
 
+def sanitize_payment_product_name(value: str) -> str:
+    normalized = unescape(value or "").replace('"', " ").strip()
+    return " ".join(normalized.split())
+
+
 def _decrypt_region_secret(account: dict[str, Any], hash_key: str, salt_key: str) -> str:
     encrypted_value = account.get(hash_key)
     salt_value = account.get(salt_key)
@@ -117,9 +124,8 @@ def _resolve_psn_account(user_doc: dict[str, Any], region: str) -> dict[str, Any
     accounts = dict(user_doc.get("psn_accounts") or {})
     region_account = dict(accounts.get(region) or {})
 
-    if region == "UA" and not region_account and (user_doc.get("psn_email") or user_doc.get("platform")):
+    if region == "UA" and not region_account and user_doc.get("psn_email"):
         region_account = {
-            "platform": user_doc.get("platform"),
             "psn_email": user_doc.get("psn_email"),
         }
 
@@ -148,14 +154,13 @@ def build_checkout_profile_context(
 
         return CheckoutProfileContext(
             payment_email=payment_email,
-            platform=(current_overrides.platform or user_doc.get("platform") or "PS5"),
+            platform=None,
             psn_email="",
             psn_password="",
             backup_code="",
         )
 
     region_account = _resolve_psn_account(user_doc, region)
-    platform = current_overrides.platform or region_account.get("platform") or user_doc.get("platform") or "PS5"
     psn_email = current_overrides.psn_email or (region_account.get("psn_email") or user_doc.get("psn_email") or "").strip().lower()
     psn_password = current_overrides.psn_password or _decrypt_region_secret(region_account, "psn_password_hash", "psn_password_salt")
     backup_code = current_overrides.backup_code or ""
@@ -173,7 +178,7 @@ def build_checkout_profile_context(
 
     return CheckoutProfileContext(
         payment_email=payment_email,
-        platform=platform,
+        platform=None,
         psn_email=psn_email,
         psn_password=psn_password,
         backup_code=backup_code,
@@ -270,7 +275,6 @@ class SitePurchaseService:
         region: str,
         use_ps_plus: bool,
         purchase_email: Optional[str] = None,
-        platform: Optional[str] = None,
         psn_email: Optional[str] = None,
         psn_password: Optional[str] = None,
         backup_code: Optional[str] = None,
@@ -286,7 +290,6 @@ class SitePurchaseService:
             normalized_region,
             overrides=CheckoutInputOverrides(
                 purchase_email=purchase_email,
-                platform=platform,
                 psn_email=psn_email,
                 psn_password=psn_password,
                 backup_code=backup_code,
@@ -299,12 +302,17 @@ class SitePurchaseService:
             profile_context=profile_context,
             overrides=CheckoutInputOverrides(
                 purchase_email=purchase_email,
-                platform=platform,
                 psn_email=psn_email,
                 psn_password=psn_password,
                 backup_code=backup_code,
             ),
         )
+        if user_doc.get("telegram_id") is not None:
+            sync_telegram_user_from_site(
+                db=db,
+                users_collection=self.users_collection,
+                site_user_id=site_user_id,
+            )
         current_price = resolve_product_price(product, region=normalized_region, use_ps_plus=use_ps_plus)
         region_info = product.get_region_info()
         rate = CurrencyRate.get_rate_for_price(db, region_info["code"], current_price)
@@ -370,11 +378,6 @@ class SitePurchaseService:
             existing_accounts = dict(user_doc.get("psn_accounts") or {})
             region_account = _resolve_psn_account(user_doc, region)
             account_changed = False
-
-            if profile_context.platform and region_account.get("platform") != profile_context.platform:
-                region_account["platform"] = profile_context.platform
-                update_fields["platform"] = profile_context.platform
-                account_changed = True
 
             if profile_context.psn_email and region_account.get("psn_email") != profile_context.psn_email:
                 region_account["psn_email"] = profile_context.psn_email
@@ -506,7 +509,7 @@ class SitePurchaseService:
         current_price: float,
         price_rub: float,
     ) -> PaymentGenerationResult:
-        game_name = product.name or product.get_display_name()
+        game_name = sanitize_payment_product_name(product.name or product.get_display_name())
         region_info = product.get_region_info()
         region = product.region
 

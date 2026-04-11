@@ -1,4 +1,5 @@
 from collections import defaultdict
+import re
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, case, func, literal, text
 from typing import Optional, List, Dict, Any
@@ -65,6 +66,136 @@ class ProductCRUD:
             return 'price_desc'
 
         return 'popular'
+
+    @staticmethod
+    def _apply_product_kind_filter(query, product_kind: Optional[str]):
+        normalized = (product_kind or '').strip().lower()
+
+        if normalized == 'games':
+            return query.filter(
+                or_(
+                    Product.type.ilike('%Игра%'),
+                    Product.type.ilike('%Game%'),
+                    Product.type.ilike('%Bundle%'),
+                    Product.type.ilike('%Набор%'),
+                    Product.type.ilike('%Предзаказ%'),
+                )
+            )
+
+        if normalized == 'dlc':
+            return query.filter(
+                or_(
+                    Product.type.ilike('%Дополнение%'),
+                    Product.type.ilike('%DLC%'),
+                    Product.category.ilike('%Дополнение%'),
+                )
+            )
+
+        return query
+
+    @staticmethod
+    def _normalize_product_identity_name(value: Optional[str]) -> str:
+        if not value:
+            return ''
+
+        normalized = str(value).lower().replace('ё', 'е')
+        normalized = re.sub(r'[™®©℠]', '', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized)
+        return normalized.strip()
+
+    @staticmethod
+    def _get_product_identity_names(product: Product) -> set[str]:
+        names = {
+            ProductCRUD._normalize_product_identity_name(getattr(product, 'name', None)),
+            ProductCRUD._normalize_product_identity_name(getattr(product, 'name_localized', None)),
+        }
+
+        search_names = getattr(product, 'search_names', None)
+        if search_names:
+            names.update(
+                ProductCRUD._normalize_product_identity_name(part)
+                for part in str(search_names).split(',')
+            )
+
+        main_name = ProductCRUD._normalize_product_identity_name(getattr(product, 'main_name', None))
+        names.discard(main_name)
+        names.discard('')
+        return {name for name in names if len(name) >= 4}
+
+    @staticmethod
+    def _has_region_price(product: Product, region_code: str) -> bool:
+        price_field_by_region = {
+            'UA': 'price_uah',
+            'TR': 'price_try',
+            'IN': 'price_inr',
+        }
+        price_field = price_field_by_region.get(region_code)
+        if price_field is None:
+            return False
+
+        price = getattr(product, price_field, None)
+        return bool(price and price > 0)
+
+    @staticmethod
+    def _augment_regional_products_with_equivalents(
+        db: Session,
+        product: Product,
+        regional_products: List[Product],
+        visible_regions: Optional[List[str]] = None,
+    ) -> List[Product]:
+        regional_by_code: Dict[str, Product] = {}
+        for item in regional_products:
+            region = ProductCRUD.normalize_product_region(getattr(item, 'region', None))
+            if region:
+                regional_by_code[region] = item
+
+        existing_regions = {
+            region
+            for region, item in regional_by_code.items()
+            if ProductCRUD._has_region_price(item, region)
+        }
+        target_regions = visible_regions or ['TR', 'IN', 'UA']
+        missing_regions = [
+            region
+            for region in target_regions
+            if region not in existing_regions
+        ]
+
+        if not missing_regions:
+            return regional_products
+
+        identity_names = ProductCRUD._get_product_identity_names(product)
+        if not identity_names:
+            return regional_products
+
+        candidates_query = db.query(Product).filter(
+            Product.region.in_(missing_regions),
+            Product.type == product.type,
+        )
+
+        if product.main_name:
+            candidates_query = candidates_query.filter(Product.main_name == product.main_name)
+
+        candidates = candidates_query.all()
+        for candidate in candidates:
+            candidate_region = ProductCRUD.normalize_product_region(getattr(candidate, 'region', None))
+            if not candidate_region:
+                continue
+
+            if not ProductCRUD._has_region_price(candidate, candidate_region):
+                continue
+
+            current = regional_by_code.get(candidate_region)
+            if current is not None and ProductCRUD._has_region_price(current, candidate_region):
+                continue
+
+            candidate_names = ProductCRUD._get_product_identity_names(candidate)
+            if identity_names.isdisjoint(candidate_names):
+                continue
+
+            regional_by_code[candidate_region] = candidate
+
+        return [item for item in regional_by_code.values() if item is not None]
 
     @staticmethod
     def normalize_product_region(region: Optional[str]) -> Optional[str]:
@@ -483,6 +614,8 @@ class ProductCRUD:
         if filters.category:
             query = query.filter(Product.category.ilike(f"%{filters.category}%"))
 
+        query = ProductCRUD._apply_product_kind_filter(query, getattr(filters, 'product_kind', None))
+
         if filters.region:
             query = query.filter(Product.region == filters.region)
 
@@ -686,6 +819,12 @@ class ProductCRUD:
         # Находим ВСЕ варианты ЭТОГО КОНКРЕТНОГО товара (с тем же ID) из разных регионов
         # ID у товаров одинаковый для всех регионов, отличается только поле region
         regional_products = regional_products or db.query(Product).filter(Product.id == product.id).all()
+        regional_products = ProductCRUD._augment_regional_products_with_equivalents(
+            db,
+            product,
+            regional_products,
+            visible_regions=['TR', 'IN', 'UA'],
+        )
         regional_price_data = ProductCRUD._collect_regional_price_data(
             regional_products,
             db,
@@ -923,6 +1062,12 @@ class ProductCRUD:
         """
         # Все варианты товара по id; цены по регионам — единая логика с каталогом
         regional_products = db.query(Product).filter(Product.id == product.id).all()
+        regional_products = ProductCRUD._augment_regional_products_with_equivalents(
+            db,
+            product,
+            regional_products,
+            visible_regions=['TR', 'IN', 'UA'],
+        )
         regional_price_data = ProductCRUD._collect_regional_price_data(regional_products, db)
         regional_prices = regional_price_data['regional_prices']
         min_price = regional_price_data['min_price_rub']
@@ -996,6 +1141,8 @@ class ProductCRUD:
         # Применяем остальные фильтры
         if filters.category:
             query = query.filter(Product.category.ilike(f"%{filters.category}%"))
+
+        query = ProductCRUD._apply_product_kind_filter(query, getattr(filters, 'product_kind', None))
 
         if filters.search:
             search_term = f"%{filters.search}%"
@@ -1094,6 +1241,8 @@ class ProductCRUD:
         if filters.category:
             query = query.filter(Product.category.ilike(f"%{filters.category}%"))
 
+        query = ProductCRUD._apply_product_kind_filter(query, getattr(filters, 'product_kind', None))
+
         if filters.platform:
             # Фильтр по платформе: PS4, PS5 или обе
             platform_filter = filters.platform.upper()
@@ -1123,6 +1272,20 @@ class ProductCRUD:
                     and_(
                         Product.platforms.ilike('%PS4%'),
                         Product.platforms.ilike('%PS5%')
+                    )
+                )
+            elif platform_filter in ('PSVR2', 'PLAYSTATION_VR2'):
+                query = query.filter(Product.info.ilike('%VR2%'))
+            elif platform_filter in ('PSVR1', 'PSVR', 'PLAYSTATION_VR1'):
+                query = query.filter(
+                    and_(
+                        or_(
+                            Product.info.ilike('%PS VR%'),
+                            Product.info.ilike('%PSVR%'),
+                            Product.info.ilike('%PlayStation%VR%'),
+                            Product.info.ilike('%PS Camera%')
+                        ),
+                        ~Product.info.ilike('%VR2%')
                     )
                 )
 

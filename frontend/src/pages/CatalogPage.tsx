@@ -63,7 +63,7 @@ function parseFilters(searchParams: URLSearchParams, storedProductKind = DEFAULT
   })
 }
 
-function buildSearchParams(filters: CatalogFilterState) {
+function buildSearchParams(filters: CatalogFilterState, options: { filtersOpen?: boolean } = {}) {
   const next = new URLSearchParams()
 
   if (filters.sort && filters.sort !== 'popular') next.set('sort', filters.sort)
@@ -78,6 +78,7 @@ function buildSearchParams(filters: CatalogFilterState) {
   if (filters.hasDiscount) next.set('hasDiscount', 'true')
   if (filters.hasPsPlus) next.set('hasPsPlus', 'true')
   if (filters.hasEaAccess) next.set('hasEaAccess', 'true')
+  if (options.filtersOpen) next.set('filters', 'open')
 
   return next
 }
@@ -164,7 +165,7 @@ export function CatalogPage() {
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [isFiltersOpen, setIsFiltersOpen] = useState(false)
+  const [isFiltersOpen, setIsFiltersOpen] = useState(searchParams.get('filters') === 'open')
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [total, setTotal] = useState(0)
@@ -178,6 +179,10 @@ export function CatalogPage() {
     setDraftSearch(filters.search)
     setDraftFilters(filters)
   }, [filters])
+
+  useEffect(() => {
+    setIsFiltersOpen(searchParams.get('filters') === 'open')
+  }, [searchParams])
 
   useEffect(() => {
     let ignore = false
@@ -204,9 +209,9 @@ export function CatalogPage() {
     const normalizedFilters = sanitizeCatalogFilters(filters, categories)
 
     if (!areFiltersEqual(filters, normalizedFilters)) {
-      setSearchParams(buildSearchParams(normalizedFilters), { replace: true })
+      setSearchParams(buildSearchParams(normalizedFilters, { filtersOpen: searchParams.get('filters') === 'open' }), { replace: true })
     }
-  }, [categories, filters, setSearchParams])
+  }, [categories, filters, searchParams, setSearchParams])
 
   useEffect(() => {
     const nextFilters = {
@@ -221,20 +226,20 @@ export function CatalogPage() {
       limit: DEFAULT_FILTERS.limit,
     }
 
-    const nextParams = buildSearchParams(nextFilters).toString()
-    const currentParams = buildSearchParams(currentFilters).toString()
+    const nextParams = buildSearchParams(nextFilters, { filtersOpen: isFiltersOpen }).toString()
+    const currentParams = buildSearchParams(currentFilters, { filtersOpen: isFiltersOpen }).toString()
 
     if (nextParams === currentParams) {
       return undefined
     }
 
     const timeoutId = window.setTimeout(() => {
-      setSearchParams(buildSearchParams(nextFilters), { replace: true })
+      setSearchParams(buildSearchParams(nextFilters, { filtersOpen: isFiltersOpen }), { replace: true })
       persistProductKind(nextFilters.productKind)
     }, 1000)
 
     return () => window.clearTimeout(timeoutId)
-  }, [draftFilters, draftSearch, filters, productKindStorageKey, setSearchParams])
+  }, [draftFilters, draftSearch, filters, isFiltersOpen, productKindStorageKey, setSearchParams])
 
   useEffect(() => {
     const node = loadMoreRef.current
@@ -366,7 +371,7 @@ export function CatalogPage() {
     }
 
     persistProductKind(nextFilters.productKind)
-    setSearchParams(buildSearchParams(nextFilters), { replace: true })
+    setSearchParams(buildSearchParams(nextFilters, { filtersOpen: !close && isFiltersOpen }), { replace: true })
 
     if (close) {
       setIsFiltersOpen(false)

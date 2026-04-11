@@ -23,6 +23,7 @@ function buildFallbackHelpContent(): HelpContent {
       'История заказов и переписка по ним доступны на oplata.info. Используйте тот же email, который указан как email для покупок.',
     purchases_button_label: 'Открыть oplata.info',
     purchases_button_url: 'https://oplata.info',
+    social_links: supportUrl ? [{ label: 'Telegram', url: supportUrl }] : [],
     sections: [
       {
         title: 'Как оформить заказ',
@@ -61,24 +62,35 @@ function HelpActionCard({
   description,
   buttonLabel,
   buttonUrl,
+  socialLinks = [],
   icon,
 }: {
   title: string
   description: string
   buttonLabel: string
   buttonUrl?: string | null
+  socialLinks?: HelpContent['social_links']
   icon: ReactNode
 }) {
+  const actionLinks = [
+    buttonUrl ? { label: buttonLabel, url: buttonUrl } : null,
+    ...socialLinks.map((link) => ({ label: link.label, url: link.url })),
+  ].filter((item): item is { label: string; url: string } => Boolean(item?.url))
+
   return (
     <article className="panel-soft rounded-[30px] p-6">
       <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-500/12 text-brand-100">{icon}</div>
       <h3 className="mt-5 text-2xl text-white">{title}</h3>
       <p className="mt-3 whitespace-pre-line text-sm leading-7 text-slate-300">{description}</p>
-      {buttonUrl ? (
-        <a href={buttonUrl} target="_blank" rel="noreferrer" className="btn-primary mt-6">
-          {buttonLabel}
-          <ExternalLink size={16} />
-        </a>
+      {actionLinks.length ? (
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+          {actionLinks.map((link, index) => (
+            <a key={`${link.label}-${link.url}`} href={link.url} target="_blank" rel="noreferrer" className={index === 0 ? 'btn-primary' : 'btn-secondary'}>
+              {link.label}
+              <ExternalLink size={16} />
+            </a>
+          ))}
+        </div>
       ) : null}
     </article>
   )
@@ -129,6 +141,7 @@ export function HelpPage() {
             description={content.support_description}
             buttonLabel={content.support_button_label}
             buttonUrl={content.support_button_url}
+            socialLinks={content.social_links || []}
             icon={<ShieldCheck size={20} />}
           />
           <HelpActionCard

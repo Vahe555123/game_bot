@@ -226,6 +226,7 @@ class UserWithFavorites(User):
 # Схемы для фильтрации
 class ProductFilter(BaseModel):
     category: Optional[str] = None
+    product_kind: Optional[str] = Field(None, description="Тип товаров: all, games, dlc")
     region: Optional[str] = None
     min_price: Optional[float] = None
     max_price: Optional[float] = None

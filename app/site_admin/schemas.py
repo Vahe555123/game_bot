@@ -91,6 +91,21 @@ class HelpContentFaqItem(BaseModel):
         return normalize_required_text(value, field_name="ответ")
 
 
+class HelpSocialLink(BaseModel):
+    label: str = Field(..., max_length=80)
+    url: str = Field(..., max_length=500)
+
+    @field_validator("label")
+    @classmethod
+    def validate_label(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="название ссылки")
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        return normalize_required_text(value, field_name="ссылку")
+
+
 class HelpContentBase(BaseModel):
     eyebrow: str = Field("Помощь", max_length=40)
     title: str = Field(..., max_length=160)
@@ -103,6 +118,7 @@ class HelpContentBase(BaseModel):
     purchases_description: str = Field(..., max_length=1000)
     purchases_button_label: str = Field(..., max_length=80)
     purchases_button_url: Optional[str] = Field(None, max_length=500)
+    social_links: list[HelpSocialLink] = Field(default_factory=list, max_length=8)
     sections: list[HelpContentSection] = Field(default_factory=list, max_length=12)
     faq_items: list[HelpContentFaqItem] = Field(default_factory=list, max_length=24)
 

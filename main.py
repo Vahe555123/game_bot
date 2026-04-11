@@ -11,7 +11,9 @@ from app.api.routes import router as api_router
 from app.api.site_admin_routes import router as site_admin_router
 from app.api.site_auth_routes import router as site_auth_router
 from app.api.site_content_routes import router as site_content_router
+from app.api.site_favorite_routes import router as site_favorite_router
 from app.api.site_purchase_routes import router as site_purchase_router
+from app.api.payment_return_routes import router as payment_return_router
 from app.auth.mongo import init_mongo_indexes
 from app.bot.main import setup_bot, shutdown_bot
 from app.webapp.routes import router as webapp_router
@@ -63,7 +65,9 @@ app = FastAPI(
         {"name": "Admin", "description": "Administration endpoints"},
         {"name": "Site Auth", "description": "Website authentication endpoints"},
         {"name": "Site Admin", "description": "Website administration endpoints"},
+        {"name": "Site Favorites", "description": "Website favorites endpoints for Telegram-linked users"},
         {"name": "Site Orders", "description": "Website purchase and delivery endpoints"},
+        {"name": "Payment Return", "description": "External payment return endpoints"},
         {"name": "System", "description": "System endpoints"},
     ],
 )
@@ -88,7 +92,9 @@ app.include_router(admin_router, prefix="/api")
 app.include_router(site_auth_router, prefix="/api")
 app.include_router(site_admin_router, prefix="/api")
 app.include_router(site_content_router, prefix="/api")
+app.include_router(site_favorite_router, prefix="/api")
 app.include_router(site_purchase_router, prefix="/api")
+app.include_router(payment_return_router, prefix="/api")
 app.include_router(webapp_router, prefix="", tags=["WebApp"])
 
 

@@ -2,7 +2,7 @@ import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
 import { fetchAdminHelpContent, updateAdminHelpContent } from '../../services/admin'
 import type { AdminHelpContent, AdminHelpContentPayload } from '../../types/admin'
-import type { HelpContentFaqItem, HelpContentSection } from '../../types/help'
+import type { HelpContentFaqItem, HelpContentSection, HelpSocialLink } from '../../types/help'
 import { getApiErrorMessage } from '../../utils/apiErrors'
 import {
   AdminNotice,
@@ -22,6 +22,11 @@ const EMPTY_FAQ: HelpContentFaqItem = {
   answer: '',
 }
 
+const EMPTY_SOCIAL_LINK: HelpSocialLink = {
+  label: '',
+  url: '',
+}
+
 const EMPTY_FORM: AdminHelpContentPayload = {
   eyebrow: 'Помощь',
   title: '',
@@ -34,6 +39,7 @@ const EMPTY_FORM: AdminHelpContentPayload = {
   purchases_description: '',
   purchases_button_label: '',
   purchases_button_url: '',
+  social_links: [EMPTY_SOCIAL_LINK],
   sections: [EMPTY_SECTION],
   faq_items: [EMPTY_FAQ],
 }
@@ -55,6 +61,7 @@ function buildFormState(content?: AdminHelpContent | null): AdminHelpContentPayl
     purchases_description: content.purchases_description,
     purchases_button_label: content.purchases_button_label,
     purchases_button_url: content.purchases_button_url ?? '',
+    social_links: content.social_links?.length ? content.social_links : [EMPTY_SOCIAL_LINK],
     sections: content.sections.length ? content.sections : [EMPTY_SECTION],
     faq_items: content.faq_items.length ? content.faq_items : [EMPTY_FAQ],
   }
@@ -66,6 +73,10 @@ function buildEmptySection(): HelpContentSection {
 
 function buildEmptyFaq(): HelpContentFaqItem {
   return { ...EMPTY_FAQ }
+}
+
+function buildEmptySocialLink(): HelpSocialLink {
+  return { ...EMPTY_SOCIAL_LINK }
 }
 
 export function AdminContentSection() {
@@ -132,13 +143,31 @@ export function AdminContentSection() {
     }))
   }
 
+  function updateSocialLink(index: number, field: keyof HelpSocialLink, value: string) {
+    setForm((current) => ({
+      ...current,
+      social_links: current.social_links.map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              [field]: value,
+            }
+          : item,
+      ),
+    }))
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setIsSaving(true)
     setNotice(EMPTY_ADMIN_NOTICE)
 
     try {
-      const response = await updateAdminHelpContent(form)
+      const payload = {
+        ...form,
+        social_links: form.social_links.filter((link) => link.label.trim() && link.url.trim()),
+      }
+      const response = await updateAdminHelpContent(payload)
       setContent(response)
       setForm(buildFormState(response))
       setNotice({ type: 'success', message: 'Страница помощи обновлена.' })
@@ -289,6 +318,70 @@ export function AdminContentSection() {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-[28px] border border-white/10 bg-white/[0.03] p-5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-xl text-white">Социальные ссылки</h3>
+                <p className="mt-2 text-sm text-slate-400">Кнопки для связи: VK, Max, Telegram и любые другие каналы.</p>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setForm((current) => ({ ...current, social_links: [...current.social_links, buildEmptySocialLink()] }))}
+              >
+                <Plus size={16} />
+                Добавить ссылку
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              {form.social_links.map((link, index) => (
+                <div key={`social-${index}`} className="rounded-[24px] border border-white/10 bg-slate-950/35 p-4">
+                  <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)_auto]">
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-200">Название</label>
+                      <input
+                        value={link.label}
+                        onChange={(event) => updateSocialLink(index, 'label', event.target.value)}
+                        className="auth-input"
+                        placeholder="VK"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-2 block text-sm font-medium text-slate-200">Ссылка</label>
+                      <input
+                        value={link.url}
+                        onChange={(event) => updateSocialLink(index, 'url', event.target.value)}
+                        className="auth-input"
+                        placeholder="https://vk.com/..."
+                      />
+                    </div>
+
+                    <div className="md:self-end">
+                      <button
+                        type="button"
+                        className="btn-secondary border-rose-400/20 text-rose-100 hover:bg-rose-500/10"
+                        onClick={() =>
+                          setForm((current) => ({
+                            ...current,
+                            social_links:
+                              current.social_links.length > 1
+                                ? current.social_links.filter((_, itemIndex) => itemIndex !== index)
+                                : [buildEmptySocialLink()],
+                          }))
+                        }
+                      >
+                        <Trash2 size={16} />
+                        Удалить
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 

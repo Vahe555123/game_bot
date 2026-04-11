@@ -75,6 +75,9 @@ def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
         ),
         "support_button_label": "Написать менеджеру",
         "support_button_url": settings.MANAGER_TELEGRAM_URL or None,
+        "social_links": [
+            {"label": "Telegram", "url": settings.MANAGER_TELEGRAM_URL}
+        ] if settings.MANAGER_TELEGRAM_URL else [],
         "purchases_title": "Где посмотреть покупки",
         "purchases_description": (
             "История заказов и переписка по ним доступны на oplata.info. "
@@ -594,10 +597,14 @@ class SiteAdminService:
             .limit(limit)
             .all()
         )
+        site_favorite_counts = self._get_site_favorite_counts()
 
         return AdminProductListResponse(
             products=[
-                build_admin_product_record(product, favorites_count=favorites_count)
+                build_admin_product_record(
+                    product,
+                    favorites_count=int(favorites_count or 0) + site_favorite_counts.get(product.id, 0),
+                )
                 for product, favorites_count in product_rows
             ],
             total=total,
@@ -796,6 +803,7 @@ class SiteAdminService:
             "purchases_description",
             "purchases_button_label",
             "purchases_button_url",
+            "social_links",
             "sections",
             "faq_items",
             "updated_at",
@@ -956,7 +964,41 @@ class SiteAdminService:
             .filter(UserFavoriteProduct.product_id == product_id)
             .scalar()
             or 0
-        )
+        ) + self._get_site_favorite_counts(product_id=product_id).get(product_id, 0)
+
+    def _get_site_favorite_counts(self, *, product_id: Optional[str] = None) -> dict[str, int]:
+        query: dict[str, Any] = {
+            "$or": [
+                {"telegram_id": None},
+                {"telegram_id": {"$exists": False}},
+            ],
+            "favorite_products": {"$elemMatch": {"product_id": product_id}} if product_id else {"$exists": True},
+        }
+        counts: dict[str, int] = {}
+        try:
+            user_docs = self.users.find(query, {"favorite_products": 1})
+        except PyMongoError:
+            return counts
+
+        for user_doc in user_docs:
+            seen_product_ids: set[str] = set()
+            raw_favorites = user_doc.get("favorite_products", [])
+            if not isinstance(raw_favorites, list):
+                continue
+
+            for entry in raw_favorites:
+                if not isinstance(entry, dict):
+                    continue
+                favorite_product_id = str(entry.get("product_id") or "").strip()
+                if not favorite_product_id or favorite_product_id in seen_product_ids:
+                    continue
+                if product_id and favorite_product_id != product_id:
+                    continue
+
+                seen_product_ids.add(favorite_product_id)
+                counts[favorite_product_id] = counts.get(favorite_product_id, 0) + 1
+
+        return counts
 
     def _get_product_favorites(self, db: Session, *, product_id: str) -> list[AdminProductFavoriteRecord]:
         favorite_rows = (

@@ -39,7 +39,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
 
       let nextFavorites = localFavorites
 
-      if (user?.telegram_id != null) {
+      if (user) {
         try {
           let remoteFavorites = await listSiteFavorites()
           const remoteIds = new Set(remoteFavorites.map((entry) => entry.productId))
@@ -79,7 +79,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     return () => {
       ignore = true
     }
-  }, [isAuthLoading, storageKey, user?.id, user?.telegram_id])
+  }, [isAuthLoading, storageKey, user])
 
   useEffect(() => {
     if (!loadedKey || loadedKey !== storageKey || typeof window === 'undefined') {
@@ -97,7 +97,7 @@ export function FavoritesProvider({ children }: { children: ReactNode }) {
     const favoriteAlreadyExists = isFavorite(payload.productId)
     setFavorites((current) => toggleFavoriteEntry(current, payload))
 
-    if (user?.telegram_id == null) {
+    if (!user) {
       return
     }
 

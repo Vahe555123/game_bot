@@ -5,7 +5,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.auth.schemas import normalize_email, normalize_optional_text, normalize_platform
+from app.auth.schemas import normalize_email, normalize_optional_text
 
 
 ALLOWED_PURCHASE_REGIONS = {"UA", "TR", "IN"}
@@ -45,7 +45,6 @@ class PurchaseCheckoutRequest(BaseModel):
     region: str = Field(..., description="UA, TR или IN")
     use_ps_plus: bool = Field(False, description="Использовать цену PS Plus")
     purchase_email: Optional[str] = Field(None, description="Email для покупки, если он не заполнен в профиле")
-    platform: Optional[str] = Field(None, description="Платформа PlayStation для UA-региона")
     psn_email: Optional[str] = Field(None, description="PSN Email для UA-региона")
     psn_password: Optional[str] = Field(None, description="PSN пароль для UA-региона")
     backup_code: Optional[str] = Field(None, description="Резервный код 2FA для UA-региона")
@@ -72,11 +71,6 @@ class PurchaseCheckoutRequest(BaseModel):
         if not cleaned:
             return None
         return normalize_email(cleaned)
-
-    @field_validator("platform")
-    @classmethod
-    def validate_platform(cls, value: Optional[str]) -> Optional[str]:
-        return normalize_platform(value)
 
     @field_validator("psn_password", "backup_code")
     @classmethod

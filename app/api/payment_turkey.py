@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import logging
 from dataclasses import dataclass
 from config.settings import settings
+from app.api.payment_utils import resolve_payment_return_url
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +59,7 @@ LOW_AMOUNT_TURKEY_TYPECURR = "API_17432_RUB"
 
 
 def get_fail_page_url() -> str:
-    configured_url = (settings.DIGISELLER_FAILPAGE_URL or settings.PUBLIC_APP_URL or "").strip()
-    if configured_url:
-        return configured_url
-
-    return "https://romanomak.ru"
+    return resolve_payment_return_url(settings.PUBLIC_APP_URL, settings.DIGISELLER_FAILPAGE_URL)
 
 
 class TurkeyPaymentAPIError(Exception):

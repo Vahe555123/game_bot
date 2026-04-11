@@ -11,7 +11,7 @@ from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from config.settings import settings
-from app.utils.encryption import encrypt_password
+from app.utils.encryption import decrypt_password, encrypt_password
 
 from .email_service import EmailDeliveryError, send_verification_email
 from .exceptions import AuthServiceError
@@ -166,11 +166,15 @@ def build_public_user(user_doc: dict[str, Any]) -> SiteUserPublic:
 def build_public_psn_account(region: str, account_doc: Optional[dict[str, Any]] = None) -> SitePSNAccountPublic:
     region_code = (region or "").upper()
     current_account = account_doc or {}
+    psn_password = ""
+    if current_account.get("psn_password_hash") and current_account.get("psn_password_salt"):
+        psn_password = decrypt_password(current_account["psn_password_hash"], current_account["psn_password_salt"])
 
     return SitePSNAccountPublic(
         region=region_code,
         platform=current_account.get("platform"),
         psn_email=current_account.get("psn_email"),
+        psn_password=psn_password or None,
         has_password=bool(current_account.get("psn_password_hash")),
         has_backup_code=False,
         updated_at=current_account.get("updated_at"),

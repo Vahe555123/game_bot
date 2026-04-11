@@ -314,6 +314,7 @@ def get_products(
     page: int = Query(1, ge=1, description="Номер страницы"),
     limit: int = Query(20, ge=1, le=100, description="Количество элементов на странице"),
     category: Optional[str] = Query(None, description="Фильтр по категории"),
+    product_kind: Optional[str] = Query(None, description="Тип товаров (all, games, dlc)"),
     region: Optional[str] = Query(None, description="Фильтр по региону (UA, TR, IN)"),
     search: Optional[str] = Query(None, description="Поиск по названию, описанию, издателю"),
     min_price: Optional[float] = Query(None, ge=0, description="Минимальная цена в рублях"),
@@ -346,6 +347,7 @@ def get_products(
 
     filters = ProductFilter(
         category=category,
+        product_kind=product_kind,
         region=normalized_region,
         search=search,
         min_price=min_price,

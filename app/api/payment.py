@@ -2,6 +2,7 @@ import aiohttp
 from typing import Dict, Optional
 import logging
 from config.settings import settings
+from app.api.payment_utils import resolve_payment_return_url
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,7 @@ class PlatiMarketAPI:
         pass
 
     def _get_fail_page_url(self) -> str:
-        configured_url = (settings.DIGISELLER_FAILPAGE_URL or settings.PUBLIC_APP_URL or "").strip()
-        if configured_url:
-            return configured_url
-
-        return "https://romanomak.ru"
+        return resolve_payment_return_url(settings.PUBLIC_APP_URL, settings.DIGISELLER_FAILPAGE_URL)
 
     def _get_unit_cnt_for_trl_price(self, trl_price: float) -> str:
         """

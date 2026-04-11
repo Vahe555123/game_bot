@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Check, RotateCcw, Sparkles } from 'lucide-react'
+import { Check, RotateCcw } from 'lucide-react'
 import type { CatalogFilterState } from '../../types/catalog'
 import {
   PLAYER_OPTIONS,
@@ -23,15 +23,16 @@ type SelectFieldProps = {
   value: string
   options: ReadonlyArray<{ value: string; label: string }>
   onChange: (value: string) => void
+  className?: string
 }
 
-function SelectField({ value, options, onChange }: SelectFieldProps) {
+function SelectField({ value, options, onChange, className }: SelectFieldProps) {
   return (
-    <label className="block">
+    <label className={clsx('block', className)}>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-brand-300/60 md:rounded-2xl"
+        className="min-h-[46px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-white outline-none transition focus:border-brand-300/60 md:rounded-2xl md:text-sm"
       >
         {options.map((option) => (
           <option key={option.value || 'empty'} value={option.value} className="bg-slate-900 text-white">
@@ -52,11 +53,14 @@ export function CatalogFilters({
   className,
 }: CatalogFiltersProps) {
   const hasActiveFilters = hasActiveCatalogFilters(draftFilters)
-  const categoryOptions = [{ value: '', label: 'Все жанры игр' }, ...categories.map((category) => ({ value: category, label: category }))]
+  const categoryOptions = [
+    { value: '', label: 'Все жанры игр' },
+    ...categories.map((category) => ({ value: category, label: category })),
+  ]
 
   return (
-    <div className={clsx('space-y-4', className)}>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+    <div className={clsx('space-y-3', className)}>
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
         <SelectField value={draftFilters.sort} options={SORT_OPTIONS} onChange={(sort) => onDraftChange({ sort })} />
 
         <SelectField
@@ -80,8 +84,8 @@ export function CatalogFilters({
         <SelectField value={draftFilters.players} options={PLAYER_OPTIONS} onChange={(players) => onDraftChange({ players })} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <label className="block">
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12">
+        <label className="block lg:col-span-2 xl:col-span-2">
           <input
             type="number"
             min="0"
@@ -89,11 +93,11 @@ export function CatalogFilters({
             value={draftFilters.minPrice}
             onChange={(event) => onDraftChange({ minPrice: event.target.value })}
             placeholder="Мин. цена"
-            className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl"
+            className="min-h-[46px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl md:text-sm"
           />
         </label>
 
-        <label className="block">
+        <label className="block lg:col-span-2 xl:col-span-2">
           <input
             type="number"
             min="0"
@@ -101,7 +105,7 @@ export function CatalogFilters({
             value={draftFilters.maxPrice}
             onChange={(event) => onDraftChange({ maxPrice: event.target.value })}
             placeholder="Макс. цена"
-            className="min-h-[52px] w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl"
+            className="min-h-[46px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl md:text-sm"
           />
         </label>
 
@@ -109,10 +113,11 @@ export function CatalogFilters({
           value={draftFilters.priceCurrency}
           options={PRICE_CURRENCY_OPTIONS}
           onChange={(priceCurrency) => onDraftChange({ priceCurrency })}
+          className="lg:col-span-2 xl:col-span-2"
         />
 
-        <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
-          <span>Только со скидкой</span>
+        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-2">
+          <span className="whitespace-nowrap">Только со скидкой</span>
           <input
             type="checkbox"
             checked={draftFilters.hasDiscount}
@@ -121,8 +126,8 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
-          <span>Доступно в PS Plus</span>
+        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-2">
+          <span className="whitespace-nowrap">Доступно в PS Plus</span>
           <input
             type="checkbox"
             checked={draftFilters.hasPsPlus}
@@ -131,11 +136,8 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="flex min-h-[56px] cursor-pointer items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
-          <span className="flex items-center gap-2">
-            <Sparkles size={16} className="text-sky-300" />
-            Доступно в EA PLAY
-          </span>
+        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-2">
+          <span className="whitespace-nowrap">Доступно в EA PLAY</span>
           <input
             type="checkbox"
             checked={draftFilters.hasEaAccess}
@@ -144,12 +146,12 @@ export function CatalogFilters({
           />
         </label>
 
-        <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2 lg:col-span-3 xl:col-span-6">
+        <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:justify-end lg:col-span-6 xl:col-span-12">
           <button
             type="button"
             onClick={onReset}
             className={clsx(
-              'btn-secondary min-h-[56px] w-full justify-center',
+              'btn-secondary min-h-[46px] w-full justify-center px-4 text-sm sm:w-auto sm:min-w-[132px]',
               !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
             )}
           >
@@ -157,7 +159,11 @@ export function CatalogFilters({
             Сбросить
           </button>
 
-          <button type="button" onClick={onApply} className="btn-primary min-h-[56px] w-full justify-center">
+          <button
+            type="button"
+            onClick={onApply}
+            className="btn-primary min-h-[46px] w-full justify-center px-5 text-sm sm:w-auto sm:min-w-[150px]"
+          >
             <Check size={16} />
             Применить
           </button>

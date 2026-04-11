@@ -8,6 +8,11 @@ export type HelpContentFaqItem = {
   answer: string
 }
 
+export type HelpSocialLink = {
+  label: string
+  url: string
+}
+
 export type HelpContent = {
   eyebrow: string
   title: string
@@ -20,6 +25,7 @@ export type HelpContent = {
   purchases_description: string
   purchases_button_label: string
   purchases_button_url?: string | null
+  social_links: HelpSocialLink[]
   sections: HelpContentSection[]
   faq_items: HelpContentFaqItem[]
   updated_at?: string | null

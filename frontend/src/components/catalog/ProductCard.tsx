@@ -101,7 +101,7 @@ export function ProductCard({ product }: ProductCardProps) {
 
       <div className="relative z-0 space-y-3 p-3 md:space-y-4 md:p-4">
         <div className="space-y-1.5 md:space-y-2">
-          <h3 className="line-clamp-2 min-h-[2.75rem] text-base leading-5 text-white md:min-h-[3.5rem] md:text-xl md:leading-6">
+          <h3 className="line-clamp-3 min-h-[3.65rem] text-[15px] leading-[1.22] text-white md:min-h-[4.35rem] md:text-lg md:leading-[1.2]">
             {productTitle}
           </h3>
         </div>

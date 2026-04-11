@@ -45,7 +45,6 @@ async def create_site_checkout(
             region=payload.region,
             use_ps_plus=payload.use_ps_plus,
             purchase_email=payload.purchase_email,
-            platform=payload.platform,
             psn_email=payload.psn_email,
             psn_password=payload.psn_password,
             backup_code=payload.backup_code,

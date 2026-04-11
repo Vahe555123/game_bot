@@ -7,6 +7,8 @@ export const PLATFORM_OPTIONS = [
   { value: 'PS4_ONLY', label: 'Только PS4' },
   { value: 'PS5_ONLY', label: 'Только PS5' },
   { value: 'BOTH', label: 'PS4 + PS5' },
+  { value: 'PSVR2', label: 'PlayStation VR2' },
+  { value: 'PSVR1', label: 'PlayStation VR1' },
 ] as const
 
 const PLATFORM_OPTION_VALUES = new Set(PLATFORM_OPTIONS.map((option) => option.value))
@@ -124,8 +126,16 @@ export function matchesPlatformFilter(product: CatalogProduct, platformFilter: s
   }
 
   const platforms = (product.platforms || '').toUpperCase()
+  const info = (product.info || []).join(' ').toUpperCase()
   const hasPS4 = platforms.includes('PS4')
   const hasPS5 = platforms.includes('PS5')
+  const hasPSVR2 = info.includes('VR2')
+  const hasPSVR1 =
+    !hasPSVR2 &&
+    (info.includes('PS VR') ||
+      info.includes('PSVR') ||
+      info.includes('PLAYSTATION VR') ||
+      info.includes('PS CAMERA'))
 
   switch (platformFilter) {
     case 'PS4_ALL':
@@ -140,6 +150,10 @@ export function matchesPlatformFilter(product: CatalogProduct, platformFilter: s
       return hasPS5 && !hasPS4
     case 'BOTH':
       return hasPS4 && hasPS5
+    case 'PSVR2':
+      return hasPSVR2
+    case 'PSVR1':
+      return hasPSVR1
     default:
       return true
   }

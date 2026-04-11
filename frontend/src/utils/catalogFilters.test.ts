@@ -61,6 +61,22 @@ describe('catalog filter helpers', () => {
     expect(matchesPlatformFilter(baseProduct, 'PS5_ONLY')).toBe(false)
   })
 
+  it('separates PlayStation VR generations by product info', () => {
+    const vr2Product = {
+      ...baseProduct,
+      info: ['Версия PS5', 'PlayStation VR2 (обязательна)'],
+    }
+    const vr1Product = {
+      ...baseProduct,
+      info: ['Версия PS4', 'Гарнитура PS VR (обязательна)', 'Требуется PS Camera'],
+    }
+
+    expect(matchesPlatformFilter(vr2Product, 'PSVR2')).toBe(true)
+    expect(matchesPlatformFilter(vr2Product, 'PSVR1')).toBe(false)
+    expect(matchesPlatformFilter(vr1Product, 'PSVR1')).toBe(true)
+    expect(matchesPlatformFilter(vr1Product, 'PSVR2')).toBe(false)
+  })
+
   it('detects coop and singleplayer from normalized player fields', () => {
     const coopProduct = {
       ...baseProduct,

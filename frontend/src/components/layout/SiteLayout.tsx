@@ -1,9 +1,23 @@
 import clsx from 'clsx'
-import { ChevronDown, Globe2, Heart, Menu, MessageCircle, Shield, Sparkles, UserRound, type LucideIcon } from 'lucide-react'
+import {
+  ChevronDown,
+  Globe2,
+  Heart,
+  Home,
+  Menu,
+  MessageCircle,
+  Search,
+  Shield,
+  SlidersHorizontal,
+  Sparkles,
+  UserRound,
+  type LucideIcon,
+} from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useFavorites } from '../../context/FavoritesContext'
+import { SORT_OPTIONS } from '../../utils/catalogFilters'
 import { AuthModal } from '../auth/AuthModal'
 import { buildAuthModalPath, buildBaseAuthPath, normalizeAuthModalView } from '../auth/authModalState'
 
@@ -199,6 +213,30 @@ function DesktopCountriesDropdown() {
   )
 }
 
+function buildCatalogSearch(search: string, locationSearch: string, extraParams: Record<string, string | null> = {}) {
+  const params = new URLSearchParams(locationSearch)
+  params.delete('page')
+  params.delete('auth')
+
+  if (search.trim()) {
+    params.set('search', search.trim())
+  } else {
+    params.delete('search')
+  }
+
+  Object.entries(extraParams).forEach(([key, value]) => {
+    if (value === null || value === '') {
+      params.delete(key)
+      return
+    }
+
+    params.set(key, value)
+  })
+
+  const query = params.toString()
+  return query ? `/catalog?${query}` : '/catalog'
+}
+
 export function SiteLayout() {
   const [isOpen, setIsOpen] = useState(false)
   const [mobileCountriesOpen, setMobileCountriesOpen] = useState(false)
@@ -207,6 +245,8 @@ export function SiteLayout() {
   const { favorites } = useFavorites()
   const location = useLocation()
   const navigate = useNavigate()
+  const currentCatalogParams = new URLSearchParams(location.search)
+  const [globalSearch, setGlobalSearch] = useState(currentCatalogParams.get('search') || '')
   const telegramUrl = import.meta.env.VITE_TELEGRAM_BOT_URL
   const managerTelegramUrl = import.meta.env.VITE_MANAGER_TELEGRAM_URL || telegramUrl
   const supportVkUrl = import.meta.env.VITE_SUPPORT_VK_URL
@@ -217,6 +257,14 @@ export function SiteLayout() {
     supportVkUrl ? { label: 'ВКонтакте', href: supportVkUrl } : null,
     supportMaxUrl ? { label: 'Max', href: supportMaxUrl } : null,
   ].filter((item): item is { label: string; href: string } => Boolean(item))
+  const currentSort = currentCatalogParams.get('sort') || 'popular'
+  const isCatalogPage = location.pathname === '/' || location.pathname === '/catalog'
+  const isCatalogFiltersOpen = isCatalogPage && currentCatalogParams.get('filters') === 'open'
+  const showCatalogControls = !location.pathname.startsWith('/admin')
+
+  useEffect(() => {
+    setGlobalSearch(new URLSearchParams(location.search).get('search') || '')
+  }, [location.search])
 
   function closeMobileMenu() {
     setIsOpen(false)
@@ -230,6 +278,26 @@ export function SiteLayout() {
   function openMobileAuthModal() {
     closeMobileMenu()
     openAuthModal()
+  }
+
+  function submitGlobalSearch() {
+    navigate(buildCatalogSearch(globalSearch, location.search))
+  }
+
+  function toggleGlobalFilters() {
+    navigate(
+      buildCatalogSearch(globalSearch, location.search, {
+        filters: isCatalogFiltersOpen ? null : 'open',
+      }),
+    )
+  }
+
+  function updateGlobalSort(sort: string) {
+    navigate(
+      buildCatalogSearch(globalSearch, location.search, {
+        sort: sort === 'popular' ? null : sort,
+      }),
+    )
   }
 
   return (
@@ -248,9 +316,80 @@ export function SiteLayout() {
             </div>
           </Link>
 
+          {showCatalogControls ? (
+            <div className="ml-auto flex min-w-0 flex-1 items-center gap-2 lg:hidden">
+              <label className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white">
+                <Search size={16} className="shrink-0 text-brand-200" />
+                <input
+                  value={globalSearch}
+                  onChange={(event) => setGlobalSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      submitGlobalSearch()
+                    }
+                  }}
+                  onBlur={submitGlobalSearch}
+                  placeholder="Поиск игр..."
+                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={toggleGlobalFilters}
+                className={clsx(
+                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-white transition',
+                  isCatalogFiltersOpen ? 'border-brand-300/50 bg-brand-500/20' : 'border-white/10 bg-white/5',
+                )}
+                aria-label="Открыть фильтр"
+              >
+                <SlidersHorizontal size={18} />
+              </button>
+            </div>
+          ) : null}
+
           <div className="hidden min-w-0 flex-1 items-center justify-end gap-3 lg:flex xl:gap-4">
+            {showCatalogControls ? (
+              <div className="flex min-w-[340px] max-w-[520px] flex-1 items-center gap-2">
+                <label className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 text-sm text-white transition focus-within:border-brand-300/50">
+                  <Search size={16} className="shrink-0 text-brand-200" />
+                  <input
+                    value={globalSearch}
+                    onChange={(event) => setGlobalSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        submitGlobalSearch()
+                      }
+                    }}
+                    onBlur={submitGlobalSearch}
+                    placeholder="Поиск игр и подписок..."
+                    className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-500"
+                  />
+                </label>
+                <button type="button" onClick={toggleGlobalFilters} className={clsx(DESKTOP_ACTION_BUTTON_CLASS, isCatalogFiltersOpen && 'border-brand-300/50 bg-brand-500/15 text-white')}>
+                  <SlidersHorizontal size={16} />
+                  Фильтр
+                </button>
+                <select
+                  value={currentSort}
+                  onChange={(event) => updateGlobalSort(event.target.value)}
+                  className="hidden min-h-[44px] rounded-full border border-white/10 bg-white/5 px-3 text-sm text-white outline-none transition focus:border-brand-300/50 xl:block"
+                  aria-label="Сортировка каталога"
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value} className="bg-slate-900 text-white">
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+
             <nav className="flex min-w-0 flex-1 items-center justify-end gap-0.5 overflow-visible xl:gap-1">
               <div className="flex min-w-0 items-center justify-end gap-0.5 xl:gap-1">
+                <ActionLink to="/" className={DESKTOP_NAV_LINK_CLASS}>
+                  <Home size={16} />
+                  Главная
+                </ActionLink>
                 <ActionLink to="/catalog?hasDiscount=true" className={DESKTOP_NAV_LINK_CLASS}>
                   Скидки
                 </ActionLink>
@@ -312,7 +451,7 @@ export function SiteLayout() {
 
           <button
             type="button"
-            className="ml-auto flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white lg:hidden"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white lg:hidden"
             onClick={() => setIsOpen((value) => !value)}
             aria-label="Открыть меню"
           >
@@ -325,6 +464,11 @@ export function SiteLayout() {
             <div className="mx-auto flex max-w-6xl flex-col gap-2">
               <ActionLink to="/catalog?hasDiscount=true" className={MOBILE_MENU_LINK_CLASS} onClick={closeMobileMenu}>
                 Скидки
+              </ActionLink>
+
+              <ActionLink to="/" className={MOBILE_MENU_LINK_CLASS} onClick={closeMobileMenu}>
+                <Home size={18} />
+                Главная
               </ActionLink>
 
               <ActionLink href={PS_PLUS_PARTNER_LINK.href} external className={MOBILE_MENU_LINK_CLASS} onClick={closeMobileMenu}>
