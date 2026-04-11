@@ -316,74 +316,7 @@ export function SiteLayout() {
             </div>
           </Link>
 
-          {showCatalogControls ? (
-            <div className="ml-auto flex min-w-0 flex-1 items-center gap-2 lg:hidden">
-              <label className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white">
-                <Search size={16} className="shrink-0 text-brand-200" />
-                <input
-                  value={globalSearch}
-                  onChange={(event) => setGlobalSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      submitGlobalSearch()
-                    }
-                  }}
-                  onBlur={submitGlobalSearch}
-                  placeholder="Поиск игр..."
-                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={toggleGlobalFilters}
-                className={clsx(
-                  'flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border text-white transition',
-                  isCatalogFiltersOpen ? 'border-brand-300/50 bg-brand-500/20' : 'border-white/10 bg-white/5',
-                )}
-                aria-label="Открыть фильтр"
-              >
-                <SlidersHorizontal size={18} />
-              </button>
-            </div>
-          ) : null}
-
           <div className="hidden min-w-0 flex-1 items-center justify-end gap-3 lg:flex xl:gap-4">
-            {showCatalogControls ? (
-              <div className="flex min-w-[340px] max-w-[520px] flex-1 items-center gap-2">
-                <label className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 text-sm text-white transition focus-within:border-brand-300/50">
-                  <Search size={16} className="shrink-0 text-brand-200" />
-                  <input
-                    value={globalSearch}
-                    onChange={(event) => setGlobalSearch(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        submitGlobalSearch()
-                      }
-                    }}
-                    onBlur={submitGlobalSearch}
-                    placeholder="Поиск игр и подписок..."
-                    className="min-w-0 flex-1 bg-transparent outline-none placeholder:text-slate-500"
-                  />
-                </label>
-                <button type="button" onClick={toggleGlobalFilters} className={clsx(DESKTOP_ACTION_BUTTON_CLASS, isCatalogFiltersOpen && 'border-brand-300/50 bg-brand-500/15 text-white')}>
-                  <SlidersHorizontal size={16} />
-                  Фильтр
-                </button>
-                <select
-                  value={currentSort}
-                  onChange={(event) => updateGlobalSort(event.target.value)}
-                  className="hidden min-h-[44px] rounded-full border border-white/10 bg-white/5 px-3 text-sm text-white outline-none transition focus:border-brand-300/50 xl:block"
-                  aria-label="Сортировка каталога"
-                >
-                  {SORT_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value} className="bg-slate-900 text-white">
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : null}
-
             <nav className="flex min-w-0 flex-1 items-center justify-end gap-0.5 overflow-visible xl:gap-1">
               <div className="flex min-w-0 items-center justify-end gap-0.5 xl:gap-1">
                 <ActionLink to="/" className={DESKTOP_NAV_LINK_CLASS}>
@@ -458,6 +391,53 @@ export function SiteLayout() {
             <Menu size={18} />
           </button>
         </div>
+
+        {showCatalogControls ? (
+          <div className="border-t border-white/[0.06] bg-slate-950/35">
+            <div className="container flex items-center gap-2 pb-3 lg:pb-4">
+              <label className="flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 text-sm text-white transition focus-within:border-brand-300/50 md:rounded-full md:px-4">
+                <Search size={16} className="shrink-0 text-brand-200" />
+                <input
+                  value={globalSearch}
+                  onChange={(event) => setGlobalSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      submitGlobalSearch()
+                    }
+                  }}
+                  onBlur={submitGlobalSearch}
+                  placeholder="Поиск игр и подписок..."
+                  className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-500"
+                />
+              </label>
+
+              <button
+                type="button"
+                onClick={toggleGlobalFilters}
+                className={clsx(
+                  'inline-flex min-h-[44px] shrink-0 items-center justify-center gap-2 rounded-2xl border px-3 text-sm font-semibold text-white transition md:rounded-full md:px-4',
+                  isCatalogFiltersOpen ? 'border-brand-300/50 bg-brand-500/20' : 'border-white/10 bg-white/5 hover:border-brand-300/50',
+                )}
+              >
+                <SlidersHorizontal size={16} />
+                <span className="hidden sm:inline">Фильтр</span>
+              </button>
+
+              <select
+                value={currentSort}
+                onChange={(event) => updateGlobalSort(event.target.value)}
+                className="hidden min-h-[44px] shrink-0 rounded-full border border-white/10 bg-white/5 px-3 text-sm text-white outline-none transition focus:border-brand-300/50 sm:block"
+                aria-label="Сортировка каталога"
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value} className="bg-slate-900 text-white">
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : null}
 
         {isOpen ? (
           <div className="border-t border-white/8 bg-slate-950/90 px-4 pb-4 pt-3 lg:hidden">
