@@ -235,6 +235,13 @@ async def telegram_login(
         if synced_user_doc:
             user = build_public_user(synced_user_doc)
 
+        await run_in_threadpool(
+            sync_telegram_user_from_site,
+            db=db,
+            users_collection=auth_service.users,
+            site_user_id=user.id,
+        )
+
     _set_session_cookie(response, session_token)
     return AuthUserResponse(user=user)
 
@@ -361,7 +368,14 @@ async def get_me(
             telegram_id=current_user.telegram_id,
         )
         if synced_user_doc:
-            return AuthUserResponse(user=build_public_user(synced_user_doc))
+            current_user = build_public_user(synced_user_doc)
+
+        await run_in_threadpool(
+            sync_telegram_user_from_site,
+            db=db,
+            users_collection=auth_service.users,
+            site_user_id=current_user.id,
+        )
 
     return AuthUserResponse(user=current_user)
 
@@ -380,6 +394,12 @@ async def get_profile(
                 users_collection=auth_service.users,
                 site_user_id=current_user.id,
                 telegram_id=current_user.telegram_id,
+            )
+            await run_in_threadpool(
+                sync_telegram_user_from_site,
+                db=db,
+                users_collection=auth_service.users,
+                site_user_id=current_user.id,
             )
         return await run_in_threadpool(auth_service.get_profile, current_user.id)
     except AuthServiceError as error:

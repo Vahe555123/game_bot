@@ -24,6 +24,37 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _normalize_payment_query_region(region: Optional[str]) -> Optional[str]:
+    """Привести query region к UA/TR/IN для оплаты в WebApp (алиасы en-tr, TRL и т.д.)."""
+    if region is None:
+        return None
+    raw = str(region).strip()
+    if not raw:
+        return None
+    lower = raw.lower()
+    aliases = {
+        "en-ua": "UA",
+        "en-tr": "TR",
+        "en-in": "IN",
+        "ua": "UA",
+        "tr": "TR",
+        "in": "IN",
+        "uah": "UA",
+        "try": "TR",
+        "trl": "TR",
+        "inr": "IN",
+    }
+    if lower in aliases:
+        return aliases[lower]
+    canon = product_crud.normalize_product_region(raw)
+    if canon:
+        return canon
+    upper = raw.upper()
+    if upper in ("UA", "TR", "IN"):
+        return upper
+    return None
+
 # Роуты для пользователей
 @router.post("/users/", response_model=User, tags=["Users"], summary="Создать пользователя")
 async def create_user(request: Request, user_data: UserCreate, db: Session = Depends(get_db)):
@@ -588,19 +619,7 @@ async def generate_payment_url(
     if not user:
         raise HTTPException(status_code=404, detail="Пользователь не найден")
 
-    # Нормализуем регион
-    region_normalize_map = {
-        'en-ua': 'UA',
-        'en-tr': 'TR',
-        'en-in': 'IN',
-        'ua': 'UA',
-        'tr': 'TR',
-        'in': 'IN',
-        'uah': 'UA',
-        'try': 'TR',
-        'inr': 'IN'
-    }
-    normalized_region = region_normalize_map.get(region.lower(), region.upper()) if region else None
+    normalized_region = _normalize_payment_query_region(region)
 
     # Проверяем что регион указан
     if not normalized_region:
@@ -636,7 +655,7 @@ async def generate_payment_url(
     if not current_price or current_price <= 0:
         raise HTTPException(
             status_code=400,
-            detail=f"Для данного товара не установлена цена в регионе {region}"
+            detail=f"Для данного товара не установлена цена в регионе {normalized_region}"
         )
 
     # Получаем данные для API
