@@ -237,6 +237,10 @@ class ProductFilter(BaseModel):
     search: Optional[str] = None
     platform: Optional[str] = Field(None, description="Платформа (PS4, PS5, или обе)")
     players: Optional[str] = Field(None, description="Количество игроков (singleplayer, multiplayer, coop)")
+    game_language: Optional[str] = Field(
+        None,
+        description="Язык игры: full_ru (полный русский), partial_ru (субтитры/интерфейс), no_ru (без русского)",
+    )
     sort: Optional[str] = Field(None, description="Сортировка (popular, alphabet, price_asc, price_desc)")
 
 class PaginationParams(BaseModel):

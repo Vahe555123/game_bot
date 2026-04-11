@@ -21,6 +21,15 @@ export const PLAYER_OPTIONS = [
 
 const PLAYER_OPTION_VALUES = new Set(PLAYER_OPTIONS.map((option) => option.value))
 
+export const GAME_LANGUAGE_OPTIONS = [
+  { value: '', label: 'Язык игры' },
+  { value: 'full_ru', label: 'Полностью на русском' },
+  { value: 'partial_ru', label: 'Субтитры / интерфейс RU' },
+  { value: 'no_ru', label: 'Без русского' },
+] as const
+
+const GAME_LANGUAGE_OPTION_VALUES = new Set(GAME_LANGUAGE_OPTIONS.map((option) => option.value))
+
 export const SORT_OPTIONS = [
   { value: 'popular', label: 'Популярность' },
   { value: 'alphabet', label: 'По алфавиту' },
@@ -98,6 +107,7 @@ export function sanitizeCatalogFilters(filters: CatalogFilterState, categories: 
     priceCurrency: sanitizeSelectValue(filters.priceCurrency, PRICE_CURRENCY_OPTION_VALUES) || 'RUB',
     platform: sanitizeSelectValue(filters.platform, PLATFORM_OPTION_VALUES),
     players: sanitizeSelectValue(filters.players, PLAYER_OPTION_VALUES),
+    gameLanguage: sanitizeSelectValue(filters.gameLanguage, GAME_LANGUAGE_OPTION_VALUES),
     category: !filters.category || !categories.length || categories.includes(filters.category) ? filters.category : '',
     minPrice: hasInvalidRange ? '' : minPrice,
     maxPrice: hasInvalidRange ? '' : maxPrice,
@@ -112,6 +122,7 @@ export function hasActiveCatalogFilters(filters: CatalogFilterState) {
       (filters.productKind && filters.productKind !== 'all') ||
       filters.platform ||
       filters.players ||
+      filters.gameLanguage ||
       filters.minPrice ||
       filters.maxPrice ||
       filters.hasDiscount ||

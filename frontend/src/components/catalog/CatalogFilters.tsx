@@ -2,6 +2,7 @@ import clsx from 'clsx'
 import { Check, RotateCcw } from 'lucide-react'
 import type { CatalogFilterState } from '../../types/catalog'
 import {
+  GAME_LANGUAGE_OPTIONS,
   PLAYER_OPTIONS,
   PLATFORM_OPTIONS,
   PRICE_CURRENCY_OPTIONS,
@@ -60,7 +61,7 @@ export function CatalogFilters({
 
   return (
     <div className={clsx('space-y-3', className)}>
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
         <SelectField value={draftFilters.sort} options={SORT_OPTIONS} onChange={(sort) => onDraftChange({ sort })} />
 
         <SelectField
@@ -82,6 +83,12 @@ export function CatalogFilters({
         />
 
         <SelectField value={draftFilters.players} options={PLAYER_OPTIONS} onChange={(players) => onDraftChange({ players })} />
+
+        <SelectField
+          value={draftFilters.gameLanguage}
+          options={GAME_LANGUAGE_OPTIONS}
+          onChange={(gameLanguage) => onDraftChange({ gameLanguage })}
+        />
       </div>
 
       <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12">

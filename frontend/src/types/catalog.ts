@@ -153,6 +153,7 @@ export type CatalogQuery = {
   has_ps_plus?: boolean
   has_ea_access?: boolean
   grouped?: boolean
+  game_language?: string
 }
 
 export type CatalogFilterState = {
@@ -166,6 +167,7 @@ export type CatalogFilterState = {
   priceCurrency: string
   platform: string
   players: string
+  gameLanguage: string
   minPrice: string
   maxPrice: string
   hasDiscount: boolean

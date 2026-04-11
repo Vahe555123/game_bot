@@ -325,6 +325,10 @@ def get_products(
     has_ea_access: Optional[bool] = Query(None, description="Доступно в EA Access"),
     platform: Optional[str] = Query(None, description="Фильтр по платформе (PS4, PS5, BOTH)"),
     players: Optional[str] = Query(None, description="Фильтр по количеству игроков"),
+    game_language: Optional[str] = Query(
+        None,
+        description="Язык игры: full_ru | partial_ru | no_ru",
+    ),
     sort: Optional[str] = Query("popular", description="Сортировка (popular, alphabet, price_asc, price_desc)"),
     telegram_id: Optional[int] = Query(None, description="ID пользователя для настроек отображения"),
     grouped: bool = Query(True, description="Группировать товары с ценами из всех регионов"),
@@ -358,6 +362,7 @@ def get_products(
         has_ea_access=has_ea_access,
         platform=platform,
         players=players,
+        game_language=(game_language or "").strip().lower() or None,
         sort=sort,
     )
     pagination = PaginationParams(page=page, limit=limit)
@@ -466,23 +471,29 @@ async def add_to_favorites(
         logger.error(f"❌ Product not found in any region: {favorite_data.product_id}")
         raise HTTPException(status_code=404, detail="Товар не найден")
 
-    # Используем регион из запроса или первый найденный товар
-    region = favorite_data.region
+    # Используем регион из запроса или первый найденный товар (с нормализацией TR/UA/IN)
+    region_raw = favorite_data.region
     product = None
 
-    if region:
-        # Ищем товар в указанном регионе
-        product = next((p for p in products if p.region == region), None)
+    if region_raw:
+        target = product_crud.normalize_product_region(region_raw) or str(region_raw).strip().upper()
+        product = next(
+            (
+                p
+                for p in products
+                if (product_crud.normalize_product_region(p.region) or str(p.region or "").strip().upper()) == target
+            ),
+            None,
+        )
         if product:
             logger.info(f"✅ Using product from specified region: {product.region}, name: {product.name}")
 
     if not product:
-        # Если регион не указан или не найден, используем первый
         product = products[0]
-        region = product.region
         logger.info(f"✅ Using product from fallback region: {product.region}, name: {product.name}")
 
-    favorite = favorite_crud.add_to_favorites(db, user.id, favorite_data.product_id, region)
+    store_region = product_crud.normalize_product_region(product.region) or (str(product.region or "").strip().upper() or None)
+    favorite = favorite_crud.add_to_favorites(db, user.id, favorite_data.product_id, store_region)
     logger.info(f"✅ Favorite added successfully: {favorite.id}, region: {favorite.region}")
     return {"message": "Товар добавлен в избранное", "favorite_id": favorite.id}
 

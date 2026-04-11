@@ -561,10 +561,23 @@ class ProductCRUD:
 
         query = db.query(Product).filter(Product.id == product_id)
 
-        # Если указан регион, фильтруем по нему
+        # Если указан регион, фильтруем по нему (учитываем TR/UA/IN и алиасы вроде en-tr)
         if region:
-            query = query.filter(Product.region == region)
-            logger.info(f"   Filtering by region: {region}")
+            candidates = {
+                c
+                for c in (
+                    str(region).strip(),
+                    str(region).strip().upper(),
+                    str(region).strip().lower(),
+                )
+                if c
+            }
+            canon = ProductCRUD.normalize_product_region(region)
+            if canon:
+                candidates.add(canon)
+            if candidates:
+                query = query.filter(Product.region.in_(list(candidates)))
+            logger.info(f"   Filtering by region candidates: {candidates}")
         else:
             logger.warning(f"⚠️ Region NOT specified!")
 
@@ -1418,6 +1431,34 @@ class ProductCRUD:
                 )
             )
 
+        game_language = (getattr(filters, 'game_language', None) or '').strip().lower()
+        if game_language in ('full_ru', 'partial_ru', 'no_ru'):
+            query = query.outerjoin(Localization, Localization.code == Product.localization)
+            if game_language == 'full_ru':
+                query = query.filter(
+                    or_(
+                        Localization.name_ru.ilike('%полностью%рус%'),
+                        Localization.name_ru.ilike('%полностью на русском%'),
+                    )
+                )
+            elif game_language == 'partial_ru':
+                query = query.filter(
+                    or_(
+                        Localization.name_ru.ilike('%субтитр%рус%'),
+                        Localization.name_ru.ilike('%русск%интерфейс%'),
+                        Localization.name_ru.ilike('%русские субтитры%'),
+                    )
+                )
+            else:
+                query = query.filter(
+                    or_(
+                        Localization.name_ru.ilike('%без русского%'),
+                        Localization.name_ru.ilike('%нет русского%'),
+                        Localization.name_ru.ilike('%английский%'),
+                        Localization.name_ru.ilike('%только англ%'),
+                    )
+                )
+
         sort_mode = ProductCRUD._normalize_sort_mode(getattr(filters, 'sort', None))
         favorites_subquery = ProductCRUD._get_favorites_count_subquery(db)
         localization_cache: Dict[str, Optional[str]] = {}
@@ -1531,6 +1572,10 @@ class FavoriteCRUD:
     @staticmethod
     def add_to_favorites(db: Session, user_id: int, product_id: str, region: Optional[str] = None) -> Optional[UserFavoriteProduct]:
         """Добавить товар в избранное"""
+        if region:
+            canon = ProductCRUD.normalize_product_region(region)
+            region = canon or str(region).strip().upper() or None
+
         # Проверяем, что товар не уже в избранном
         existing = db.query(UserFavoriteProduct).filter(
             and_(

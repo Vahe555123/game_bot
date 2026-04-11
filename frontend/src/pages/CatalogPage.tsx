@@ -21,6 +21,7 @@ const DEFAULT_FILTERS: CatalogFilterState = {
   priceCurrency: 'RUB',
   platform: '',
   players: '',
+  gameLanguage: '',
   minPrice: '',
   maxPrice: '',
   hasDiscount: false,
@@ -56,6 +57,7 @@ function parseFilters(searchParams: URLSearchParams, storedProductKind = DEFAULT
     priceCurrency: searchParams.get('priceCurrency') || 'RUB',
     platform: searchParams.get('platform') || '',
     players: searchParams.get('players') || '',
+    gameLanguage: searchParams.get('gameLanguage') || '',
     minPrice: searchParams.get('minPrice') || '',
     maxPrice: searchParams.get('maxPrice') || '',
     hasDiscount: searchParams.get('hasDiscount') === 'true',
@@ -74,6 +76,7 @@ function buildSearchParams(filters: CatalogFilterState, options: { filtersOpen?:
   if (filters.priceCurrency && filters.priceCurrency !== 'RUB') next.set('priceCurrency', filters.priceCurrency)
   if (filters.platform) next.set('platform', filters.platform)
   if (filters.players) next.set('players', filters.players)
+  if (filters.gameLanguage) next.set('gameLanguage', filters.gameLanguage)
   if (filters.minPrice) next.set('minPrice', filters.minPrice)
   if (filters.maxPrice) next.set('maxPrice', filters.maxPrice)
   if (filters.hasDiscount) next.set('hasDiscount', 'true')
@@ -95,6 +98,7 @@ function areFiltersEqual(left: CatalogFilterState, right: CatalogFilterState) {
     left.priceCurrency === right.priceCurrency &&
     left.platform === right.platform &&
     left.players === right.players &&
+    left.gameLanguage === right.gameLanguage &&
     left.minPrice === right.minPrice &&
     left.maxPrice === right.maxPrice &&
     left.hasDiscount === right.hasDiscount &&
@@ -110,6 +114,7 @@ function countActiveFilters(filters: CatalogFilterState) {
     filters.priceCurrency !== 'RUB',
     filters.platform,
     filters.players,
+    filters.gameLanguage,
     filters.minPrice || filters.maxPrice,
     filters.hasDiscount,
     filters.hasPsPlus,
@@ -304,6 +309,7 @@ export function CatalogPage() {
           price_currency: filters.priceCurrency || undefined,
           platform: filters.platform || undefined,
           players: filters.players || undefined,
+          game_language: filters.gameLanguage || undefined,
           min_price: filters.minPrice ? Number(filters.minPrice) : undefined,
           max_price: filters.maxPrice ? Number(filters.maxPrice) : undefined,
           has_discount: filters.hasDiscount || undefined,

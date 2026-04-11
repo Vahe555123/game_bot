@@ -986,8 +986,14 @@ class FavoritesManager {
     }
 
     async loadFavorites() {
+        try {
+            await this.ensureUserReady();
+        } catch {
+            return [];
+        }
+
         const userId = this.userManager.getUserId();
-        if (!userId) return;
+        if (!userId) return [];
 
         try {
             // ИСПРАВЛЕНИЕ: Не используем кеш (useCache = false), чтобы всегда получать актуальные данные
@@ -1014,11 +1020,21 @@ class FavoritesManager {
         }
     }
 
-    async addToFavorites(productId) {
-        const userId = this.userManager.getUserId();
+    async ensureUserReady() {
+        let userId = this.userManager.getUserId();
+        if (userId) {
+            return userId;
+        }
+        await this.userManager.initUser();
+        userId = this.userManager.getUserId();
         if (!userId) {
             throw new Error('User not authenticated');
         }
+        return userId;
+    }
+
+    async addToFavorites(productId) {
+        const userId = await this.ensureUserReady();
         const normalizedProductId = this.normalizeProductId(productId);
 
         try {
@@ -1035,10 +1051,7 @@ class FavoritesManager {
     }
 
     async removeFromFavorites(productId) {
-        const userId = this.userManager.getUserId();
-        if (!userId) {
-            throw new Error('User not authenticated');
-        }
+        const userId = await this.ensureUserReady();
         const normalizedProductId = this.normalizeProductId(productId);
 
         try {
@@ -1627,15 +1640,19 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-// Auto-initialize user when app loads
+// Auto-initialize user when app loads (ждём Telegram user context — иначе избранное и /users дают 404)
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        if (tgApp.isReady()) {
-            await userManager.initUser();
-            // ОПТИМИЗАЦИЯ: loadFavorites вызывается в ModernProductCatalog.init()
-            // Убираем дублирующий вызов здесь
-            // await favoritesManager.loadFavorites();
+        if (window.Telegram?.WebApp) {
+            await tgApp.waitForUserContext(8000, 100);
+            let attempts = 0;
+            while (!tgApp.isInitialized && attempts < 100) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+                attempts += 1;
+            }
         }
+        await userManager.initUser();
+        await favoritesManager.loadFavorites();
     } catch (error) {
         console.error('Error during app initialization:', error);
     }
