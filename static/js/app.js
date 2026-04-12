@@ -651,6 +651,7 @@ class APIClient {
                 'Content-Type': 'application/json',
                 ...options.headers
             },
+            credentials: options.credentials || 'same-origin',
             ...options
         };
 
@@ -800,10 +801,54 @@ class UserManager {
         this.isInitialized = false;
     }
 
+    _storeTelegramUser(user) {
+        if (!user?.telegram_id || !this.tg?.storeUser) {
+            return;
+        }
+
+        this.tg.storeUser({
+            id: user.telegram_id,
+            username: user.username || null,
+            first_name: user.first_name || null,
+            last_name: user.last_name || null,
+            language_code: user.language_code || null
+        });
+    }
+
+    async loadSiteSessionUser() {
+        try {
+            const response = await this.api.get('/auth/me', {}, false);
+            const user = response?.user || response;
+
+            if (user?.id) {
+                this.currentUser = user;
+                this.isInitialized = true;
+                this._storeTelegramUser(user);
+                return this.currentUser;
+            }
+        } catch (error) {
+            const message = String(error?.message || '');
+            if (!message.includes('HTTP 401') && !message.includes('HTTP 403')) {
+                console.warn('Failed to load authenticated site user:', error);
+            }
+        }
+
+        return null;
+    }
+
     async initUser() {
+        if (this.currentUser?.id) {
+            return this.currentUser;
+        }
+
         const rawId = this.tg.getUserId();
         const userId = rawId != null && rawId !== '' ? Number(rawId) : NaN;
         if (!Number.isFinite(userId)) {
+            const sessionUser = await this.loadSiteSessionUser();
+            if (sessionUser) {
+                return sessionUser;
+            }
+
             console.warn('No Telegram user ID available');
             return null;
         }
@@ -812,6 +857,7 @@ class UserManager {
             // Try to get existing user
             this.currentUser = await this.api.get(`/users/${userId}`, {}, true);
             this.isInitialized = true;
+            this._storeTelegramUser(this.currentUser);
             return this.currentUser;
         } catch (error) {
             // User doesn't exist, create new one
@@ -826,8 +872,14 @@ class UserManager {
 
                 this.currentUser = await this.api.post('/users/', userData);
                 this.isInitialized = true;
+                this._storeTelegramUser(this.currentUser);
                 return this.currentUser;
             } catch (createError) {
+                const sessionUser = await this.loadSiteSessionUser();
+                if (sessionUser) {
+                    return sessionUser;
+                }
+
                 console.error('Failed to create user:', createError);
                 return null;
             }

@@ -475,6 +475,12 @@
                 <option value="singleplayer">👤 Одиночная игра</option>
                 <option value="coop">?? ????. ?? ????? ???????</option>
             </select>
+            <select class="filter-select" id="gameLanguageFilter">
+                <option value="">Язык игры</option>
+                <option value="full_ru">Полностью на русском</option>
+                <option value="partial_ru">Русские субтитры / интерфейс</option>
+                <option value="no_ru">Без русского</option>
+            </select>
         </div>
 
         <div class="price-range-row">
@@ -850,6 +856,7 @@ class ModernProductCatalog {
         document.getElementById('categoryFilter').addEventListener('change', () => this.updateFilterState());
         document.getElementById('platformFilter').addEventListener('change', () => this.updateFilterState());
         document.getElementById('playersFilter').addEventListener('change', () => this.updateFilterState());
+        document.getElementById('gameLanguageFilter').addEventListener('change', () => this.updateFilterState());
         if (sortFilter) {
             sortFilter.addEventListener('change', () => this.search());
         }
@@ -1035,6 +1042,9 @@ class ModernProductCatalog {
 
             const players = document.getElementById('playersFilter').value;
             if (players) params.append('players', players);
+
+            const gameLanguage = document.getElementById('gameLanguageFilter').value;
+            if (gameLanguage) params.append('game_language', gameLanguage);
 
             const sort = document.getElementById('sortFilter').value;
             if (sort && sort !== 'popular') params.append('sort', sort);
@@ -1637,6 +1647,7 @@ class ModernProductCatalog {
         const platform = document.getElementById('platformFilter').value;
         const players = document.getElementById('playersFilter').value;
         const sort = document.getElementById('sortFilter').value;
+        const gameLanguage = document.getElementById('gameLanguageFilter').value;
         const minPrice = document.getElementById('minPrice').value;
         const maxPrice = document.getElementById('maxPrice').value;
         const priceCurrency = document.getElementById('priceCurrency').value;
@@ -1644,7 +1655,7 @@ class ModernProductCatalog {
         const psPlusOnly = document.getElementById('psPlusOnly').checked;
         const eaAccessOnly = document.getElementById('eaAccessOnly').checked;
 
-        return !!(category || platform || players || minPrice || maxPrice || (priceCurrency && priceCurrency !== 'RUB') || discountOnly || psPlusOnly || eaAccessOnly || (sort && sort !== 'popular'));
+        return !!(category || platform || players || gameLanguage || minPrice || maxPrice || (priceCurrency && priceCurrency !== 'RUB') || discountOnly || psPlusOnly || eaAccessOnly || (sort && sort !== 'popular'));
     }
 
     saveSearchState() {
@@ -1654,6 +1665,7 @@ class ModernProductCatalog {
             category: document.getElementById('categoryFilter').value,
             platform: document.getElementById('platformFilter').value,
             players: document.getElementById('playersFilter').value,
+            gameLanguage: document.getElementById('gameLanguageFilter').value,
             minPrice: document.getElementById('minPrice').value,
             maxPrice: document.getElementById('maxPrice').value,
             priceCurrency: document.getElementById('priceCurrency').value,
@@ -1692,6 +1704,7 @@ class ModernProductCatalog {
             document.getElementById('categoryFilter').value = state.category || '';
             document.getElementById('platformFilter').value = this.normalizePlatformFilterValue(state.platform);
             document.getElementById('playersFilter').value = state.players || '';
+            document.getElementById('gameLanguageFilter').value = state.gameLanguage || '';
             document.getElementById('minPrice').value = state.minPrice || '';
             document.getElementById('maxPrice').value = state.maxPrice || '';
             document.getElementById('priceCurrency').value = state.priceCurrency || 'RUB';
@@ -1798,6 +1811,7 @@ class ModernProductCatalog {
         document.getElementById('categoryFilter').value = '';
         document.getElementById('platformFilter').value = '';
         document.getElementById('playersFilter').value = '';
+        document.getElementById('gameLanguageFilter').value = '';
         document.getElementById('minPrice').value = '';
         document.getElementById('maxPrice').value = '';
         document.getElementById('priceCurrency').value = 'RUB';
@@ -1848,7 +1862,44 @@ class ModernProductCatalog {
 }
 
 // Initialize when DOM is loaded
+function applyGlobalFiltersFromStorage() {
+    const storedFiltersRaw = sessionStorage.getItem('globalFilters');
+    if (!storedFiltersRaw) {
+        return false;
+    }
+
+    try {
+        const filters = JSON.parse(storedFiltersRaw);
+        const storedSearchQuery = sessionStorage.getItem('globalSearchQuery') || '';
+        const catalogState = {
+            searchText: storedSearchQuery,
+            sort: 'popular',
+            category: filters.category || '',
+            platform: filters.platform || '',
+            players: filters.players || '',
+            gameLanguage: filters.gameLanguage || '',
+            minPrice: filters.minPrice || '',
+            maxPrice: filters.maxPrice || '',
+            priceCurrency: 'RUB',
+            discountOnly: !!filters.discountOnly,
+            psPlusOnly: !!filters.psPlusOnly,
+            eaAccessOnly: !!filters.eaAccessOnly,
+            scrollPosition: 0,
+            currentPage: 1
+        };
+
+        sessionStorage.setItem('catalogSearchState', JSON.stringify(catalogState));
+        sessionStorage.removeItem('globalFilters');
+        sessionStorage.removeItem('globalSearchQuery');
+        return true;
+    } catch (error) {
+        console.error('Failed to apply global filters from storage:', error);
+        return false;
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    applyGlobalFiltersFromStorage();
     console.log('🚀 DOM loaded, initializing catalog...');
 
     // Мгновенная инициализация без ожидания

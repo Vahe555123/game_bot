@@ -29,6 +29,12 @@
                 <option value="en-tr">🇹🇷 Турция</option>
                 <option value="en-in">🇮🇳 Индия</option>
             </select>
+            <select class="filter-select" id="gameLanguageFilter">
+                <option value="">Язык игры</option>
+                <option value="full_ru">Полностью на русском</option>
+                <option value="partial_ru">Русские субтитры / интерфейс</option>
+                <option value="no_ru">Без русского</option>
+            </select>
         </div>
 
         <div class="filter-row">
@@ -914,6 +920,7 @@
                 document.getElementById('regionSelect').value = '';
                 document.getElementById('platformFilter').value = '';
                 document.getElementById('playersFilter').value = '';
+                document.getElementById('gameLanguageFilter').value = '';
                 document.getElementById('minPrice').value = '';
                 document.getElementById('maxPrice').value = '';
                 document.getElementById('discountOnly').checked = false;
@@ -934,6 +941,7 @@
                     region: document.getElementById('regionSelect').value,
                     platform: document.getElementById('platformFilter').value,
                     players: document.getElementById('playersFilter').value,
+                    gameLanguage: document.getElementById('gameLanguageFilter').value,
                     minPrice: document.getElementById('minPrice').value,
                     maxPrice: document.getElementById('maxPrice').value,
                     discountOnly: document.getElementById('discountOnly').checked,
