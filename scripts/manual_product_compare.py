@@ -13,6 +13,7 @@ from typing import Any, Dict, List
 from time import perf_counter
 
 import aiohttp
+import aiosqlite
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +22,7 @@ if str(ROOT) not in sys.path:
 
 from parser import (  # noqa: E402
     get_all_ps_plus_subscriptions,
+    get_active_sqlite_db_path,
     match_products_by_id,
     merge_region_data,
     parse as parse_full,
@@ -345,6 +347,23 @@ def compare_records(auto_records: list[Dict[str, Any]], manual_records: list[Dic
     }
 
 
+async def clear_existing_products(records: list[Dict[str, Any]]) -> int:
+    product_ids = sorted({str(record.get("id") or "").strip() for record in records if record.get("id")})
+    if not product_ids:
+        return 0
+
+    db_path = get_active_sqlite_db_path()
+    placeholders = ",".join("?" for _ in product_ids)
+
+    async with aiosqlite.connect(db_path) as db:
+        cursor = await db.execute(
+            f"DELETE FROM products WHERE id IN ({placeholders})",
+            product_ids,
+        )
+        await db.commit()
+        return cursor.rowcount if cursor.rowcount is not None else 0
+
+
 async def main() -> None:
     args = parse_args()
     start_time = perf_counter()
@@ -435,6 +454,8 @@ async def main() -> None:
     if manual_all:
         print("=" * 96)
         print("Syncing parsed records into products.db")
+        deleted_rows = await clear_existing_products(manual_all)
+        print(f"Deleted old rows: {deleted_rows}")
         await process_specific_products_to_db(manual_all, promo, start_time)
 
     print("=" * 96)

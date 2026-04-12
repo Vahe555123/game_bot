@@ -14,9 +14,42 @@ import pickle
 import sys
 import hashlib
 from typing import List, Dict, Set, Tuple, Optional
+from pathlib import Path
+
+try:
+    from app.database.connection import DATABASE_URL as ACTIVE_DATABASE_URL
+except Exception:
+    ACTIVE_DATABASE_URL = None
 
 
 load_dotenv()
+
+
+def get_active_sqlite_db_path(default: str = "products.db") -> str:
+    """
+    Возвращает путь к активной SQLite-базе.
+
+    Сначала пытается взять уже выбранный writable путь из app.database.connection,
+    затем fallback на DATABASE_URL из окружения, и только потом на локальный products.db.
+    """
+    database_url = ACTIVE_DATABASE_URL or os.getenv("DATABASE_URL", "")
+    if database_url.startswith("sqlite"):
+        try:
+            from sqlalchemy.engine import make_url
+
+            url = make_url(database_url)
+            database = url.database
+            if database and database != ":memory:":
+                path = Path(database).expanduser()
+                if not path.is_absolute():
+                    path = (Path.cwd() / path).resolve(strict=False)
+                else:
+                    path = path.resolve(strict=False)
+                return str(path)
+        except Exception:
+            pass
+
+    return str((Path.cwd() / default).resolve(strict=False))
 
 
 # Configuration
@@ -221,7 +254,7 @@ class CurrencyConverter:
 
     def __init__(self):
         self.rates_cache = {}
-        self.db_path = "products.db"
+        self.db_path = get_active_sqlite_db_path()
 
     async def load_rates(self):
         """Загружает курсы валют из БД"""
@@ -3429,7 +3462,7 @@ async def add_update_table():
     Создает таблицу update_info в SQLite БД (если не существует)
     Используется для отслеживания обновлений товаров
     """
-    db_path = "products.db"
+    db_path = get_active_sqlite_db_path()
     async with aiosqlite.connect(db_path) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS update_info (
@@ -3455,7 +3488,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("=" * 80)
 
     # Подключение к SQLite
-    db_path = "products.db"
+    db_path = get_active_sqlite_db_path()
 
     # Подготовка данных для вставки
     products_to_insert = []
