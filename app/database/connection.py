@@ -1,32 +1,175 @@
 from __future__ import annotations
 
+import logging
+import os
+import shutil
+import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from config.settings import settings
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args={
-        "check_same_thread": False,
-        "timeout": 30,
-    }
-    if "sqlite" in settings.DATABASE_URL
-    else {},
-)
+logger = logging.getLogger(__name__)
 
-if "sqlite" in settings.DATABASE_URL:
 
-    @event.listens_for(engine, "connect")
-    def _set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA journal_mode=WAL")
-        cursor.execute("PRAGMA synchronous=NORMAL")
-        cursor.execute("PRAGMA busy_timeout=30000")
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+def _is_sqlite_url(database_url: str) -> bool:
+    try:
+        return make_url(database_url).drivername.startswith("sqlite")
+    except Exception:
+        return database_url.startswith("sqlite")
+
+
+def _sqlite_database_path(database_url: str) -> Path | None:
+    if not _is_sqlite_url(database_url):
+        return None
+
+    url = make_url(database_url)
+    database = url.database
+    if not database or database == ":memory:":
+        return None
+
+    path = Path(database).expanduser()
+    if not path.is_absolute():
+        path = (Path.cwd() / path).resolve(strict=False)
+    else:
+        path = path.resolve(strict=False)
+    return path
+
+
+def _sqlite_url_for_path(database_url: str, path: Path) -> str:
+    url = make_url(database_url)
+    return str(url.set(database=path.resolve(strict=False).as_posix()))
+
+
+def _path_is_writable(path: Path) -> bool:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return False
+
+    if path.exists() and not os.access(path, os.W_OK):
+        return False
+
+    return os.access(path.parent, os.W_OK | os.X_OK)
+
+
+def _copy_sqlite_sidecars(source: Path, target: Path) -> None:
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.warning("Could not prepare SQLite fallback directory %s: %s", target.parent, exc)
+        return
+
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        source_file = Path(f"{source}{suffix}")
+        target_file = Path(f"{target}{suffix}")
+        if not source_file.exists() or target_file.exists():
+            continue
+        try:
+            shutil.copy2(source_file, target_file)
+        except OSError as exc:
+            logger.warning("Could not copy SQLite file %s to %s: %s", source_file, target_file, exc)
+
+
+def _sqlite_fallback_candidates(database_url: str) -> list[Path]:
+    source_path = _sqlite_database_path(database_url)
+    if source_path is None:
+        return []
+
+    candidates: list[Path] = []
+    seen: set[str] = set()
+
+    def add_candidate(path: Path) -> None:
+        resolved = str(path.resolve(strict=False))
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        candidates.append(Path(resolved))
+
+    add_candidate(source_path)
+
+    fallback_root = Path(os.getenv("SQLITE_DATA_DIR", str(Path.home() / "data" / "game_bot2"))).expanduser()
+    add_candidate(fallback_root / source_path.name)
+    add_candidate(Path(tempfile.gettempdir()) / "game_bot2" / source_path.name)
+
+    return candidates
+
+
+def _select_sqlite_database_url(database_url: str, excluded_urls: set[str] | None = None) -> str:
+    if not _is_sqlite_url(database_url):
+        return database_url
+
+    excluded_urls = excluded_urls or set()
+    candidates = _sqlite_fallback_candidates(database_url)
+    if not candidates:
+        return database_url
+
+    source_path = _sqlite_database_path(database_url)
+
+    for candidate in candidates:
+        candidate_url = _sqlite_url_for_path(database_url, candidate)
+        if candidate_url in excluded_urls:
+            continue
+
+        if source_path is not None and candidate != source_path and source_path.exists() and not candidate.exists():
+            _copy_sqlite_sidecars(source_path, candidate)
+
+        if _path_is_writable(candidate):
+            if candidate != source_path:
+                logger.warning(
+                    "SQLite database path %s is not writable, using fallback %s",
+                    source_path,
+                    candidate,
+                )
+            return candidate_url
+
+    last_candidate = candidates[-1]
+    last_candidate_url = _sqlite_url_for_path(database_url, last_candidate)
+    if last_candidate_url not in excluded_urls:
+        logger.warning(
+            "No confirmed writable SQLite path found, using best-effort fallback %s",
+            last_candidate,
+        )
+        return last_candidate_url
+
+    return database_url
+
+
+RAW_DATABASE_URL = settings.DATABASE_URL
+DATABASE_URL = _select_sqlite_database_url(RAW_DATABASE_URL)
+
+
+def _build_engine(database_url: str):
+    connect_args = (
+        {
+            "check_same_thread": False,
+            "timeout": 30,
+        }
+        if _is_sqlite_url(database_url)
+        else {}
+    )
+    current_engine = create_engine(database_url, connect_args=connect_args)
+
+    if _is_sqlite_url(database_url):
+
+        @event.listens_for(current_engine, "connect")
+        def _set_sqlite_pragma(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+    return current_engine
+
+
+engine = _build_engine(DATABASE_URL)
 
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -213,7 +356,7 @@ def create_tables():
 
     Base.metadata.create_all(bind=engine)
 
-    if "sqlite" in settings.DATABASE_URL:
+    if _is_sqlite_url(RAW_DATABASE_URL):
         with engine.begin() as connection:
             _migrate_users_table(connection)
             for statement in SQLITE_INDEX_STATEMENTS:
@@ -224,4 +367,26 @@ def create_tables():
 
 
 def init_database():
+    global DATABASE_URL, SessionLocal, engine
+
+    readonly_error: OperationalError | None = None
+    try:
+        create_tables()
+        return
+    except OperationalError as exc:
+        if "readonly database" not in str(exc).lower() or not _is_sqlite_url(RAW_DATABASE_URL):
+            raise
+        readonly_error = exc
+
+    fallback_url = _select_sqlite_database_url(RAW_DATABASE_URL, excluded_urls={DATABASE_URL})
+    if fallback_url == DATABASE_URL:
+        if readonly_error is not None:
+            raise readonly_error
+        raise RuntimeError("SQLite database is not writable and no fallback path is available")
+
+    logger.warning("Rebuilding SQLite engine with fallback database URL: %s", fallback_url)
+    engine.dispose()
+    DATABASE_URL = fallback_url
+    engine = _build_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     create_tables()
