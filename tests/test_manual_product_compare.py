@@ -4,6 +4,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import aiosqlite
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -14,6 +16,7 @@ from scripts.manual_product_compare import (  # noqa: E402
     parse_grouped_text,
     record_signature,
     region_from_url,
+    register_sqlite_functions,
 )
 
 
@@ -62,6 +65,17 @@ class ManualProductCompareTests(unittest.TestCase):
         self.assertIn('"price_rub": 123.46', signature)
         self.assertIn('"price_old_rub": 250.01', signature)
         self.assertIn('"ps_plus": 1', signature)
+
+
+class ManualProductCompareAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_register_sqlite_functions_exposes_normalize_search(self) -> None:
+        async with aiosqlite.connect(":memory:") as db:
+            await register_sqlite_functions(db)
+
+            cursor = await db.execute("SELECT normalize_search(?)", ("God of War™ Ragnarök",))
+            row = await cursor.fetchone()
+
+        self.assertEqual(row[0], "god of war ragnarok")
 
 
 if __name__ == "__main__":

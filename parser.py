@@ -18,8 +18,10 @@ from pathlib import Path
 
 try:
     from app.database.connection import DATABASE_URL as ACTIVE_DATABASE_URL
+    from app.database.connection import _normalize_search_text as _db_normalize_search_text
 except Exception:
     ACTIVE_DATABASE_URL = None
+    _db_normalize_search_text = None
 
 
 load_dotenv()
@@ -50,6 +52,22 @@ def get_active_sqlite_db_path(default: str = "products.db") -> str:
             pass
 
     return str((Path.cwd() / default).resolve(strict=False))
+
+
+async def register_sqlite_functions(db) -> None:
+    """
+    Регистрирует SQLite-функции, которые нужны для expression indexes и поиска.
+
+    Важно: aiosqlite-подключения не наследуют функции из SQLAlchemy engine,
+    поэтому их надо регистрировать отдельно для каждого соединения.
+    """
+    if _db_normalize_search_text is None:
+        return
+
+    try:
+        await db.create_function("normalize_search", 1, _db_normalize_search_text, deterministic=True)
+    except TypeError:
+        await db.create_function("normalize_search", 1, _db_normalize_search_text)
 
 
 # Configuration
@@ -259,6 +277,7 @@ class CurrencyConverter:
     async def load_rates(self):
         """Загружает курсы валют из БД"""
         async with aiosqlite.connect(self.db_path) as db:
+            await register_sqlite_functions(db)
             cursor = await db.execute("""
                 SELECT currency_from, currency_to, price_min, price_max, rate
                 FROM currency_rates
@@ -3636,6 +3655,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("=" * 80)
 
     async with aiosqlite.connect(db_path) as db:
+        await register_sqlite_functions(db)
         if clear_db:
             print("Очистка таблицы products...")
             await db.execute("DELETE FROM products")

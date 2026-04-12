@@ -28,6 +28,7 @@ from parser import (  # noqa: E402
     parse as parse_full,
     parse_in,
     parse_tr,
+    register_sqlite_functions,
     process_ps_plus_only_editions,
     process_specific_products_to_db,
     uni,
@@ -356,6 +357,7 @@ async def clear_existing_products(records: list[Dict[str, Any]]) -> int:
     placeholders = ",".join("?" for _ in product_ids)
 
     async with aiosqlite.connect(db_path) as db:
+        await register_sqlite_functions(db)
         cursor = await db.execute(
             f"DELETE FROM products WHERE id IN ({placeholders})",
             product_ids,
