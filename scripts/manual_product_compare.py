@@ -10,6 +10,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
+from time import perf_counter
 
 import aiohttp
 
@@ -19,12 +20,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from parser import (  # noqa: E402
+    get_all_ps_plus_subscriptions,
     match_products_by_id,
     merge_region_data,
     parse as parse_full,
     parse_in,
     parse_tr,
     process_ps_plus_only_editions,
+    process_specific_products_to_db,
     uni,
     unquote,
 )
@@ -82,6 +85,28 @@ def load_source_text(args: argparse.Namespace) -> str:
         "Provide --input-file or pipe the grouped list via stdin.\n"
         "Example: Get-Content games.txt | python scripts/manual_product_compare.py",
     )
+
+
+async def load_promo_data(session: aiohttp.ClientSession) -> dict[str, Any]:
+    promo_path = ROOT / "promo.pkl"
+    if promo_path.exists():
+        with open(promo_path, "rb") as file:
+            promo_data = pickle.load(file)
+
+        if isinstance(promo_data, dict):
+            return promo_data
+
+        all_set = set(promo_data) if promo_data else set()
+        return {
+            "Extra": all_set,
+            "Deluxe": set(),
+            "All": all_set,
+        }
+
+    promo = await get_all_ps_plus_subscriptions(session)
+    with open(promo_path, "wb") as file:
+        pickle.dump(promo, file)
+    return promo
 
 
 def normalize_url(url: str) -> str:
@@ -322,6 +347,7 @@ def compare_records(auto_records: list[Dict[str, Any]], manual_records: list[Dic
 
 async def main() -> None:
     args = parse_args()
+    start_time = perf_counter()
     raw_text = load_source_text(args)
     groups = parse_grouped_text(raw_text)
 
@@ -340,6 +366,8 @@ async def main() -> None:
     report: list[Dict[str, Any]] = []
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
+        promo = await load_promo_data(session)
+
         for index, group in enumerate(groups, start=1):
             print("=" * 96)
             print(f"[{index}/{len(groups)}] {group.title}")
@@ -403,6 +431,11 @@ async def main() -> None:
         pickle.dump(manual_all, file)
     with open(output_dir / "comparison_report.json", "w", encoding="utf-8") as file:
         json.dump(report, file, ensure_ascii=False, indent=2)
+
+    if manual_all:
+        print("=" * 96)
+        print("Syncing parsed records into products.db")
+        await process_specific_products_to_db(manual_all, promo, start_time)
 
     print("=" * 96)
     print("Done")
