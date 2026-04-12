@@ -158,11 +158,53 @@ class ProductCRUD:
                 func.normalize_search(Product.id).like(search_pattern),
                 func.normalize_search(Product.main_name).like(search_pattern),
                 func.normalize_search(Product.name).like(search_pattern),
-                func.normalize_search(Product.description).like(search_pattern),
-                func.normalize_search(Product.publisher).like(search_pattern),
                 func.normalize_search(Product.search_names).like(search_pattern),
-                func.normalize_search(Product.tags).like(search_pattern),
+                func.normalize_search(Product.edition).like(search_pattern),
             )
+        )
+
+    @staticmethod
+    def _apply_game_language_filter(query, game_language: Optional[str]):
+        normalized = (game_language or '').strip().lower()
+        if normalized == 'full_ru':
+            return query.filter(Product.localization == 'full')
+        if normalized == 'partial_ru':
+            return query.filter(
+                or_(
+                    Product.localization == 'subtitles',
+                    Product.localization == 'interface',
+                )
+            )
+        if normalized == 'no_ru':
+            return query.filter(
+                or_(
+                    Product.localization == 'none',
+                    Product.localization.is_(None),
+                    Product.localization == '',
+                )
+            )
+        return query
+
+    @staticmethod
+    def _get_localization_rank_expression():
+        return case(
+            (Product.localization == 'full', 0),
+            (
+                or_(
+                    Product.localization == 'subtitles',
+                    Product.localization == 'interface',
+                ),
+                1,
+            ),
+            (
+                or_(
+                    Product.localization == 'none',
+                    Product.localization.is_(None),
+                    Product.localization == '',
+                ),
+                2,
+            ),
+            else_=3,
         )
 
     @staticmethod
@@ -794,6 +836,9 @@ class ProductCRUD:
 
         if filters.search:
             query = ProductCRUD._apply_search_filter(query, filters.search)
+
+        if getattr(filters, 'game_language', None):
+            query = ProductCRUD._apply_game_language_filter(query, filters.game_language)
 
         if filters.has_discount is not None:
             if filters.has_discount:
@@ -1505,33 +1550,14 @@ class ProductCRUD:
                 )
             )
 
+        localization_rank_column = ProductCRUD._get_localization_rank_expression()
+        min_localization_rank_column = func.min(localization_rank_column).label('min_localization_rank')
         game_language = (getattr(filters, 'game_language', None) or '').strip().lower()
-        if game_language in ('full_ru', 'partial_ru', 'no_ru'):
-            query = query.outerjoin(Localization, Localization.code == Product.localization)
-            if game_language == 'full_ru':
-                query = query.filter(
-                    or_(
-                        Localization.name_ru.ilike('%полностью%рус%'),
-                        Localization.name_ru.ilike('%полностью на русском%'),
-                    )
-                )
-            elif game_language == 'partial_ru':
-                query = query.filter(
-                    or_(
-                        Localization.name_ru.ilike('%субтитр%рус%'),
-                        Localization.name_ru.ilike('%русск%интерфейс%'),
-                        Localization.name_ru.ilike('%русские субтитры%'),
-                    )
-                )
-            else:
-                query = query.filter(
-                    or_(
-                        Localization.name_ru.ilike('%без русского%'),
-                        Localization.name_ru.ilike('%нет русского%'),
-                        Localization.name_ru.ilike('%английский%'),
-                        Localization.name_ru.ilike('%только англ%'),
-                    )
-                )
+        target_language_rank = {
+            'full_ru': 0,
+            'partial_ru': 1,
+            'no_ru': 2,
+        }.get(game_language)
 
         sort_mode = ProductCRUD._normalize_sort_mode(getattr(filters, 'sort', None))
         favorites_subquery = ProductCRUD._get_favorites_count_subquery(db)
@@ -1553,6 +1579,7 @@ class ProductCRUD:
                 sort_name_column,
                 favorites_count_column,
                 min_price_filter_column,
+                min_localization_rank_column,
             )
             .group_by(Product.id, favorites_subquery.c.favorites_count)
         )
@@ -1562,6 +1589,9 @@ class ProductCRUD:
 
         if filters.max_price is not None:
             grouped_query = grouped_query.having(min_price_filter_column <= filters.max_price)
+
+        if target_language_rank is not None:
+            grouped_query = grouped_query.having(min_localization_rank_column == target_language_rank)
 
         total = db.query(func.count()).select_from(grouped_query.order_by(None).subquery()).scalar() or 0
 

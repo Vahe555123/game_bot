@@ -97,6 +97,135 @@ class ProductResolutionTests(unittest.TestCase):
         self.assertEqual(products[0]["region"], "UA")
         self.assertEqual(products[0]["localization"], "full")
 
+    def test_game_language_filter_uses_best_available_localization(self):
+        with self.SessionLocal() as db:
+            db.add_all(
+                [
+                    Product(
+                        id="game-full",
+                        region="TR",
+                        name="Game Full",
+                        main_name="Game Full",
+                        search_names="Game Full",
+                        localization="none",
+                        type="Game",
+                        price_try=100,
+                    ),
+                    Product(
+                        id="game-full",
+                        region="UA",
+                        name="Game Full",
+                        main_name="Game Full",
+                        search_names="Game Full",
+                        localization="full",
+                        type="Game",
+                        price_uah=200,
+                    ),
+                    Product(
+                        id="game-partial",
+                        region="TR",
+                        name="Game Partial",
+                        main_name="Game Partial",
+                        search_names="Game Partial",
+                        localization="subtitles",
+                        type="Game",
+                        price_try=120,
+                    ),
+                    Product(
+                        id="game-none",
+                        region="TR",
+                        name="Game None",
+                        main_name="Game None",
+                        search_names="Game None",
+                        localization="none",
+                        type="Game",
+                        price_try=140,
+                    ),
+                ]
+            )
+            db.commit()
+
+            with patch.object(
+                ProductCRUD,
+                "prepare_product_with_multi_region_prices",
+                side_effect=lambda product, *args, **kwargs: {
+                    "id": product.id,
+                    "region": product.region,
+                    "localization": product.localization,
+                    "main_name": product.main_name,
+                },
+            ):
+                full_products, full_total = ProductCRUD.get_products_grouped_by_name(
+                    db,
+                    ProductFilter(game_language="full_ru"),
+                    PaginationParams(page=1, limit=20),
+                )
+                partial_products, partial_total = ProductCRUD.get_products_grouped_by_name(
+                    db,
+                    ProductFilter(game_language="partial_ru"),
+                    PaginationParams(page=1, limit=20),
+                )
+                none_products, none_total = ProductCRUD.get_products_grouped_by_name(
+                    db,
+                    ProductFilter(game_language="no_ru"),
+                    PaginationParams(page=1, limit=20),
+                )
+
+        self.assertEqual(full_total, 1)
+        self.assertEqual([product["id"] for product in full_products], ["game-full"])
+        self.assertEqual(partial_total, 1)
+        self.assertEqual([product["id"] for product in partial_products], ["game-partial"])
+        self.assertEqual(none_total, 1)
+        self.assertEqual([product["id"] for product in none_products], ["game-none"])
+
+    def test_search_matches_title_fields_only(self):
+        with self.SessionLocal() as db:
+            db.add_all(
+                [
+                    Product(
+                        id="god-of-war",
+                        region="TR",
+                        name="God of War",
+                        main_name="God of War",
+                        search_names="God of War",
+                        localization="full",
+                        type="Game",
+                        price_try=100,
+                    ),
+                    Product(
+                        id="false-positive",
+                        region="TR",
+                        name="Arslan: The Warriors of Legend",
+                        main_name="Arslan: The Warriors of Legend",
+                        search_names="Arslan: The Warriors of Legend",
+                        description="A special God of War event inside the description.",
+                        publisher="Another Studio",
+                        localization="none",
+                        type="Game",
+                        price_try=120,
+                    ),
+                ]
+            )
+            db.commit()
+
+            with patch.object(
+                ProductCRUD,
+                "prepare_product_with_multi_region_prices",
+                side_effect=lambda product, *args, **kwargs: {
+                    "id": product.id,
+                    "region": product.region,
+                    "main_name": product.main_name,
+                },
+            ):
+                products, total = ProductCRUD.get_products_grouped_by_name(
+                    db,
+                    ProductFilter(search="God of War"),
+                    PaginationParams(page=1, limit=20),
+                )
+
+        self.assertEqual(total, 1)
+        self.assertEqual([product["id"] for product in products], ["god-of-war"])
+
     def test_get_by_id_with_fallback_handles_missing_region(self):
         with self.SessionLocal() as db:
             db.add_all(

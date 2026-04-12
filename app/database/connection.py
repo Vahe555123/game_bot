@@ -92,18 +92,13 @@ def _normalize_search_text(value: str | None) -> str:
 
 
 PRODUCT_SEARCH_FTS_TABLE = "product_search_fts"
+PRODUCT_SEARCH_INDEX_VERSION = 2
 PRODUCT_SEARCH_FTS_FIELDS = (
     "id",
     "main_name",
     "name",
     "search_names",
-    "description",
-    "publisher",
-    "tags",
     "edition",
-    "category",
-    "type",
-    "platforms",
 )
 
 
@@ -122,6 +117,9 @@ def _ensure_product_search_index(connection) -> None:
     )
 
     search_text_new = _product_search_text_sql("new")
+    connection.execute(text("DROP TRIGGER IF EXISTS products_ai"))
+    connection.execute(text("DROP TRIGGER IF EXISTS products_ad"))
+    connection.execute(text("DROP TRIGGER IF EXISTS products_au"))
     connection.execute(
         text(
             f"""
@@ -153,9 +151,10 @@ def _ensure_product_search_index(connection) -> None:
         )
     )
 
+    current_index_version = connection.execute(text("PRAGMA user_version")).scalar() or 0
     products_count = connection.execute(text("SELECT COUNT(*) FROM products")).scalar() or 0
     search_index_count = connection.execute(text(f"SELECT COUNT(*) FROM {PRODUCT_SEARCH_FTS_TABLE}")).scalar() or 0
-    if products_count != search_index_count:
+    if current_index_version != PRODUCT_SEARCH_INDEX_VERSION or products_count != search_index_count:
         logger.info(
             "Rebuilding product search index: products=%s index=%s",
             products_count,
@@ -175,6 +174,7 @@ def _ensure_product_search_index(connection) -> None:
                 """
             )
         )
+        connection.exec_driver_sql(f"PRAGMA user_version = {PRODUCT_SEARCH_INDEX_VERSION}")
 
 
 def _sqlite_fallback_candidates(database_url: str) -> list[Path]:
