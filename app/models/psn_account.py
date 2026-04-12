@@ -5,9 +5,9 @@
 
 from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
-from datetime import datetime
 from app.database.connection import Base
 from app.utils.encryption import encrypt_password, decrypt_password, verify_password
+from app.utils.time import utcnow
 
 
 class PSNAccount(Base):
@@ -40,8 +40,8 @@ class PSNAccount(Base):
 
     # Метаданные
     is_active = Column(Integer, default=1, comment='Активен ли аккаунт (1=да, 0=нет)')
-    created_at = Column(DateTime, default=datetime.utcnow, comment='Дата создания')
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='Дата обновления')
+    created_at = Column(DateTime, default=utcnow, comment='Дата создания')
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, comment='Дата обновления')
 
     # Связь с пользователем
     user = relationship("User", back_populates="psn_accounts")

@@ -67,7 +67,12 @@ class Product(Base):
     players_online = Column(Integer, nullable=True, comment='Поддержка онлайн игры (0/1)')
 
     # Связь с избранными товарами пользователей
-    favorited_by = relationship("UserFavoriteProduct", back_populates="product", cascade="all, delete-orphan")
+    favorited_by = relationship(
+        "UserFavoriteProduct",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        primaryjoin="and_(Product.id == UserFavoriteProduct.product_id, Product.region == UserFavoriteProduct.region)",
+    )
 
     def __repr__(self):
         return f"<Product(id={self.id}, name='{self.get_display_name()}', region='{self.region}')>"

@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
 from app.database.connection import Base
+from app.utils.time import utcnow
 
 class CurrencyRate(Base):
     """Модель курсов валют с диапазонами цен"""
@@ -20,8 +20,8 @@ class CurrencyRate(Base):
     
     # Метаданные
     is_active = Column(Boolean, default=True, comment='Активен ли курс')
-    created_at = Column(DateTime, default=datetime.utcnow, comment='Дата создания')
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='Дата обновления')
+    created_at = Column(DateTime, default=utcnow, comment='Дата создания')
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, comment='Дата обновления')
     created_by = Column(Integer, nullable=True, comment='ID администратора, создавшего курс')
     
     # Дополнительная информация

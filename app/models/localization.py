@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime
 from app.database.connection import Base
-from datetime import datetime
+from app.utils.time import utcnow
 
 class Localization(Base):
     """Модель для уровней локализации"""
@@ -11,7 +11,7 @@ class Localization(Base):
     name_ru = Column(String(255), nullable=False, comment='Название на русском')
     name_en = Column(String(255), nullable=False, comment='Название на английском')
     description = Column(Text, nullable=True, comment='Описание уровня локализации')
-    created_at = Column(DateTime, default=datetime.utcnow, comment='Дата создания')
+    created_at = Column(DateTime, default=utcnow, comment='Дата создания')
 
     def to_dict(self):
         """Преобразование в словарь"""

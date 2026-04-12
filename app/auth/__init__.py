@@ -1,1 +1,1 @@
-"""MongoDB-backed site authentication helpers."""
+"""SQLite-backed site authentication helpers."""

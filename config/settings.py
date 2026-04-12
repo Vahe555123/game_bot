@@ -1,37 +1,30 @@
+from __future__ import annotations
+
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
+
 class Settings:
-    # Настройки приложения
-    PROJECT_NAME: str = "PlayStation Store Telegram WebApp"
+    PROJECT_NAME: str = "PlayStation Store SQLite WebApp"
     VERSION: str = "1.0.0"
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
-    
-    # Настройки базы данных
+
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./products.db")
-    MONGODB_URL: str = os.getenv("MONGODB_URL", "mongodb://127.0.0.1:27017")
-    MONGODB_DB_NAME: str = os.getenv("MONGODB_DB_NAME", "game_bot2")
-    MONGODB_AUTH_USERS_COLLECTION: str = os.getenv("MONGODB_AUTH_USERS_COLLECTION", "site_users")
-    MONGODB_AUTH_CODES_COLLECTION: str = os.getenv("MONGODB_AUTH_CODES_COLLECTION", "email_verifications")
-    MONGODB_AUTH_SESSIONS_COLLECTION: str = os.getenv("MONGODB_AUTH_SESSIONS_COLLECTION", "site_sessions")
-    MONGODB_SITE_CONTENT_COLLECTION: str = os.getenv("MONGODB_SITE_CONTENT_COLLECTION", "site_content")
-    
-    # Настройки Telegram
+
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")
     WEBAPP_URL: str = os.getenv("WEBAPP_URL", "")
     MANAGER_TELEGRAM_URL: str = os.getenv("MANAGER_TELEGRAM_URL", "")
-    
-    # Настройки FastAPI
+
     HOST: str = os.getenv("HOST", "0.0.0.0")
     PORT: int = int(os.getenv("PORT", 8000))
     CORS_ALLOW_ALL: bool = os.getenv("CORS_ALLOW_ALL", "true").lower() == "true"
-    
-    # Настройки CORS
+
     @property
-    def ALLOWED_ORIGINS(self) -> list:
+    def ALLOWED_ORIGINS(self) -> list[str]:
         origins = [
             "https://web.telegram.org",
             "http://localhost:3000",
@@ -49,18 +42,15 @@ class Settings:
                 if origin and origin not in origins:
                     origins.append(origin)
 
-        # Добавляем WEBAPP_URL если он задан
         if self.WEBAPP_URL:
-            webapp_origin = self.WEBAPP_URL.replace('/webapp', '')
+            webapp_origin = self.WEBAPP_URL.replace("/webapp", "")
             if webapp_origin not in origins:
                 origins.append(webapp_origin)
         return origins
-    
-    # Настройки файлов
-    UPLOAD_DIR: str = "uploads"
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
 
-    # Настройки email авторизации
+    UPLOAD_DIR: str = "uploads"
+    MAX_FILE_SIZE: int = 10 * 1024 * 1024
+
     AUTH_PASSWORD_MIN_LENGTH: int = int(os.getenv("AUTH_PASSWORD_MIN_LENGTH", 8))
     AUTH_EMAIL_CODE_LENGTH: int = int(os.getenv("AUTH_EMAIL_CODE_LENGTH", 6))
     AUTH_EMAIL_CODE_TTL_MINUTES: int = int(os.getenv("AUTH_EMAIL_CODE_TTL_MINUTES", 10))
@@ -91,40 +81,32 @@ class Settings:
     VK_CLIENT_ID: str = os.getenv("VK_CLIENT_ID", "")
     VK_CLIENT_SECRET: str = os.getenv("VK_CLIENT_SECRET", "")
     TELEGRAM_BOT_USERNAME: str = os.getenv("TELEGRAM_BOT_USERNAME", "")
-    
-    # Настройки валют
+
     DEFAULT_CURRENCY: str = "RUB"
-    SUPPORTED_CURRENCIES: list = ["UAH", "TRL", "INR", "RUB"]
-    
-    # Настройки администрирования
+    SUPPORTED_CURRENCIES: list[str] = ["UAH", "TRL", "INR", "RUB"]
+
     @property
-    def ADMIN_TELEGRAM_IDS(self) -> list:
-        """Список Telegram ID администраторов"""
+    def ADMIN_TELEGRAM_IDS(self) -> list[int]:
         admin_ids_str = os.getenv("ADMIN_TELEGRAM_IDS", "") or os.getenv("ADMIN_TELEGRAM_ID", "")
         if not admin_ids_str:
             return []
 
-        admin_ids = []
-        seen_ids = set()
-
+        admin_ids: list[int] = []
+        seen_ids: set[int] = set()
         for raw_user_id in admin_ids_str.split(","):
             user_id = raw_user_id.strip()
             if not user_id:
                 continue
-
             try:
                 parsed_id = int(user_id)
             except ValueError:
                 continue
-
             if parsed_id in seen_ids:
                 continue
-
             seen_ids.add(parsed_id)
             admin_ids.append(parsed_id)
-
         return admin_ids
-    
+
     ADMIN_SECRET_KEY: str = os.getenv("ADMIN_SECRET_KEY", "your-secret-admin-key-here")
 
     @property
@@ -134,8 +116,9 @@ class Settings:
     @property
     def VK_REDIRECT_URI(self) -> str:
         return f"{self.PUBLIC_APP_URL}/api/auth/oauth/vk/callback"
-    
+
     class Config:
         case_sensitive = True
 
-settings = Settings() 
+
+settings = Settings()

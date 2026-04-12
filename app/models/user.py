@@ -1,143 +1,169 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text
+from __future__ import annotations
+
+import json
+from typing import Iterable, Optional
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import relationship
-from datetime import datetime
+
+from app.auth.security import hash_password, verify_password
 from app.database.connection import Base
-import hashlib
-import secrets
-from app.utils.encryption import encrypt_password, decrypt_password, verify_password
+from app.utils.encryption import decrypt_password, encrypt_password
+from app.utils.time import utcnow
+
 
 class User(Base):
-    """Модель пользователя Telegram"""
-    __tablename__ = 'users'
+    """Unified user account stored in SQLite."""
+
+    __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    telegram_id = Column(Integer, unique=True, nullable=False, index=True, comment='ID пользователя в Telegram')
-    username = Column(String(255), nullable=True, comment='Username пользователя в Telegram')
-    first_name = Column(String(255), nullable=True, comment='Имя пользователя')
-    last_name = Column(String(255), nullable=True, comment='Фамилия пользователя')
-    preferred_region = Column(String(10), default='UA', comment='Предпочитаемый регион (UA, TR, IN)')
 
-    # Настройки отображения регионов (по умолчанию включена только Турция)
-    show_ukraine_prices = Column(Boolean, default=False, comment='Показывать цены Украины')
-    show_turkey_prices = Column(Boolean, default=True, comment='Показывать цены Турции')
-    show_india_prices = Column(Boolean, default=False, comment='Показывать цены Индии')
+    telegram_id = Column(Integer, unique=True, nullable=True, index=True)
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    vk_id = Column(String(255), unique=True, nullable=True, index=True)
 
-    # Email для привязки покупки (общий для всех регионов - Турция, Индия, Украина)
-    payment_email = Column(String(255), nullable=True, comment='Email для привязки покупки на oplata.info')
+    email = Column(String(255), unique=True, nullable=True, index=True)
+    email_normalized = Column(String(255), unique=True, nullable=True, index=True)
+    email_verified = Column(Boolean, default=False, nullable=False)
+    password_hash = Column(Text, nullable=True)
 
-    # PSN данные пользователя
-    platform = Column(String(50), nullable=True, comment='PlayStation платформа (PS4, PS5)')
-    psn_email = Column(String(255), nullable=True, comment='Email для PSN аккаунта')
-    psn_password_hash = Column(Text, nullable=True, comment='Зашифрованный пароль PSN аккаунта')
-    psn_password_salt = Column(String(32), nullable=True, comment='Соль для шифрования пароля')
+    username = Column(String(255), nullable=True)
+    first_name = Column(String(255), nullable=True)
+    last_name = Column(String(255), nullable=True)
+    preferred_region = Column(String(10), default="UA", nullable=False)
+    show_ukraine_prices = Column(Boolean, default=False, nullable=False)
+    show_turkey_prices = Column(Boolean, default=True, nullable=False)
+    show_india_prices = Column(Boolean, default=False, nullable=False)
+    payment_email = Column(String(255), nullable=True)
+    platform = Column(String(50), nullable=True)
+    psn_email = Column(String(255), nullable=True)
+    psn_password_hash = Column(Text, nullable=True)
+    psn_password_salt = Column(String(32), nullable=True)
 
-    is_active = Column(Boolean, default=True, comment='Активен ли пользователь')
-    created_at = Column(DateTime, default=datetime.utcnow, comment='Дата регистрации')
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='Дата последнего обновления')
+    role = Column(String(32), default="client", nullable=False, index=True)
+    auth_providers_json = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
 
-    # Связь с избранными товарами
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
+    last_registration_at = Column(DateTime, nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
+    registration_user_agent = Column(String(255), nullable=True)
+    registration_ip_address = Column(String(64), nullable=True)
+    login_user_agent = Column(String(255), nullable=True)
+    login_ip_address = Column(String(64), nullable=True)
+
     favorite_products = relationship("UserFavoriteProduct", back_populates="user", cascade="all, delete-orphan")
-
-    # Связь с PSN аккаунтами (по регионам)
     psn_accounts = relationship("PSNAccount", back_populates="user", cascade="all, delete-orphan")
 
-    def __repr__(self):
-        return f"<User(telegram_id={self.telegram_id}, username='{self.username}')>"
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, telegram_id={self.telegram_id}, email={self.email!r})>"
 
     @property
-    def full_name(self):
-        """Полное имя пользователя"""
+    def full_name(self) -> str:
         parts = [self.first_name, self.last_name]
-        return " ".join(filter(None, parts)) or self.username or f"User {self.telegram_id}"
+        return " ".join(part for part in parts if part) or self.username or self.email or f"User {self.id}"
 
-    def get_enabled_regions(self):
-        """Получить список включенных регионов"""
+    @property
+    def auth_providers(self) -> list[str]:
+        return self.get_auth_providers()
+
+    @auth_providers.setter
+    def auth_providers(self, value: Iterable[str] | None) -> None:
+        self.set_auth_providers(value)
+
+    def get_auth_providers(self) -> list[str]:
+        if not self.auth_providers_json:
+            return []
+        try:
+            data = json.loads(self.auth_providers_json)
+        except (TypeError, ValueError):
+            return []
+        if isinstance(data, list):
+            return [str(item) for item in data if str(item).strip()]
+        return []
+
+    def set_auth_providers(self, value: Iterable[str] | None) -> None:
+        if not value:
+            self.auth_providers_json = json.dumps([], ensure_ascii=False)
+            return
+        normalized = []
+        seen = set()
+        for item in value:
+            provider = str(item).strip().lower()
+            if not provider or provider in seen:
+                continue
+            seen.add(provider)
+            normalized.append(provider)
+        self.auth_providers_json = json.dumps(normalized, ensure_ascii=False)
+
+    def set_password(self, password: Optional[str]) -> None:
+        if not password:
+            self.password_hash = None
+            return
+        self.password_hash = hash_password(password)
+
+    def verify_password(self, password: str) -> bool:
+        if not self.password_hash:
+            return False
+        return verify_password(password, self.password_hash)
+
+    @property
+    def has_password(self) -> bool:
+        return bool(self.password_hash)
+
+    def get_enabled_regions(self) -> list[str]:
         regions = []
         if self.show_ukraine_prices:
-            regions.append('UA')
+            regions.append("UA")
         if self.show_turkey_prices:
-            regions.append('TR')
+            regions.append("TR")
         if self.show_india_prices:
-            regions.append('IN')
-        # Если все регионы выключены, возвращаем Турцию по умолчанию
-        if not regions:
-            regions = ['TR']
-        return regions
+            regions.append("IN")
+        return regions or ["TR"]
 
-    def get_preferred_region_info(self):
-        """Получить информацию о предпочитаемом регионе"""
+    def get_preferred_region_info(self) -> dict[str, str]:
         region_map = {
-            'TR': {'code': 'TRL', 'symbol': '₺', 'flag': '🇹🇷', 'name': 'Турция'},
-            'UA': {'code': 'UAH', 'symbol': '₴', 'flag': '🇺🇦', 'name': 'Украина'},
-            'IN': {'code': 'INR', 'symbol': '₹', 'flag': '🇮🇳', 'name': 'Индия'}
+            "TR": {"code": "TRY", "symbol": "₺", "flag": "🇹🇷", "name": "Турция"},
+            "UA": {"code": "UAH", "symbol": "₴", "flag": "🇺🇦", "name": "Украина"},
+            "IN": {"code": "INR", "symbol": "₹", "flag": "🇮🇳", "name": "Индия"},
         }
-        return region_map.get(self.preferred_region, region_map['UA'])
+        return region_map.get((self.preferred_region or "UA").upper(), region_map["UA"])
 
-    def set_psn_password(self, password: str):
-        """Установить PSN пароль с шифрованием"""
+    def set_psn_password(self, password: Optional[str]) -> None:
         if not password:
             self.psn_password_hash = None
             self.psn_password_salt = None
             return
-
-        # Шифруем пароль
         encrypted_password, salt = encrypt_password(password)
-
         self.psn_password_hash = encrypted_password
         self.psn_password_salt = salt
 
     def verify_psn_password(self, password: str) -> bool:
-        """Проверить PSN пароль"""
         if not self.psn_password_hash or not self.psn_password_salt:
             return False
-
         return verify_password(password, self.psn_password_hash, self.psn_password_salt)
 
     def get_psn_password(self) -> str:
-        """
-        Получить расшифрованный PSN пароль
-
-        Returns:
-            str: Расшифрованный PSN пароль или пустая строка если пароль не задан
-        """
         if not self.psn_password_hash or not self.psn_password_salt:
             return ""
-
         return decrypt_password(self.psn_password_hash, self.psn_password_salt)
 
     @property
     def has_psn_credentials(self) -> bool:
-        """Проверить, есть ли PSN данные у пользователя (старые глобальные)"""
         return bool(self.psn_email and self.psn_password_hash)
 
     def get_psn_account_for_region(self, region: str):
-        """
-        Получить PSN аккаунт для указанного региона.
-
-        Args:
-            region: Код региона (UA, TR)
-
-        Returns:
-            PSNAccount или None
-        """
+        normalized_region = (region or "").upper()
         for account in self.psn_accounts:
-            if account.region == region and account.is_active:
+            if account.region == normalized_region and account.is_active:
                 return account
         return None
 
     def has_psn_credentials_for_region(self, region: str) -> bool:
-        """
-        Проверить, есть ли PSN данные для указанного региона.
-
-        Args:
-            region: Код региона (UA, TR)
-
-        Returns:
-            True если есть настроенный аккаунт
-        """
         account = self.get_psn_account_for_region(region)
-        return account is not None and account.has_credentials
+        return bool(account and account.has_credentials)
 
     def get_all_psn_accounts(self) -> list:
-        """Получить все активные PSN аккаунты пользователя"""
-        return [acc for acc in self.psn_accounts if acc.is_active]
+        return [account for account in self.psn_accounts if account.is_active]

@@ -14,7 +14,6 @@ from app.api.site_content_routes import router as site_content_router
 from app.api.site_favorite_routes import router as site_favorite_router
 from app.api.site_purchase_routes import router as site_purchase_router
 from app.api.payment_return_routes import router as payment_return_router
-from app.auth.mongo import init_mongo_indexes
 from app.bot.main import setup_bot, shutdown_bot
 from app.webapp.routes import router as webapp_router
 from config.settings import settings
@@ -29,7 +28,6 @@ async def lifespan(app: FastAPI):
     from app.database.connection import init_database
 
     init_database()
-    init_mongo_indexes()
 
     if settings.TELEGRAM_BOT_TOKEN:
         await setup_bot(app)

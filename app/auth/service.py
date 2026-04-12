@@ -1,81 +1,74 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import lru_cache
 from math import ceil
 from typing import Any, Callable, Optional
 
-from bson import ObjectId
-from bson.errors import InvalidId
-from pymongo.collection import Collection
-from pymongo.errors import DuplicateKeyError, PyMongoError
+from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, selectinload
 
-from config.settings import settings
-from app.utils.encryption import decrypt_password, encrypt_password
-
-from .email_service import EmailDeliveryError, send_verification_email
-from .exceptions import AuthServiceError
-from .mongo import (
-    get_auth_codes_collection,
-    get_auth_sessions_collection,
-    get_auth_users_collection,
-)
-from .schemas import (
+from app.auth.email_service import EmailDeliveryError, send_verification_email
+from app.auth.exceptions import AuthServiceError
+from app.auth.schemas import (
     AuthActionResponse,
     RegisterRequest,
     SitePSNAccountPublic,
+    SitePSNAccountUpdateRequest,
     SiteProfilePreferencesUpdateRequest,
     SiteProfileResponse,
-    SitePSNAccountUpdateRequest,
     SiteUserPublic,
     normalize_site_user_role,
 )
-from .security import (
+from app.auth.security import (
     generate_session_token,
     generate_verification_code,
     generate_verification_salt,
-    hash_password,
     hash_session_token,
     hash_verification_code,
     verify_password,
     verify_verification_code,
 )
+from app.database.connection import SessionLocal
+from app.models import PSNAccount, SiteAuthCode, SiteAuthSession, User
+from app.utils.encryption import decrypt_password, encrypt_password
+from app.utils.time import utcnow as shared_utcnow
+from config.settings import settings
 
 REGISTER_PURPOSE = "register"
 RESET_PASSWORD_PURPOSE = "password_reset"
 SITE_ROLE_CLIENT = "client"
 SITE_ROLE_ADMIN = "admin"
-OPTIONAL_IDENTITY_FIELDS = {"telegram_id", "google_id", "vk_id"}
+
+
+def _get_value(source: Any, key: str, default: Any = None) -> Any:
+    if source is None:
+        return default
+    if isinstance(source, dict):
+        return source.get(key, default)
+    return getattr(source, key, default)
 
 
 def omit_none_fields(payload: dict[str, Any], *, fields: Optional[set[str]] = None) -> dict[str, Any]:
     target_fields = fields or set(payload.keys())
-    return {
-        key: value
-        for key, value in payload.items()
-        if key not in target_fields or value is not None
-    }
+    return {key: value for key, value in payload.items() if key not in target_fields or value is not None}
 
 
 def utcnow() -> datetime:
-    return datetime.utcnow()
+    return shared_utcnow()
 
 
 def seconds_until(moment: Optional[datetime], *, now: Optional[datetime] = None) -> int:
     if moment is None:
         return 0
-
-    current_time = now or utcnow()
-    diff_seconds = (moment - current_time).total_seconds()
-    if diff_seconds <= 0:
-        return 0
-    return int(ceil(diff_seconds))
+    diff = (moment - (now or utcnow())).total_seconds()
+    return max(int(ceil(diff)), 0)
 
 
-def seconds_until_resend(verification_doc: Optional[dict[str, Any]], *, now: Optional[datetime] = None) -> int:
-    if not verification_doc:
-        return 0
-    return seconds_until(verification_doc.get("resend_available_at"), now=now)
+def seconds_until_resend(verification_doc: Optional[Any], *, now: Optional[datetime] = None) -> int:
+    return seconds_until(_get_value(verification_doc, "resend_available_at"), now=now) if verification_doc else 0
 
 
 def create_verification_document(
@@ -88,8 +81,7 @@ def create_verification_document(
     current_time = now or utcnow()
     code = generate_verification_code(settings.AUTH_EMAIL_CODE_LENGTH)
     salt = generate_verification_salt()
-
-    verification_doc = {
+    doc = {
         "user_id": user_id,
         "email_normalized": email_normalized,
         "purpose": purpose,
@@ -103,7 +95,7 @@ def create_verification_document(
         "resend_available_at": current_time + timedelta(seconds=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS),
         "expires_at": current_time + timedelta(minutes=settings.AUTH_EMAIL_CODE_TTL_MINUTES),
     }
-    return code, verification_doc
+    return code, doc
 
 
 def is_env_admin_telegram_id(telegram_id: Optional[int]) -> bool:
@@ -113,84 +105,105 @@ def is_env_admin_telegram_id(telegram_id: Optional[int]) -> bool:
 def resolve_site_user_role(raw_role: Optional[str], *, telegram_id: Optional[int] = None) -> str:
     if is_env_admin_telegram_id(telegram_id):
         return SITE_ROLE_ADMIN
-
     try:
         return normalize_site_user_role(raw_role)
     except ValueError:
         return SITE_ROLE_CLIENT
 
 
-def is_admin_user_doc(user_doc: Optional[dict[str, Any]]) -> bool:
-    if not user_doc:
-        return False
-
-    return resolve_site_user_role(
-        user_doc.get("role"),
-        telegram_id=user_doc.get("telegram_id"),
-    ) == SITE_ROLE_ADMIN
-
-
-def build_public_user(user_doc: dict[str, Any]) -> SiteUserPublic:
-    created_at = user_doc.get("created_at") or utcnow()
-    updated_at = user_doc.get("updated_at") or created_at
-    role = resolve_site_user_role(
-        user_doc.get("role"),
-        telegram_id=user_doc.get("telegram_id"),
+def is_admin_user_doc(user_doc: Optional[Any]) -> bool:
+    return bool(
+        user_doc
+        and resolve_site_user_role(_get_value(user_doc, "role"), telegram_id=_get_value(user_doc, "telegram_id"))
+        == SITE_ROLE_ADMIN
     )
 
+
+def _extract_auth_providers(source: Any) -> list[str]:
+    raw = _get_value(source, "auth_providers", None)
+    if isinstance(raw, list):
+        return [str(item).strip().lower() for item in raw if str(item).strip()]
+    raw_json = _get_value(source, "auth_providers_json", None)
+    if not raw_json:
+        return []
+    try:
+        import json
+
+        data = json.loads(raw_json)
+    except (TypeError, ValueError):
+        return []
+    return [str(item).strip().lower() for item in data] if isinstance(data, list) else []
+
+
+def build_public_user(user_doc: Any) -> SiteUserPublic:
+    created_at = _get_value(user_doc, "created_at") or utcnow()
+    updated_at = _get_value(user_doc, "updated_at") or created_at
+    telegram_id = _get_value(user_doc, "telegram_id")
+    role = resolve_site_user_role(_get_value(user_doc, "role"), telegram_id=telegram_id)
+    email = _get_value(user_doc, "email") or _get_value(user_doc, "email_normalized")
     return SiteUserPublic(
-        id=str(user_doc.get("_id", "")),
-        email=user_doc.get("email"),
-        email_verified=bool(user_doc.get("email_verified", False)),
-        username=user_doc.get("username"),
-        first_name=user_doc.get("first_name"),
-        last_name=user_doc.get("last_name"),
-        telegram_id=user_doc.get("telegram_id"),
-        preferred_region=user_doc.get("preferred_region", "UA"),
-        show_ukraine_prices=bool(user_doc.get("show_ukraine_prices", False)),
-        show_turkey_prices=bool(user_doc.get("show_turkey_prices", True)),
-        show_india_prices=bool(user_doc.get("show_india_prices", False)),
-        payment_email=user_doc.get("payment_email"),
-        platform=user_doc.get("platform"),
-        psn_email=user_doc.get("psn_email"),
+        id=str(_get_value(user_doc, "id") or _get_value(user_doc, "_id") or ""),
+        email=email,
+        email_verified=bool(_get_value(user_doc, "email_verified", False)),
+        username=_get_value(user_doc, "username"),
+        first_name=_get_value(user_doc, "first_name"),
+        last_name=_get_value(user_doc, "last_name"),
+        telegram_id=telegram_id,
+        preferred_region=_get_value(user_doc, "preferred_region", "UA"),
+        show_ukraine_prices=bool(_get_value(user_doc, "show_ukraine_prices", False)),
+        show_turkey_prices=bool(_get_value(user_doc, "show_turkey_prices", True)),
+        show_india_prices=bool(_get_value(user_doc, "show_india_prices", False)),
+        payment_email=_get_value(user_doc, "payment_email"),
+        platform=_get_value(user_doc, "platform"),
+        psn_email=_get_value(user_doc, "psn_email"),
         role=role,
         is_admin=role == SITE_ROLE_ADMIN,
-        is_active=bool(user_doc.get("is_active", True)),
-        auth_providers=list(user_doc.get("auth_providers", [])),
+        is_active=bool(_get_value(user_doc, "is_active", True)),
+        auth_providers=_extract_auth_providers(user_doc),
         created_at=created_at,
         updated_at=updated_at,
-        last_login_at=user_doc.get("last_login_at"),
+        last_login_at=_get_value(user_doc, "last_login_at"),
     )
 
 
-def build_public_psn_account(region: str, account_doc: Optional[dict[str, Any]] = None) -> SitePSNAccountPublic:
-    region_code = (region or "").upper()
-    current_account = account_doc or {}
+def build_public_psn_account(region: str, account_doc: Optional[Any] = None) -> SitePSNAccountPublic:
+    encrypted_password = _get_value(account_doc, "psn_password_hash")
+    password_salt = _get_value(account_doc, "psn_password_salt")
     psn_password = ""
-    if current_account.get("psn_password_hash") and current_account.get("psn_password_salt"):
-        psn_password = decrypt_password(current_account["psn_password_hash"], current_account["psn_password_salt"])
-
+    if encrypted_password and password_salt:
+        try:
+            psn_password = decrypt_password(encrypted_password, password_salt)
+        except Exception:
+            psn_password = ""
     return SitePSNAccountPublic(
-        region=region_code,
-        platform=current_account.get("platform"),
-        psn_email=current_account.get("psn_email"),
+        region=(region or "").upper(),
+        platform=_get_value(account_doc, "platform"),
+        psn_email=_get_value(account_doc, "psn_email"),
         psn_password=psn_password or None,
-        has_password=bool(current_account.get("psn_password_hash")),
-        has_backup_code=False,
-        updated_at=current_account.get("updated_at"),
+        has_password=bool(encrypted_password and password_salt),
+        has_backup_code=bool(_get_value(account_doc, "twofa_backup_code")),
+        updated_at=_get_value(account_doc, "updated_at"),
     )
 
 
-def build_public_profile(user_doc: dict[str, Any]) -> SiteProfileResponse:
-    psn_accounts = dict(user_doc.get("psn_accounts") or {})
-
-    if "UA" not in psn_accounts and (user_doc.get("platform") or user_doc.get("psn_email")):
+def build_public_profile(user_doc: Any) -> SiteProfileResponse:
+    psn_accounts: dict[str, Any] = {}
+    raw_accounts = _get_value(user_doc, "psn_accounts")
+    if isinstance(raw_accounts, dict):
+        psn_accounts.update(raw_accounts)
+    elif raw_accounts:
+        for account in raw_accounts:
+            region = (_get_value(account, "region") or "").upper()
+            if region:
+                psn_accounts[region] = account
+    if "UA" not in psn_accounts and (_get_value(user_doc, "psn_email") or _get_value(user_doc, "psn_password_hash")):
         psn_accounts["UA"] = {
-            "platform": user_doc.get("platform"),
-            "psn_email": user_doc.get("psn_email"),
-            "updated_at": user_doc.get("updated_at"),
+            "platform": _get_value(user_doc, "platform"),
+            "psn_email": _get_value(user_doc, "psn_email"),
+            "psn_password_hash": _get_value(user_doc, "psn_password_hash"),
+            "psn_password_salt": _get_value(user_doc, "psn_password_salt"),
+            "updated_at": _get_value(user_doc, "updated_at"),
         }
-
     return SiteProfileResponse(
         user=build_public_user(user_doc),
         psn_accounts={
@@ -202,427 +215,281 @@ def build_public_profile(user_doc: dict[str, Any]) -> SiteProfileResponse:
 
 def resolve_user_identifier(user_id: Any) -> Any:
     if isinstance(user_id, str):
-        normalized_id = user_id.strip()
-        if not normalized_id:
+        normalized = user_id.strip()
+        if not normalized:
             return user_id
-
-        try:
-            return ObjectId(normalized_id)
-        except (InvalidId, TypeError):
-            return normalized_id
-
+        return int(normalized) if normalized.isdigit() else normalized
     return user_id
+
+
+def _map_integrity_error(error: IntegrityError) -> AuthServiceError:
+    error_text = str(error).lower()
+    if "users.telegram_id" in error_text:
+        return AuthServiceError(409, "Этот Telegram ID уже привязан к другому аккаунту.")
+    if "users.google_id" in error_text:
+        return AuthServiceError(409, "Этот Google аккаунт уже привязан к другому профилю.")
+    if "users.vk_id" in error_text:
+        return AuthServiceError(409, "Этот VK аккаунт уже привязан к другому профилю.")
+    if "users.email" in error_text:
+        return AuthServiceError(409, "Пользователь с таким email уже существует.")
+    return AuthServiceError(409, "Пользователь с такими данными уже существует.")
 
 
 class AuthService:
     def __init__(
         self,
         *,
-        users: Optional[Collection] = None,
-        codes: Optional[Collection] = None,
-        sessions: Optional[Collection] = None,
+        session_factory: Callable[[], Session] | None = None,
         email_sender: Optional[Callable[..., None]] = None,
         clock: Callable[[], datetime] = utcnow,
     ) -> None:
-        self.users = users or get_auth_users_collection()
-        self.codes = codes or get_auth_codes_collection()
-        self.sessions = sessions or get_auth_sessions_collection()
+        self.session_factory = session_factory or SessionLocal
         self.email_sender = email_sender or send_verification_email
         self.clock = clock
 
-    def start_registration(
-        self,
-        payload: RegisterRequest,
-        *,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
-    ) -> AuthActionResponse:
-        current_time = self.clock()
-
-        if len(payload.password) < settings.AUTH_PASSWORD_MIN_LENGTH:
-            raise AuthServiceError(
-                422,
-                f"Пароль должен быть не короче {settings.AUTH_PASSWORD_MIN_LENGTH} символов.",
-            )
-
+    @contextmanager
+    def _session(self):
+        db = self.session_factory()
         try:
-            existing_user = self.users.find_one({"email_normalized": payload.email})
-            if existing_user and existing_user.get("email_verified"):
-                raise AuthServiceError(409, "Пользователь с таким email уже зарегистрирован.")
+            yield db
+        finally:
+            db.close()
 
-            existing_verification = self.codes.find_one(
-                {"email_normalized": payload.email, "purpose": REGISTER_PURPOSE}
-            )
-            resend_in = seconds_until_resend(existing_verification, now=current_time)
-            if resend_in > 0:
-                raise AuthServiceError(
-                    429,
-                    "Код уже отправлен. Попробуйте чуть позже.",
-                    extra={"resend_available_in": resend_in},
-                )
+    @staticmethod
+    def _normalize_email(email: str) -> str:
+        return email.strip().lower()
 
-            user_id = self._upsert_registration_user(
-                payload=payload,
-                existing_user=existing_user,
-                current_time=current_time,
-                user_agent=user_agent,
-                ip_address=ip_address,
-            )
+    def _get_user_by_email(self, db: Session, email: str) -> Optional[User]:
+        normalized = self._normalize_email(email)
+        return db.query(User).filter(or_(User.email_normalized == normalized, User.email == normalized)).first()
 
-            code, verification_doc = create_verification_document(
-                user_id=user_id,
-                email_normalized=payload.email,
-                purpose=REGISTER_PURPOSE,
-                now=current_time,
-            )
-            self._save_verification_and_send_email(
-                email=payload.email,
-                verification_doc=verification_doc,
-                code=code,
-                previous_doc=existing_verification,
-            )
-        except AuthServiceError:
-            raise
-        except DuplicateKeyError as error:
-            raise self._map_duplicate_key_error(error) from error
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+    def _get_user_by_id(self, db: Session, user_id: Any) -> Optional[User]:
+        return db.query(User).options(selectinload(User.psn_accounts)).filter(User.id == resolve_user_identifier(user_id)).first()
 
-        return AuthActionResponse(
-            message="Код подтверждения отправлен на email.",
-            resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS,
+    def _get_code(self, db: Session, email: str, purpose: str) -> Optional[SiteAuthCode]:
+        normalized = self._normalize_email(email)
+        return (
+            db.query(SiteAuthCode)
+            .filter(SiteAuthCode.email_normalized == normalized, SiteAuthCode.purpose == purpose)
+            .first()
         )
+
+    def _save_code(self, db: Session, *, user: User, email: str, purpose: str) -> tuple[str, SiteAuthCode]:
+        current_time = self.clock()
+        email_normalized = self._normalize_email(email)
+        code, data = create_verification_document(user_id=user.id, email_normalized=email_normalized, purpose=purpose, now=current_time)
+        code_row = self._get_code(db, email, purpose) or SiteAuthCode(user_id=user.id, email_normalized=email_normalized, purpose=purpose)
+        code_row.user_id = user.id
+        code_row.email_normalized = email_normalized
+        code_row.purpose = purpose
+        code_row.salt = data["salt"]
+        code_row.code_hash = data["code_hash"]
+        code_row.attempts = 0
+        code_row.max_attempts = settings.AUTH_EMAIL_MAX_ATTEMPTS
+        code_row.created_at = code_row.created_at or current_time
+        code_row.updated_at = current_time
+        code_row.last_sent_at = current_time
+        code_row.resend_available_at = data["resend_available_at"]
+        code_row.expires_at = data["expires_at"]
+        db.add(code_row)
+        db.commit()
+        return code, code_row
+
+    def _send_code(self, email: str, code: str, *, purpose: str) -> None:
+        try:
+            self.email_sender(email, code, purpose=purpose)
+        except EmailDeliveryError as error:
+            raise AuthServiceError(503, str(error)) from error
+
+    def _create_session(self, db: Session, *, user: User, provider: str, user_agent: Optional[str], ip_address: Optional[str]) -> str:
+        current_time = self.clock()
+        token = generate_session_token()
+        session_row = SiteAuthSession(
+            user_id=user.id,
+            session_token_hash=hash_session_token(token),
+            provider=provider,
+            user_agent=user_agent,
+            ip_address=ip_address,
+            created_at=current_time,
+            expires_at=current_time + timedelta(days=settings.AUTH_SESSION_TTL_DAYS),
+            last_used_at=current_time,
+        )
+        db.add(session_row)
+        db.commit()
+        return token
+
+    def _check_and_consume_code(self, db: Session, *, email: str, code: str, purpose: str) -> tuple[User, SiteAuthCode]:
+        user = self._get_user_by_email(db, email)
+        if not user:
+            raise AuthServiceError(404, "Пользователь с таким email не найден.")
+        verification = self._get_code(db, email, purpose)
+        if not verification:
+            raise AuthServiceError(400, "Сначала запросите код подтверждения.")
+        now = self.clock()
+        if verification.expires_at <= now:
+            db.delete(verification)
+            db.commit()
+            raise AuthServiceError(400, "Срок действия кода истек. Запросите новый код.")
+        if int(verification.attempts or 0) >= int(verification.max_attempts or settings.AUTH_EMAIL_MAX_ATTEMPTS):
+            db.delete(verification)
+            db.commit()
+            raise AuthServiceError(429, "Лимит попыток исчерпан. Запросите новый код.")
+        if not verify_verification_code(code, verification.salt, verification.code_hash):
+            verification.attempts = int(verification.attempts or 0) + 1
+            verification.updated_at = now
+            db.add(verification)
+            db.commit()
+            raise AuthServiceError(
+                400,
+                "Неверный код подтверждения.",
+                extra={"attempts_left": max(int(verification.max_attempts) - int(verification.attempts), 0)},
+            )
+        return user, verification
+
+    def _sync_region_flags(self, user: User) -> None:
+        user.show_ukraine_prices = user.preferred_region == "UA"
+        user.show_turkey_prices = user.preferred_region == "TR"
+        user.show_india_prices = user.preferred_region == "IN"
+
+    def start_registration(self, payload: RegisterRequest, *, user_agent: Optional[str] = None, ip_address: Optional[str] = None) -> AuthActionResponse:
+        now = self.clock()
+        if len(payload.password) < settings.AUTH_PASSWORD_MIN_LENGTH:
+            raise AuthServiceError(422, f"Пароль должен быть не короче {settings.AUTH_PASSWORD_MIN_LENGTH} символов.")
+        with self._session() as db:
+            try:
+                user = self._get_user_by_email(db, payload.email)
+                if user and user.email_verified:
+                    raise AuthServiceError(409, "Пользователь с таким email уже зарегистрирован.")
+                if not user:
+                    user = User(email=self._normalize_email(payload.email), email_normalized=self._normalize_email(payload.email), created_at=now, updated_at=now)
+                    db.add(user)
+                    db.flush()
+                if payload.telegram_id is not None and user.telegram_id not in (None, payload.telegram_id):
+                    raise AuthServiceError(409, "Этот Telegram ID уже привязан к другому аккаунту.")
+                user.telegram_id = payload.telegram_id or user.telegram_id
+                user.username = payload.username
+                user.first_name = payload.first_name
+                user.last_name = payload.last_name
+                user.preferred_region = payload.preferred_region
+                self._sync_region_flags(user)
+                user.payment_email = payload.payment_email
+                user.platform = payload.platform
+                user.psn_email = payload.psn_email
+                user.set_password(payload.password)
+                user.email_verified = False
+                user.is_active = False
+                user.last_registration_at = now
+                user.registration_user_agent = user_agent
+                user.registration_ip_address = ip_address
+                user.updated_at = now
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+                code, _ = self._save_code(db, user=user, email=payload.email, purpose=REGISTER_PURPOSE)
+                self._send_code(payload.email, code, purpose=REGISTER_PURPOSE)
+            except IntegrityError as error:
+                db.rollback()
+                raise _map_integrity_error(error) from error
+        return AuthActionResponse(message="Код подтверждения отправлен на email.", resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS)
 
     def resend_registration_code(self, email: str) -> AuthActionResponse:
-        current_time = self.clock()
-
-        try:
-            user_doc = self.users.find_one({"email_normalized": email})
-            if not user_doc:
+        with self._session() as db:
+            user = self._get_user_by_email(db, email)
+            if not user:
                 raise AuthServiceError(404, "Пользователь с таким email не найден.")
-            if user_doc.get("email_verified"):
+            if user.email_verified:
                 raise AuthServiceError(409, "Email уже подтвержден.")
-
-            existing_verification = self.codes.find_one(
-                {"email_normalized": email, "purpose": REGISTER_PURPOSE}
-            )
-            resend_in = seconds_until_resend(existing_verification, now=current_time)
+            existing = self._get_code(db, email, REGISTER_PURPOSE)
+            resend_in = seconds_until_resend(existing, now=self.clock())
             if resend_in > 0:
-                raise AuthServiceError(
-                    429,
-                    "Повторная отправка пока недоступна.",
-                    extra={"resend_available_in": resend_in},
-                )
-
-            code, verification_doc = create_verification_document(
-                user_id=user_doc["_id"],
-                email_normalized=email,
-                purpose=REGISTER_PURPOSE,
-                now=current_time,
-            )
-            self._save_verification_and_send_email(
-                email=email,
-                verification_doc=verification_doc,
-                code=code,
-                previous_doc=existing_verification,
-            )
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return AuthActionResponse(
-            message="Новый код подтверждения отправлен на email.",
-            resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS,
-        )
+                raise AuthServiceError(429, "Повторная отправка пока недоступна.", extra={"resend_available_in": resend_in})
+            code, _ = self._save_code(db, user=user, email=email, purpose=REGISTER_PURPOSE)
+            self._send_code(email, code, purpose=REGISTER_PURPOSE)
+        return AuthActionResponse(message="Новый код подтверждения отправлен на email.", resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS)
 
     def start_password_reset(self, email: str) -> AuthActionResponse:
-        current_time = self.clock()
-
-        try:
-            user_doc = self._get_password_reset_user(email)
-            existing_verification = self.codes.find_one(
-                {"email_normalized": email, "purpose": RESET_PASSWORD_PURPOSE}
-            )
-            resend_in = seconds_until_resend(existing_verification, now=current_time)
+        with self._session() as db:
+            user = self._get_user_by_email(db, email)
+            if not user:
+                raise AuthServiceError(404, "Пользователь с таким email не найден.")
+            existing = self._get_code(db, email, RESET_PASSWORD_PURPOSE)
+            resend_in = seconds_until_resend(existing, now=self.clock())
             if resend_in > 0:
-                raise AuthServiceError(
-                    429,
-                    "Код уже отправлен. Попробуйте чуть позже.",
-                    extra={"resend_available_in": resend_in},
-                )
-
-            code, verification_doc = create_verification_document(
-                user_id=user_doc["_id"],
-                email_normalized=email,
-                purpose=RESET_PASSWORD_PURPOSE,
-                now=current_time,
-            )
-            self._save_verification_and_send_email(
-                email=email,
-                verification_doc=verification_doc,
-                code=code,
-                previous_doc=existing_verification,
-            )
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return AuthActionResponse(
-            message="Код для восстановления пароля отправлен на email.",
-            resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS,
-        )
+                raise AuthServiceError(429, "Код уже отправлен. Попробуйте чуть позже.", extra={"resend_available_in": resend_in})
+            code, _ = self._save_code(db, user=user, email=email, purpose=RESET_PASSWORD_PURPOSE)
+            self._send_code(email, code, purpose=RESET_PASSWORD_PURPOSE)
+        return AuthActionResponse(message="Код для восстановления пароля отправлен на email.", resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS)
 
     def resend_password_reset_code(self, email: str) -> AuthActionResponse:
-        current_time = self.clock()
-
-        try:
-            user_doc = self._get_password_reset_user(email)
-            existing_verification = self.codes.find_one(
-                {"email_normalized": email, "purpose": RESET_PASSWORD_PURPOSE}
-            )
-            resend_in = seconds_until_resend(existing_verification, now=current_time)
-            if resend_in > 0:
-                raise AuthServiceError(
-                    429,
-                    "Повторная отправка пока недоступна.",
-                    extra={"resend_available_in": resend_in},
-                )
-
-            code, verification_doc = create_verification_document(
-                user_id=user_doc["_id"],
-                email_normalized=email,
-                purpose=RESET_PASSWORD_PURPOSE,
-                now=current_time,
-            )
-            self._save_verification_and_send_email(
-                email=email,
-                verification_doc=verification_doc,
-                code=code,
-                previous_doc=existing_verification,
-            )
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return AuthActionResponse(
-            message="Новый код для восстановления пароля отправлен на email.",
-            resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS,
-        )
-
-    def verify_registration_code(
-        self,
-        *,
-        email: str,
-        code: str,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
-    ) -> tuple[SiteUserPublic, str]:
-        current_time = self.clock()
-        filter_query = {"email_normalized": email, "purpose": REGISTER_PURPOSE}
-
-        try:
-            user_doc = self.users.find_one({"email_normalized": email})
-            if not user_doc:
+        with self._session() as db:
+            user = self._get_user_by_email(db, email)
+            if not user:
                 raise AuthServiceError(404, "Пользователь с таким email не найден.")
-            if user_doc.get("email_verified"):
+            existing = self._get_code(db, email, RESET_PASSWORD_PURPOSE)
+            resend_in = seconds_until_resend(existing, now=self.clock())
+            if resend_in > 0:
+                raise AuthServiceError(429, "Повторная отправка пока недоступна.", extra={"resend_available_in": resend_in})
+            code, _ = self._save_code(db, user=user, email=email, purpose=RESET_PASSWORD_PURPOSE)
+            self._send_code(email, code, purpose=RESET_PASSWORD_PURPOSE)
+        return AuthActionResponse(message="Новый код для восстановления пароля отправлен на email.", resend_available_in=settings.AUTH_EMAIL_RESEND_COOLDOWN_SECONDS)
+
+    def verify_registration_code(self, *, email: str, code: str, user_agent: Optional[str] = None, ip_address: Optional[str] = None) -> tuple[SiteUserPublic, str]:
+        now = self.clock()
+        with self._session() as db:
+            user, verification = self._check_and_consume_code(db, email=email, code=code, purpose=REGISTER_PURPOSE)
+            if user.email_verified:
                 raise AuthServiceError(409, "Email уже подтвержден.")
+            user.email_verified = True
+            user.is_active = True
+            user.last_login_at = now
+            user.login_user_agent = user_agent
+            user.login_ip_address = ip_address
+            user.updated_at = now
+            db.delete(verification)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            token = self._create_session(db, user=user, provider="email", user_agent=user_agent, ip_address=ip_address)
+            return build_public_user(user), token
 
-            verification_doc = self.codes.find_one(filter_query)
-            if not verification_doc:
-                raise AuthServiceError(400, "Сначала запросите код подтверждения.")
-
-            if verification_doc.get("expires_at") and verification_doc["expires_at"] <= current_time:
-                self.codes.delete_one(filter_query)
-                raise AuthServiceError(400, "Срок действия кода истек. Запросите новый код.")
-
-            max_attempts = int(verification_doc.get("max_attempts", settings.AUTH_EMAIL_MAX_ATTEMPTS))
-            attempts = int(verification_doc.get("attempts", 0))
-            if attempts >= max_attempts:
-                self.codes.delete_one(filter_query)
-                raise AuthServiceError(429, "Лимит попыток исчерпан. Запросите новый код.")
-
-            if not verify_verification_code(
-                code,
-                verification_doc["salt"],
-                verification_doc["code_hash"],
-            ):
-                attempts += 1
-                self.codes.update_one(
-                    filter_query,
-                    {"$set": {"attempts": attempts, "updated_at": current_time}},
-                )
-                if attempts >= max_attempts:
-                    self.codes.delete_one(filter_query)
-                    raise AuthServiceError(429, "Лимит попыток исчерпан. Запросите новый код.")
-
-                raise AuthServiceError(
-                    400,
-                    "Неверный код подтверждения.",
-                    extra={"attempts_left": max_attempts - attempts},
-                )
-
-            self.users.update_one(
-                {"_id": user_doc["_id"]},
-                {
-                    "$set": {
-                        "email_verified": True,
-                        "is_active": True,
-                        "updated_at": current_time,
-                        "last_login_at": current_time,
-                    }
-                },
-            )
-            self.codes.delete_one(filter_query)
-
-            updated_user = self.users.find_one({"_id": user_doc["_id"]})
-            if not updated_user:
-                raise AuthServiceError(404, "Пользователь не найден после подтверждения email.")
-
-            session_token = self._create_session(
-                user_id=updated_user["_id"],
-                user_agent=user_agent,
-                ip_address=ip_address,
-                current_time=current_time,
-            )
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return build_public_user(updated_user), session_token
-
-    def login(
-        self,
-        *,
-        email: str,
-        password: str,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
-    ) -> tuple[SiteUserPublic, str]:
-        current_time = self.clock()
-
-        try:
-            user_doc = self.users.find_one({"email_normalized": email})
-            if not user_doc or not user_doc.get("password_hash"):
+    def login(self, *, email: str, password: str, user_agent: Optional[str] = None, ip_address: Optional[str] = None) -> tuple[SiteUserPublic, str]:
+        now = self.clock()
+        with self._session() as db:
+            user = self._get_user_by_email(db, email)
+            if not user or not user.email_verified:
+                raise AuthServiceError(403, "Сначала подтвердите email.")
+            if not user.is_active:
+                raise AuthServiceError(403, "Пользователь деактивирован.")
+            if not user.password_hash or not verify_password(password, user.password_hash):
                 raise AuthServiceError(401, "Неверный email или пароль.")
+            user.last_login_at = now
+            user.login_user_agent = user_agent
+            user.login_ip_address = ip_address
+            user.updated_at = now
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            token = self._create_session(db, user=user, provider="email", user_agent=user_agent, ip_address=ip_address)
+            return build_public_user(user), token
 
-            if not verify_password(password, user_doc["password_hash"]):
-                raise AuthServiceError(401, "Неверный email или пароль.")
-
-            if not user_doc.get("email_verified"):
-                raise AuthServiceError(403, "Сначала подтвердите email с помощью кода из письма.")
-
-            if not user_doc.get("is_active", True):
-                raise AuthServiceError(403, "Аккаунт отключен.")
-
-            self.users.update_one(
-                {"_id": user_doc["_id"]},
-                {"$set": {"updated_at": current_time, "last_login_at": current_time}},
-            )
-            updated_user = self.users.find_one({"_id": user_doc["_id"]})
-            if not updated_user:
-                raise AuthServiceError(404, "Пользователь не найден.")
-
-            session_token = self._create_session(
-                user_id=updated_user["_id"],
-                user_agent=user_agent,
-                ip_address=ip_address,
-                current_time=current_time,
-            )
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return build_public_user(updated_user), session_token
-
-    def confirm_password_reset(
-        self,
-        *,
-        email: str,
-        code: str,
-        new_password: str,
-        user_agent: Optional[str] = None,
-        ip_address: Optional[str] = None,
-    ) -> tuple[SiteUserPublic, str]:
-        current_time = self.clock()
-        filter_query = {"email_normalized": email, "purpose": RESET_PASSWORD_PURPOSE}
-
+    def confirm_password_reset(self, *, email: str, code: str, new_password: str, user_agent: Optional[str] = None, ip_address: Optional[str] = None) -> tuple[SiteUserPublic, str]:
         if len(new_password) < settings.AUTH_PASSWORD_MIN_LENGTH:
-            raise AuthServiceError(
-                422,
-                f"Пароль должен быть не короче {settings.AUTH_PASSWORD_MIN_LENGTH} символов.",
-            )
-
-        try:
-            user_doc = self._get_password_reset_user(email)
-            verification_doc = self.codes.find_one(filter_query)
-            if not verification_doc:
-                raise AuthServiceError(400, "Сначала запросите код для восстановления пароля.")
-
-            if verification_doc.get("expires_at") and verification_doc["expires_at"] <= current_time:
-                self.codes.delete_one(filter_query)
-                raise AuthServiceError(400, "Срок действия кода истек. Запросите новый код.")
-
-            max_attempts = int(verification_doc.get("max_attempts", settings.AUTH_EMAIL_MAX_ATTEMPTS))
-            attempts = int(verification_doc.get("attempts", 0))
-            if attempts >= max_attempts:
-                self.codes.delete_one(filter_query)
-                raise AuthServiceError(429, "Лимит попыток исчерпан. Запросите новый код.")
-
-            if not verify_verification_code(
-                code,
-                verification_doc["salt"],
-                verification_doc["code_hash"],
-            ):
-                attempts += 1
-                self.codes.update_one(
-                    filter_query,
-                    {"$set": {"attempts": attempts, "updated_at": current_time}},
-                )
-                if attempts >= max_attempts:
-                    self.codes.delete_one(filter_query)
-                    raise AuthServiceError(429, "Лимит попыток исчерпан. Запросите новый код.")
-
-                raise AuthServiceError(
-                    400,
-                    "Неверный код подтверждения.",
-                    extra={"attempts_left": max_attempts - attempts},
-                )
-
-            self.users.update_one(
-                {"_id": user_doc["_id"]},
-                {
-                    "$set": {
-                        "password_hash": hash_password(new_password),
-                        "email_verified": True,
-                        "is_active": True,
-                        "updated_at": current_time,
-                        "last_login_at": current_time,
-                    }
-                },
-            )
-            self.codes.delete_one(filter_query)
-
-            updated_user = self.users.find_one({"_id": user_doc["_id"]})
-            if not updated_user:
-                raise AuthServiceError(404, "Пользователь не найден после восстановления пароля.")
-
-            session_token = self._create_session(
-                user_id=updated_user["_id"],
-                user_agent=user_agent,
-                ip_address=ip_address,
-                current_time=current_time,
-            )
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return build_public_user(updated_user), session_token
+            raise AuthServiceError(422, f"Пароль должен быть не короче {settings.AUTH_PASSWORD_MIN_LENGTH} символов.")
+        now = self.clock()
+        with self._session() as db:
+            user, verification = self._check_and_consume_code(db, email=email, code=code, purpose=RESET_PASSWORD_PURPOSE)
+            user.set_password(new_password)
+            user.is_active = True
+            user.last_login_at = now
+            user.login_user_agent = user_agent
+            user.login_ip_address = ip_address
+            user.updated_at = now
+            db.delete(verification)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            token = self._create_session(db, user=user, provider="email", user_agent=user_agent, ip_address=ip_address)
+            return build_public_user(user), token
 
     def authenticate_social_user(
         self,
@@ -635,410 +502,170 @@ class AuthService:
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
         telegram_id: Optional[int] = None,
-        preferred_region: Optional[str] = None,
         user_agent: Optional[str] = None,
         ip_address: Optional[str] = None,
     ) -> tuple[SiteUserPublic, str]:
-        current_time = self.clock()
+        provider = (provider or "").strip().lower()
+        provider_id = (provider_id or "").strip()
+        if provider not in {"google", "vk", "telegram"}:
+            raise AuthServiceError(422, "Недопустимый provider.")
+        if provider != "telegram" and not provider_id:
+            raise AuthServiceError(422, "Недопустимый provider_id.")
 
-        try:
-            user_doc = self._find_social_user(
-                provider=provider,
-                provider_id=provider_id,
-                email=email,
-                telegram_id=telegram_id,
-            )
-
-            auth_providers = set(user_doc.get("auth_providers", [])) if user_doc else set()
-            auth_providers.add(provider)
-
-            update_fields = {
-                "updated_at": current_time,
-                "last_login_at": current_time,
-                "is_active": True,
-                "auth_providers": sorted(auth_providers),
-                "role": resolve_site_user_role(
-                    user_doc.get("role") if user_doc else None,
-                    telegram_id=telegram_id if telegram_id is not None else (user_doc.get("telegram_id") if user_doc else None),
-                ),
-            }
-
-            if username:
-                update_fields["username"] = username
-            if first_name:
-                update_fields["first_name"] = first_name
-            if last_name:
-                update_fields["last_name"] = last_name
-            if preferred_region:
-                update_fields["preferred_region"] = preferred_region
-
-            email_normalized = email.lower() if email else None
-            if email_normalized:
-                update_fields["email"] = email_normalized
-                update_fields["email_normalized"] = email_normalized
-                if email_verified:
-                    update_fields["email_verified"] = True
-                if provider == "google" and not (user_doc or {}).get("payment_email"):
-                    update_fields["payment_email"] = email_normalized
-
-            if provider == "google":
-                update_fields["google_id"] = provider_id
+        now = self.clock()
+        with self._session() as db:
+            user = None
+            if provider == "telegram" and telegram_id is not None:
+                user = db.query(User).filter(User.telegram_id == telegram_id).first()
+            elif provider == "google":
+                user = db.query(User).filter(User.google_id == provider_id).first()
             elif provider == "vk":
-                update_fields["vk_id"] = provider_id
-            elif provider == "telegram":
-                update_fields["telegram_id"] = telegram_id
-
-            if user_doc:
-                self.users.update_one({"_id": user_doc["_id"]}, {"$set": update_fields})
-                user_id = user_doc["_id"]
+                user = db.query(User).filter(User.vk_id == provider_id).first()
+            if not user and email:
+                user = self._get_user_by_email(db, email)
+            if not user:
+                user = User(
+                    email=self._normalize_email(email) if email else None,
+                    email_normalized=self._normalize_email(email) if email else None,
+                    email_verified=bool(email_verified or provider == "telegram"),
+                    username=username,
+                    first_name=first_name,
+                    last_name=last_name,
+                    telegram_id=telegram_id,
+                    google_id=provider_id if provider == "google" else None,
+                    vk_id=provider_id if provider == "vk" else None,
+                    preferred_region="UA",
+                    show_turkey_prices=True,
+                    is_active=True,
+                    role=SITE_ROLE_CLIENT,
+                    last_login_at=now,
+                    updated_at=now,
+                )
+                user.auth_providers = [provider]
+                db.add(user)
+                db.flush()
             else:
-                user_fields = {
-                    "password_hash": None,
-                    "username": username,
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "telegram_id": telegram_id,
-                    "role": resolve_site_user_role(None, telegram_id=telegram_id),
-                    "preferred_region": preferred_region or "UA",
-                    "show_ukraine_prices": False,
-                    "show_turkey_prices": True,
-                    "show_india_prices": False,
-                    "payment_email": email_normalized if email_normalized else None,
-                    "platform": None,
-                    "psn_email": None,
-                    "psn_accounts": {},
-                    "email_verified": bool(email_normalized and email_verified),
-                    "is_active": True,
-                    "auth_providers": sorted(auth_providers),
-                    "created_at": current_time,
-                    "updated_at": current_time,
-                    "last_login_at": current_time,
-                    "last_registration_at": current_time,
-                    "registration_user_agent": user_agent,
-                    "registration_ip_address": ip_address,
-                }
-                if email_normalized:
-                    user_fields["email"] = email_normalized
-                    user_fields["email_normalized"] = email_normalized
+                if email:
+                    normalized = self._normalize_email(email)
+                    user.email = normalized
+                    user.email_normalized = normalized
+                if provider == "telegram" and telegram_id is not None:
+                    user.telegram_id = telegram_id
                 if provider == "google":
-                    user_fields["google_id"] = provider_id
+                    user.google_id = provider_id
                 if provider == "vk":
-                    user_fields["vk_id"] = provider_id
-                user_fields = omit_none_fields(user_fields, fields=OPTIONAL_IDENTITY_FIELDS)
-                insert_result = self.users.insert_one(user_fields)
-                user_id = insert_result.inserted_id
-
-            updated_user = self.users.find_one({"_id": user_id})
-            if not updated_user:
-                raise AuthServiceError(404, "Пользователь не найден после входа через провайдера.")
-
-            session_token = self._create_session(
-                user_id=user_id,
-                user_agent=user_agent,
-                ip_address=ip_address,
-                current_time=current_time,
-            )
-        except AuthServiceError:
-            raise
-        except DuplicateKeyError as error:
-            raise self._map_duplicate_key_error(error) from error
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return build_public_user(updated_user), session_token
+                    user.vk_id = provider_id
+                if username is not None:
+                    user.username = username
+                if first_name is not None:
+                    user.first_name = first_name
+                if last_name is not None:
+                    user.last_name = last_name
+                if email_verified:
+                    user.email_verified = True
+                user.is_active = True
+                user.last_login_at = now
+                user.updated_at = now
+                providers = set(user.auth_providers)
+                providers.add(provider)
+                user.auth_providers = sorted(providers)
+                db.add(user)
+            try:
+                db.commit()
+                db.refresh(user)
+            except IntegrityError as error:
+                db.rollback()
+                raise _map_integrity_error(error) from error
+            token = self._create_session(db, user=user, provider=provider, user_agent=user_agent, ip_address=ip_address)
+            return build_public_user(user), token
 
     def logout(self, session_token: Optional[str]) -> None:
         if not session_token:
             return
-
-        try:
-            self.sessions.delete_one({"token_hash": hash_session_token(session_token)})
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+        with self._session() as db:
+            token_hash = hash_session_token(session_token)
+            session_row = db.query(SiteAuthSession).filter(SiteAuthSession.session_token_hash == token_hash).first()
+            if session_row:
+                db.delete(session_row)
+                db.commit()
 
     def get_user_by_session_token(self, session_token: Optional[str]) -> Optional[SiteUserPublic]:
         if not session_token:
             return None
-
-        current_time = self.clock()
-        try:
-            session_doc = self.sessions.find_one(
-                {
-                    "token_hash": hash_session_token(session_token),
-                    "expires_at": {"$gt": current_time},
-                }
+        with self._session() as db:
+            token_hash = hash_session_token(session_token)
+            session_row = (
+                db.query(SiteAuthSession)
+                .options(selectinload(SiteAuthSession.user).selectinload(User.psn_accounts))
+                .filter(
+                    SiteAuthSession.session_token_hash == token_hash,
+                    SiteAuthSession.revoked_at.is_(None),
+                    SiteAuthSession.expires_at > self.clock(),
+                )
+                .first()
             )
-            if not session_doc:
+            if not session_row or not session_row.user or not session_row.user.is_active:
                 return None
-
-            user_doc = self.users.find_one({"_id": session_doc["user_id"], "is_active": True})
-            if not user_doc:
-                self.sessions.delete_one({"_id": session_doc["_id"]})
-                return None
-
-            self.sessions.update_one(
-                {"_id": session_doc["_id"]},
-                {"$set": {"updated_at": current_time, "last_seen_at": current_time}},
-            )
-            return build_public_user(user_doc)
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+            session_row.last_used_at = self.clock()
+            db.add(session_row)
+            db.commit()
+            return build_public_user(session_row.user)
 
     def get_profile(self, user_id: Any) -> SiteProfileResponse:
-        resolved_user_id = resolve_user_identifier(user_id)
-        try:
-            user_doc = self.users.find_one({"_id": resolved_user_id, "is_active": True})
-            if not user_doc:
-                raise AuthServiceError(404, "Профиль не найден.")
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+        with self._session() as db:
+            user = self._get_user_by_id(db, user_id)
+            if not user:
+                raise AuthServiceError(404, "Профиль пользователя не найден.")
+            return build_public_profile(user)
 
-        return build_public_profile(user_doc)
+    def update_profile_preferences(self, user_id: Any, payload: SiteProfilePreferencesUpdateRequest) -> SiteProfileResponse:
+        now = self.clock()
+        with self._session() as db:
+            user = self._get_user_by_id(db, user_id)
+            if not user:
+                raise AuthServiceError(404, "Профиль пользователя не найден.")
+            user.preferred_region = payload.preferred_region
+            self._sync_region_flags(user)
+            if payload.payment_email is not None:
+                user.payment_email = payload.payment_email
+            user.updated_at = now
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            return build_public_profile(user)
 
-    def update_profile_preferences(
-        self,
-        user_id: Any,
-        payload: SiteProfilePreferencesUpdateRequest,
-    ) -> SiteProfileResponse:
-        current_time = self.clock()
-        preferred_region = payload.preferred_region
-        resolved_user_id = resolve_user_identifier(user_id)
-
-        try:
-            user_doc = self.users.find_one({"_id": resolved_user_id, "is_active": True})
-            if not user_doc:
-                raise AuthServiceError(404, "Профиль не найден.")
-
-            update_fields = {
-                "preferred_region": preferred_region,
-                "payment_email": payload.payment_email,
-                "show_ukraine_prices": preferred_region == "UA",
-                "show_turkey_prices": preferred_region == "TR",
-                "show_india_prices": preferred_region == "IN",
-                "updated_at": current_time,
-            }
-
-            self.users.update_one({"_id": resolved_user_id}, {"$set": update_fields})
-            updated_user = self.users.find_one({"_id": resolved_user_id, "is_active": True})
-            if not updated_user:
-                raise AuthServiceError(404, "Профиль не найден после обновления.")
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return build_public_profile(updated_user)
-
-    def update_psn_account(
-        self,
-        user_id: Any,
-        *,
-        region: str,
-        payload: SitePSNAccountUpdateRequest,
-    ) -> SiteProfileResponse:
-        current_time = self.clock()
-        normalized_region = region.strip().upper()
-        resolved_user_id = resolve_user_identifier(user_id)
-
-        if normalized_region not in {"UA", "TR"}:
-            raise AuthServiceError(422, "Допустимы только регионы UA и TR.")
-
-        try:
-            user_doc = self.users.find_one({"_id": resolved_user_id, "is_active": True})
-            if not user_doc:
-                raise AuthServiceError(404, "Профиль не найден.")
-
-            existing_accounts = dict(user_doc.get("psn_accounts") or {})
-            region_account = dict(existing_accounts.get(normalized_region) or {})
-
+    def update_psn_account(self, user_id: Any, *, region: str, payload: SitePSNAccountUpdateRequest) -> SiteProfileResponse:
+        now = self.clock()
+        normalized_region = (region or "").strip().upper()
+        with self._session() as db:
+            user = self._get_user_by_id(db, user_id)
+            if not user:
+                raise AuthServiceError(404, "Профиль пользователя не найден.")
+            account = user.get_psn_account_for_region(normalized_region)
+            if account is None:
+                account = PSNAccount(user_id=user.id, region=normalized_region)
+                db.add(account)
             if payload.platform is not None:
-                region_account["platform"] = payload.platform
+                account.platform = payload.platform
+                if normalized_region == "UA":
+                    user.platform = payload.platform
             if payload.psn_email is not None:
-                region_account["psn_email"] = payload.psn_email
-
-            if payload.psn_password:
-                encoded_password, password_salt = encrypt_password(payload.psn_password)
-                region_account["psn_password_hash"] = encoded_password
-                region_account["psn_password_salt"] = password_salt
-
-            region_account.pop("backup_code_hash", None)
-            region_account.pop("backup_code_salt", None)
-
-            if not region_account.get("psn_email"):
-                raise AuthServiceError(422, "Введите PSN Email.")
-            if not region_account.get("psn_password_hash"):
-                raise AuthServiceError(422, "Введите PSN пароль.")
-
-            region_account["updated_at"] = current_time
-            existing_accounts[normalized_region] = region_account
-
-            update_fields = {
-                "psn_accounts": existing_accounts,
-                "updated_at": current_time,
-            }
-
-            if normalized_region == "UA":
-                update_fields["platform"] = region_account.get("platform")
-                update_fields["psn_email"] = region_account.get("psn_email")
-
-            self.users.update_one({"_id": resolved_user_id}, {"$set": update_fields})
-            updated_user = self.users.find_one({"_id": resolved_user_id, "is_active": True})
-            if not updated_user:
-                raise AuthServiceError(404, "Профиль не найден после обновления.")
-        except AuthServiceError:
-            raise
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return build_public_profile(updated_user)
-
-    def _upsert_registration_user(
-        self,
-        *,
-        payload: RegisterRequest,
-        existing_user: Optional[dict[str, Any]],
-        current_time: datetime,
-        user_agent: Optional[str],
-        ip_address: Optional[str],
-    ) -> Any:
-        fields_set = set(getattr(payload, "model_fields_set", set()))
-
-        def pick_value(field_name: str, default: Any = None) -> Any:
-            if field_name in fields_set:
-                return getattr(payload, field_name)
-            if existing_user is not None and field_name in existing_user:
-                return existing_user.get(field_name)
-            return getattr(payload, field_name, default)
-
-        user_fields = {
-            "email": payload.email,
-            "email_normalized": payload.email,
-            "password_hash": hash_password(payload.password),
-            "username": pick_value("username"),
-            "first_name": pick_value("first_name"),
-            "last_name": pick_value("last_name"),
-            "telegram_id": pick_value("telegram_id"),
-            "role": resolve_site_user_role(
-                existing_user.get("role") if existing_user else None,
-                telegram_id=pick_value("telegram_id"),
-            ),
-            "preferred_region": pick_value("preferred_region", "UA") or "UA",
-            "show_ukraine_prices": bool(pick_value("show_ukraine_prices", False)),
-            "show_turkey_prices": bool(pick_value("show_turkey_prices", True)),
-            "show_india_prices": bool(pick_value("show_india_prices", False)),
-            "payment_email": pick_value("payment_email"),
-            "platform": pick_value("platform"),
-            "psn_email": pick_value("psn_email"),
-            "psn_accounts": existing_user.get("psn_accounts", {}) if existing_user else {},
-            "email_verified": False,
-            "is_active": True,
-            "updated_at": current_time,
-            "last_registration_at": current_time,
-            "registration_user_agent": user_agent,
-            "registration_ip_address": ip_address,
-        }
-        user_fields = omit_none_fields(user_fields, fields=OPTIONAL_IDENTITY_FIELDS)
-
-        if existing_user:
-            self.users.update_one({"_id": existing_user["_id"]}, {"$set": user_fields})
-            return existing_user["_id"]
-
-        user_fields["created_at"] = current_time
-        user_fields["last_login_at"] = None
-        insert_result = self.users.insert_one(user_fields)
-        return insert_result.inserted_id
-
-    def _save_verification_and_send_email(
-        self,
-        *,
-        email: str,
-        verification_doc: dict[str, Any],
-        code: str,
-        previous_doc: Optional[dict[str, Any]],
-    ) -> None:
-        filter_query = {
-            "email_normalized": verification_doc["email_normalized"],
-            "purpose": verification_doc["purpose"],
-        }
-        self.codes.replace_one(filter_query, verification_doc, upsert=True)
-
-        try:
-            self.email_sender(email, code, purpose=verification_doc["purpose"])
-        except EmailDeliveryError as error:
-            if previous_doc is not None:
-                self.codes.replace_one(filter_query, previous_doc, upsert=True)
-            else:
-                self.codes.delete_one(filter_query)
-            raise AuthServiceError(503, str(error)) from error
-
-    def _get_password_reset_user(self, email: str) -> dict[str, Any]:
-        user_doc = self.users.find_one({"email_normalized": email})
-        if not user_doc:
-            raise AuthServiceError(404, "Аккаунт с таким email не найден.")
-        if not user_doc.get("is_active", True):
-            raise AuthServiceError(403, "Аккаунт отключен.")
-        return user_doc
-
-    def _find_social_user(
-        self,
-        *,
-        provider: str,
-        provider_id: str,
-        email: Optional[str],
-        telegram_id: Optional[int],
-    ) -> Optional[dict[str, Any]]:
-        if provider == "google":
-            user_doc = self.users.find_one({"google_id": provider_id})
-            if user_doc:
-                return user_doc
-        elif provider == "vk":
-            user_doc = self.users.find_one({"vk_id": provider_id})
-            if user_doc:
-                return user_doc
-        elif provider == "telegram" and telegram_id is not None:
-            user_doc = self.users.find_one({"telegram_id": telegram_id})
-            if user_doc:
-                return user_doc
-
-        if email:
-            return self.users.find_one({"email_normalized": email.lower()})
-
-        return None
-
-    def _create_session(
-        self,
-        *,
-        user_id: Any,
-        user_agent: Optional[str],
-        ip_address: Optional[str],
-        current_time: datetime,
-    ) -> str:
-        session_token = generate_session_token()
-        self.sessions.insert_one(
-            {
-                "user_id": user_id,
-                "token_hash": hash_session_token(session_token),
-                "created_at": current_time,
-                "updated_at": current_time,
-                "last_seen_at": current_time,
-                "expires_at": current_time + timedelta(days=settings.AUTH_SESSION_TTL_DAYS),
-                "user_agent": user_agent,
-                "ip_address": ip_address,
-            }
-        )
-        return session_token
-
-    def _map_duplicate_key_error(self, error: DuplicateKeyError) -> AuthServiceError:
-        error_text = str(error)
-        if "telegram_id" in error_text:
-            return AuthServiceError(409, "Этот Telegram ID уже привязан к другому аккаунту.")
-        if "google_id" in error_text:
-            return AuthServiceError(409, "Этот Google аккаунт уже привязан к другому профилю.")
-        if "vk_id" in error_text:
-            return AuthServiceError(409, "Этот VK аккаунт уже привязан к другому профилю.")
-        return AuthServiceError(409, "Пользователь с такими данными уже существует.")
+                account.psn_email = payload.psn_email
+                if normalized_region == "UA":
+                    user.psn_email = payload.psn_email
+            if payload.psn_password is not None:
+                account.set_psn_password(payload.psn_password)
+                if normalized_region == "UA":
+                    user.set_psn_password(payload.psn_password)
+            if payload.backup_code is not None:
+                account.set_twofa_code(payload.backup_code)
+            account.updated_at = now
+            user.updated_at = now
+            db.add(user)
+            db.add(account)
+            db.commit()
+            db.refresh(user)
+            return build_public_profile(user)
 
 
 @lru_cache(maxsize=1)

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any
 
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text
 
 from app.database.connection import Base
+from app.utils.time import utcnow
 
 
 class SitePurchaseOrder(Base):
@@ -47,8 +47,8 @@ class SitePurchaseOrder(Base):
     delivery_message = Column(Text, nullable=True)
     delivery_items_json = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utcnow, nullable=False)
+    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow, nullable=False)
     payment_submitted_at = Column(DateTime, nullable=True)
     fulfilled_at = Column(DateTime, nullable=True)
 

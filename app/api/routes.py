@@ -19,6 +19,7 @@ from app.api.payment_india import india_payment_api, IndiaPaymentAPIError, CardP
 from app.api.payment_ukraine import ukraine_payment_api, UkrainePaymentAPIError, UkrainePaymentInfo
 from app.api.payment_turkey import turkey_payment_api, TurkeyPaymentAPIError
 from app.utils.network_check import diagnose_payment_site_issues
+from app.utils.time import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -966,7 +967,7 @@ async def diagnose_payment_issues():
         return {
             "status": "success",
             "diagnosis": diagnosis,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utcnow().isoformat()
         }
     except Exception as e:
         logger.error(f"Error during payment site diagnosis: {str(e)}")
@@ -977,5 +978,5 @@ async def diagnose_payment_issues():
                 "issues_found": ["Ошибка проведения диагностики"],
                 "recommendations": ["Обратитесь к администратору"]
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": utcnow().isoformat()
         }

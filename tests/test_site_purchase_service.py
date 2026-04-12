@@ -2,28 +2,15 @@ import asyncio
 import unittest
 from datetime import datetime
 
-from bson import ObjectId
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.auth.exceptions import AuthServiceError
 from app.database.connection import Base
+from app.models import PSNAccount, Product, SitePurchaseOrder, User
 from app.models.currency_rate import CurrencyRate
-from app.models.product import Product
-from app.models.purchase_order import SitePurchaseOrder
 from app.site_orders.service import PaymentGenerationResult, SitePurchaseService
-from app.utils.encryption import encrypt_password
-
-
-class StaticUsersCollection:
-    def __init__(self, user_doc):
-        self.user_doc = user_doc
-
-    def find_one(self, filter_query):
-        for key, value in filter_query.items():
-            if self.user_doc.get(key) != value:
-                return None
-        return dict(self.user_doc)
 
 
 class StubPurchaseService(SitePurchaseService):
@@ -45,37 +32,16 @@ class StubPurchaseService(SitePurchaseService):
 
 class SitePurchaseServiceTests(unittest.TestCase):
     def setUp(self):
-        engine = create_engine("sqlite:///:memory:")
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        Base.metadata.create_all(bind=engine)
-        self.db = TestingSessionLocal()
-
-        self.user_id = ObjectId()
-        encoded_password, password_salt = encrypt_password("psn-secret")
-        encoded_backup, backup_salt = encrypt_password("backup-code")
-
-        self.user_doc = {
-            "_id": self.user_id,
-            "is_active": True,
-            "email": "site@example.com",
-            "payment_email": "buy@example.com",
-            "platform": "PS5",
-            "psn_accounts": {
-                "UA": {
-                    "platform": "PS5",
-                    "psn_email": "ua-psn@example.com",
-                    "psn_password_hash": encoded_password,
-                    "psn_password_salt": password_salt,
-                    "backup_code_hash": encoded_backup,
-                    "backup_code_salt": backup_salt,
-                }
-            },
-        }
-
-        self.service = StubPurchaseService(
-            users_collection=StaticUsersCollection(self.user_doc),
-            now_provider=lambda: datetime(2026, 4, 4, 12, 0, 0),
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
         )
+        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        Base.metadata.create_all(bind=self.engine)
+        self.db = self.SessionLocal()
+
+        self.service = StubPurchaseService(now_provider=lambda: datetime(2026, 4, 4, 12, 0, 0))
 
         self.db.add(
             CurrencyRate(
@@ -99,16 +65,46 @@ class SitePurchaseServiceTests(unittest.TestCase):
                 ps_plus_price_uah=850,
             )
         )
+
+        user = User(
+            email="site@example.com",
+            email_normalized="site@example.com",
+            email_verified=True,
+            payment_email="buy@example.com",
+            platform="PS5",
+            psn_email="ua-psn@example.com",
+            preferred_region="UA",
+            show_ukraine_prices=True,
+            show_turkey_prices=False,
+            show_india_prices=False,
+            is_active=True,
+            created_at=datetime(2026, 4, 4, 12, 0, 0),
+            updated_at=datetime(2026, 4, 4, 12, 0, 0),
+        )
+        user.set_psn_password("psn-secret")
+        self.db.add(user)
         self.db.commit()
+        self.db.refresh(user)
+
+        account = PSNAccount(user_id=user.id, region="UA", psn_email="ua-psn@example.com", platform="PS5")
+        account.set_psn_password("psn-secret")
+        account.set_twofa_code("backup-code")
+        self.db.add(account)
+        self.db.commit()
+        self.db.refresh(user)
+
+        self.user = user
 
     def tearDown(self):
         self.db.close()
+        Base.metadata.drop_all(bind=self.engine)
+        self.engine.dispose()
 
     def test_create_checkout_persists_order(self):
         order = asyncio.run(
             self.service.create_checkout(
                 self.db,
-                site_user_id=str(self.user_id),
+                site_user_id=str(self.user.id),
                 product_id="game-1",
                 region="UA",
                 use_ps_plus=True,
@@ -122,22 +118,25 @@ class SitePurchaseServiceTests(unittest.TestCase):
         self.assertEqual(order.payment_email, "buy@example.com")
         self.assertEqual(order.psn_email, "ua-psn@example.com")
 
-        orders = self.service.list_user_orders(self.db, site_user_id=str(self.user_id))
+        orders = self.service.list_user_orders(self.db, site_user_id=str(self.user.id))
         self.assertEqual(len(orders), 1)
         self.assertEqual(orders[0].order_number, order.order_number)
 
         stored_order = self.db.query(SitePurchaseOrder).filter(SitePurchaseOrder.order_number == order.order_number).first()
         self.assertIsNotNone(stored_order)
+        self.assertEqual(stored_order.site_user_id, str(self.user.id))
         self.assertEqual(stored_order.status, "payment_pending")
 
     def test_create_checkout_requires_payment_email(self):
-        self.user_doc["payment_email"] = ""
+        self.user.payment_email = ""
+        self.db.add(self.user)
+        self.db.commit()
 
         with self.assertRaises(AuthServiceError) as error_context:
             asyncio.run(
                 self.service.create_checkout(
                     self.db,
-                    site_user_id=str(self.user_id),
+                    site_user_id=str(self.user.id),
                     product_id="game-1",
                     region="UA",
                     use_ps_plus=False,
@@ -148,20 +147,28 @@ class SitePurchaseServiceTests(unittest.TestCase):
         self.assertIn("purchase_email", error_context.exception.extra["missing_fields"])
 
     def test_create_checkout_accepts_inline_checkout_overrides(self):
-        self.user_doc["payment_email"] = ""
-        self.user_doc["psn_accounts"]["UA"]["psn_email"] = ""
-        self.user_doc["psn_accounts"]["UA"]["psn_password_hash"] = ""
-        self.user_doc["psn_accounts"]["UA"]["psn_password_salt"] = ""
+        self.user.payment_email = ""
+        self.user.psn_email = ""
+        self.user.psn_password_hash = None
+        self.user.psn_password_salt = None
+        self.db.add(self.user)
+        self.db.commit()
+
+        account = self.db.query(PSNAccount).filter(PSNAccount.user_id == self.user.id, PSNAccount.region == "UA").first()
+        account.psn_email = ""
+        account.set_psn_password(None)
+        account.set_twofa_code(None)
+        self.db.add(account)
+        self.db.commit()
 
         order = asyncio.run(
             self.service.create_checkout(
                 self.db,
-                site_user_id=str(self.user_id),
+                site_user_id=str(self.user.id),
                 product_id="game-1",
                 region="UA",
                 use_ps_plus=False,
                 purchase_email="override-buy@example.com",
-                platform="PS4",
                 psn_email="override-psn@example.com",
                 psn_password="override-pass",
                 backup_code="override-backup",
@@ -170,13 +177,12 @@ class SitePurchaseServiceTests(unittest.TestCase):
 
         self.assertEqual(order.payment_email, "override-buy@example.com")
         self.assertEqual(order.psn_email, "override-psn@example.com")
-        self.assertEqual(order.platform, "PS4")
 
     def test_list_user_orders_filters_by_days(self):
         recent_order = asyncio.run(
             self.service.create_checkout(
                 self.db,
-                site_user_id=str(self.user_id),
+                site_user_id=str(self.user.id),
                 product_id="game-1",
                 region="UA",
                 use_ps_plus=False,
@@ -185,7 +191,7 @@ class SitePurchaseServiceTests(unittest.TestCase):
 
         old_order = SitePurchaseOrder(
             order_number="PS-20260301-OLD123",
-            site_user_id=str(self.user_id),
+            site_user_id=str(self.user.id),
             user_email="site@example.com",
             user_display_name="site@example.com",
             product_id="game-1",
@@ -210,18 +216,18 @@ class SitePurchaseServiceTests(unittest.TestCase):
         self.db.add(old_order)
         self.db.commit()
 
-        recent_orders = self.service.list_user_orders(self.db, site_user_id=str(self.user_id), days=7)
+        recent_orders = self.service.list_user_orders(self.db, site_user_id=str(self.user.id), days=7)
         self.assertEqual(len(recent_orders), 1)
         self.assertEqual(recent_orders[0].order_number, recent_order.order_number)
 
-        all_orders = self.service.list_user_orders(self.db, site_user_id=str(self.user_id))
+        all_orders = self.service.list_user_orders(self.db, site_user_id=str(self.user.id))
         self.assertEqual(len(all_orders), 2)
 
     def test_confirm_payment_moves_order_to_review(self):
         order = asyncio.run(
             self.service.create_checkout(
                 self.db,
-                site_user_id=str(self.user_id),
+                site_user_id=str(self.user.id),
                 product_id="game-1",
                 region="UA",
                 use_ps_plus=False,
@@ -230,7 +236,7 @@ class SitePurchaseServiceTests(unittest.TestCase):
 
         updated_order = self.service.confirm_payment(
             self.db,
-            site_user_id=str(self.user_id),
+            site_user_id=str(self.user.id),
             order_number=order.order_number,
         )
 

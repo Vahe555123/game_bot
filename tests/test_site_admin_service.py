@@ -1,145 +1,152 @@
-import copy
 import unittest
 from datetime import datetime
-from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.auth.exceptions import AuthServiceError
-from app.auth.schemas import SiteUserPublic
+from app.auth.service import build_public_user
 from app.database.connection import Base
 from app.models import User, UserFavoriteProduct
 from app.site_admin.schemas import (
+    AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
     AdminProductUpdateRequest,
+    AdminUserCreateRequest,
     AdminUserUpdateRequest,
 )
 from app.site_admin.service import SiteAdminService
 
 
-class SimpleCollection:
-    def __init__(self, documents=None):
-        self.documents = copy.deepcopy(documents or [])
-
-    def find_one(self, filter_query):
-        for document in self.documents:
-            if all(document.get(key) == value for key, value in filter_query.items()):
-                return copy.deepcopy(document)
-        return None
-
-    def insert_one(self, document):
-        stored = copy.deepcopy(document)
-        if "_id" not in stored:
-            stored["_id"] = f"user-{len(self.documents) + 1}"
-        self.documents.append(stored)
-        return SimpleNamespace(inserted_id=stored["_id"])
-
-    def update_one(self, filter_query, update):
-        for index, document in enumerate(self.documents):
-            if not all(document.get(key) == value for key, value in filter_query.items()):
-                continue
-
-            updated = copy.deepcopy(document)
-            updated.update(copy.deepcopy(update.get("$set", {})))
-            self.documents[index] = updated
-            return SimpleNamespace(matched_count=1, modified_count=1)
-
-        return SimpleNamespace(matched_count=0, modified_count=0)
-
-    def delete_one(self, filter_query):
-        for index, document in enumerate(self.documents):
-            if not all(document.get(key) == value for key, value in filter_query.items()):
-                continue
-            self.documents.pop(index)
-            return SimpleNamespace(deleted_count=1)
-
-        return SimpleNamespace(deleted_count=0)
-
-    def delete_many(self, filter_query):
-        kept = []
-        deleted_count = 0
-        for document in self.documents:
-            if all(document.get(key) == value for key, value in filter_query.items()):
-                deleted_count += 1
-            else:
-                kept.append(document)
-        self.documents = kept
-        return SimpleNamespace(deleted_count=deleted_count)
-
-    def count_documents(self, filter_query):
-        if not filter_query:
-            return len(self.documents)
-        return sum(1 for document in self.documents if all(document.get(key) == value for key, value in filter_query.items()))
-
-
 class SiteAdminServiceTests(unittest.TestCase):
     def setUp(self):
-        engine = create_engine("sqlite:///:memory:")
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        Base.metadata.create_all(bind=engine)
-        self.db = TestingSessionLocal()
-
-        self.users = SimpleCollection(
-            [
-                {
-                    "_id": "admin-1",
-                    "email": "admin@example.com",
-                    "email_normalized": "admin@example.com",
-                    "email_verified": True,
-                    "is_active": True,
-                    "role": "admin",
-                    "preferred_region": "TR",
-                    "show_ukraine_prices": False,
-                    "show_turkey_prices": True,
-                    "show_india_prices": False,
-                    "payment_email": "admin@example.com",
-                    "psn_accounts": {},
-                    "created_at": datetime(2026, 4, 5, 12, 0, 0),
-                    "updated_at": datetime(2026, 4, 5, 12, 0, 0),
-                }
-            ]
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
         )
-        self.codes = SimpleCollection()
-        self.sessions = SimpleCollection()
+        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        Base.metadata.create_all(bind=self.engine)
+        self.db = self.SessionLocal()
+
         self.service = SiteAdminService(
-            users=self.users,
-            codes=self.codes,
-            sessions=self.sessions,
-            content=SimpleCollection(),
+            session_factory=self.SessionLocal,
             now_provider=lambda: datetime(2026, 4, 5, 12, 0, 0),
         )
-        self.current_admin = SiteUserPublic(
-            id="admin-1",
+
+        admin_user = User(
             email="admin@example.com",
+            email_normalized="admin@example.com",
             email_verified=True,
-            username=None,
-            first_name=None,
-            last_name=None,
-            telegram_id=None,
+            username="admin",
+            first_name="Site",
+            last_name="Admin",
+            telegram_id=1,
             preferred_region="TR",
             show_ukraine_prices=False,
             show_turkey_prices=True,
             show_india_prices=False,
             payment_email="admin@example.com",
-            platform=None,
-            psn_email=None,
-            role="admin",
-            is_admin=True,
             is_active=True,
-            auth_providers=[],
+            role="admin",
             created_at=datetime(2026, 4, 5, 12, 0, 0),
             updated_at=datetime(2026, 4, 5, 12, 0, 0),
-            last_login_at=None,
         )
+        self.db.add(admin_user)
+        self.db.commit()
+        self.db.refresh(admin_user)
+        self.current_admin = build_public_user(admin_user)
 
     def tearDown(self):
         self.db.close()
+        Base.metadata.drop_all(bind=self.engine)
+        self.engine.dispose()
+
+    def test_help_content_roundtrip_uses_sqlite(self):
+        payload = AdminHelpContentUpdateRequest(
+            eyebrow="Help",
+            title="Support center",
+            subtitle="All about payments and access",
+            support_title="Need live help?",
+            support_description="Managers can help with region, subscription, and order access.",
+            support_button_label="Write to manager",
+            support_button_url="https://t.me/support",
+            purchases_title="Where purchases live",
+            purchases_description="Orders are stored in SQLite now.",
+            purchases_button_label="Open orders",
+            purchases_button_url="https://oplata.info",
+            social_links=[{"label": "Telegram", "url": "https://t.me/support"}],
+            sections=[
+                {"title": "First", "body": "Body one"},
+                {"title": "Second", "body": "Body two"},
+            ],
+            faq_items=[
+                {"question": "Q1", "answer": "A1"},
+            ],
+        )
+
+        updated = self.service.update_help_content(payload)
+        fetched = self.service.get_help_content()
+
+        self.assertEqual(updated.title, "Support center")
+        self.assertEqual(fetched.title, "Support center")
+        self.assertEqual(fetched.social_links[0].label, "Telegram")
+        self.assertIsNotNone(fetched.updated_at)
+
+    def test_user_crud_roundtrip_uses_sqlite(self):
+        created_user = self.service.create_user(
+            AdminUserCreateRequest(
+                email="new@example.com",
+                password="secretpass123",
+                email_verified=True,
+                username="newbie",
+                first_name="New",
+                last_name="User",
+                telegram_id=555,
+                preferred_region="UA",
+                payment_email="buy@example.com",
+                platform="PS5",
+                psn_email="psn@example.com",
+                role="client",
+                is_active=True,
+            )
+        )
+
+        self.assertEqual(created_user.email, "new@example.com")
+        self.assertEqual(created_user.telegram_id, 555)
+
+        listed = self.service.list_users(self.db, page=1, limit=10, search="new@example.com")
+        self.assertEqual(listed.total, 1)
+        self.assertEqual(listed.users[0].email, "new@example.com")
+
+        updated_user = self.service.update_user(
+            created_user.id,
+            AdminUserUpdateRequest(
+                first_name="Updated",
+                preferred_region="IN",
+                payment_email="updated@example.com",
+                role="client",
+            ),
+            current_admin=self.current_admin,
+        )
+        self.assertEqual(updated_user.first_name, "Updated")
+        self.assertEqual(updated_user.preferred_region, "IN")
+        self.assertEqual(updated_user.payment_email, "updated@example.com")
+
+        with self.SessionLocal() as db:
+            stored_user = db.query(User).filter(User.email_normalized == "new@example.com").one()
+            self.assertEqual(stored_user.first_name, "Updated")
+            self.assertEqual(stored_user.preferred_region, "IN")
+
+        self.service.delete_user(created_user.id, current_admin=self.current_admin)
+        with self.SessionLocal() as db:
+            self.assertIsNone(db.query(User).filter(User.email_normalized == "new@example.com").first())
 
     def test_update_user_cannot_demote_current_admin(self):
         with self.assertRaises(AuthServiceError) as error_context:
             self.service.update_user(
-                "admin-1",
+                str(self.current_admin.id),
                 AdminUserUpdateRequest(role="client"),
                 current_admin=self.current_admin,
             )
@@ -148,7 +155,7 @@ class SiteAdminServiceTests(unittest.TestCase):
 
     def test_delete_user_cannot_delete_current_admin(self):
         with self.assertRaises(AuthServiceError) as error_context:
-            self.service.delete_user("admin-1", current_admin=self.current_admin)
+            self.service.delete_user(str(self.current_admin.id), current_admin=self.current_admin)
 
         self.assertEqual(error_context.exception.status_code, 400)
 
@@ -225,6 +232,9 @@ class SiteAdminServiceTests(unittest.TestCase):
             preferred_region="UA",
             payment_email="favorite@example.com",
             is_active=True,
+            email_verified=False,
+            created_at=datetime(2026, 4, 5, 12, 0, 0),
+            updated_at=datetime(2026, 4, 5, 12, 0, 0),
         )
         self.db.add(favorite_user)
         self.db.commit()

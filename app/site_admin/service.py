@@ -1,23 +1,14 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from typing import Any, Optional
 
-from bson import ObjectId
-from bson.errors import InvalidId
-from pymongo import DESCENDING
-from pymongo.collection import Collection
-from pymongo.errors import DuplicateKeyError, PyMongoError
 from sqlalchemy import distinct, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.exceptions import AuthServiceError
-from app.auth.mongo import (
-    get_auth_codes_collection,
-    get_auth_sessions_collection,
-    get_site_content_collection,
-    get_auth_users_collection,
-)
 from app.auth.schemas import SiteUserPublic
 from app.auth.security import hash_password
 from app.auth.service import (
@@ -28,11 +19,14 @@ from app.auth.service import (
     omit_none_fields,
     resolve_site_user_role,
     resolve_user_identifier,
+    _map_integrity_error,
     utcnow,
 )
 from app.models import User, UserFavoriteProduct
+from app.models.site_auth import SiteAuthCode, SiteAuthSession, SiteContent
 from app.models.product import Product
 from app.models.purchase_order import SitePurchaseOrder
+from app.database.connection import SessionLocal
 from app.site_orders.service import build_status_label, serialize_purchase_order
 from config.settings import settings
 
@@ -142,35 +136,6 @@ def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
     }
 
 
-def _safe_object_id(value: Any) -> Any:
-    if isinstance(value, ObjectId):
-        return value
-
-    if isinstance(value, str):
-        cleaned = value.strip()
-        if not cleaned:
-            return value
-        try:
-            return ObjectId(cleaned)
-        except (InvalidId, TypeError):
-            return value
-
-    return value
-
-
-def _map_duplicate_key_error(error: DuplicateKeyError) -> AuthServiceError:
-    error_text = str(error)
-    if "telegram_id" in error_text:
-        return AuthServiceError(409, "Этот Telegram ID уже привязан к другому аккаунту.")
-    if "google_id" in error_text:
-        return AuthServiceError(409, "Этот Google аккаунт уже привязан к другому профилю.")
-    if "vk_id" in error_text:
-        return AuthServiceError(409, "Этот VK аккаунт уже привязан к другому профилю.")
-    if "email_normalized" in error_text or "email" in error_text:
-        return AuthServiceError(409, "Пользователь с таким email уже существует.")
-    return AuthServiceError(409, "Пользователь с такими данными уже существует.")
-
-
 def build_admin_user_record(
     user_doc: dict[str, Any],
     *,
@@ -179,7 +144,8 @@ def build_admin_user_record(
 ) -> AdminUserRecord:
     public_user = build_public_user(user_doc)
     payload = public_user.model_dump()
-    payload["is_env_admin"] = is_env_admin_telegram_id(user_doc.get("telegram_id"))
+    telegram_id = user_doc.get("telegram_id") if isinstance(user_doc, dict) else getattr(user_doc, "telegram_id", None)
+    payload["is_env_admin"] = is_env_admin_telegram_id(telegram_id)
     payload["purchase_count"] = int(purchase_count)
     payload["total_spent_rub"] = float(total_spent_rub or 0.0)
     return AdminUserRecord(**payload)
@@ -282,31 +248,38 @@ class SiteAdminService:
     def __init__(
         self,
         *,
-        users: Optional[Collection] = None,
-        codes: Optional[Collection] = None,
-        sessions: Optional[Collection] = None,
-        content: Optional[Collection] = None,
+        session_factory=SessionLocal,
         now_provider=utcnow,
     ) -> None:
-        self.users = users or get_auth_users_collection()
-        self.codes = codes or get_auth_codes_collection()
-        self.sessions = sessions or get_auth_sessions_collection()
-        self.content = content or get_site_content_collection()
+        self.session_factory = session_factory
         self.now_provider = now_provider
 
+    @contextmanager
+    def _session(self):
+        db = self.session_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
     def get_dashboard(self, db: Session) -> AdminDashboardResponse:
-        users_summary = self._build_user_summary()
+        users_summary = self._build_user_summary(db)
         products_summary = self._build_product_summary(db)
         purchases_summary = self._build_purchase_summary(db)
 
-        recent_user_docs = list(self.users.find({}).sort("updated_at", DESCENDING).limit(8))
-        recent_user_ids = [str(doc.get("_id")) for doc in recent_user_docs]
+        recent_user_docs = (
+            db.query(User)
+            .order_by(User.updated_at.desc(), User.id.desc())
+            .limit(8)
+            .all()
+        )
+        recent_user_ids = [str(doc.id) for doc in recent_user_docs]
         purchase_stats = self._get_purchase_stats_for_users(db, recent_user_ids)
         recent_users = [
             build_admin_user_record(
                 doc,
-                purchase_count=purchase_stats.get(str(doc.get("_id")), {}).get("purchase_count", 0),
-                total_spent_rub=purchase_stats.get(str(doc.get("_id")), {}).get("total_spent_rub", 0.0),
+                purchase_count=purchase_stats.get(str(doc.id), {}).get("purchase_count", 0),
+                total_spent_rub=purchase_stats.get(str(doc.id), {}).get("total_spent_rub", 0.0),
             )
             for doc in recent_user_docs
         ]
@@ -330,32 +303,35 @@ class SiteAdminService:
         )
 
     def get_help_content(self) -> AdminHelpContentResponse:
-        try:
-            content_doc = self.content.find_one({"_id": HELP_CONTENT_DOCUMENT_ID})
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        return self._serialize_help_content(content_doc)
+        with self._session() as db:
+            content_doc = (
+                db.query(SiteContent)
+                .filter(SiteContent.content_key == HELP_CONTENT_DOCUMENT_ID)
+                .first()
+            )
+            return self._serialize_help_content(content_doc)
 
     def update_help_content(self, payload: AdminHelpContentUpdateRequest) -> AdminHelpContentResponse:
         current_time = self.now_provider()
-        next_payload = payload.model_dump()
-        next_payload["updated_at"] = current_time
-
-        try:
-            self.content.update_one(
-                {"_id": HELP_CONTENT_DOCUMENT_ID},
-                {
-                    "$set": next_payload,
-                    "$setOnInsert": {"created_at": current_time},
-                },
-                upsert=True,
+        with self._session() as db:
+            content_doc = (
+                db.query(SiteContent)
+                .filter(SiteContent.content_key == HELP_CONTENT_DOCUMENT_ID)
+                .first()
             )
-            content_doc = self.content.find_one({"_id": HELP_CONTENT_DOCUMENT_ID})
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+            if not content_doc:
+                content_doc = SiteContent(content_key=HELP_CONTENT_DOCUMENT_ID, payload_json="{}")
+                db.add(content_doc)
 
-        return self._serialize_help_content(content_doc)
+            payload_data = payload.model_dump()
+            payload_data["updated_at"] = current_time.isoformat()
+            content_doc.set_payload(payload_data)
+            content_doc.updated_at = current_time
+            content_doc.created_at = content_doc.created_at or current_time
+            db.add(content_doc)
+            db.commit()
+            db.refresh(content_doc)
+            return self._serialize_help_content(content_doc)
 
     def list_users(
         self,
@@ -367,23 +343,61 @@ class SiteAdminService:
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
     ) -> AdminUserListResponse:
-        query = self._build_user_query(search=search, role=role, is_active=is_active)
+        query = db.query(User)
 
-        total = self.users.count_documents(query)
+        if role:
+            normalized_role = resolve_site_user_role(role)
+            if normalized_role == SITE_ROLE_ADMIN and settings.ADMIN_TELEGRAM_IDS:
+                query = query.filter(
+                    or_(
+                        User.role == SITE_ROLE_ADMIN,
+                        User.telegram_id.in_(settings.ADMIN_TELEGRAM_IDS),
+                    )
+                )
+            elif normalized_role == SITE_ROLE_CLIENT and settings.ADMIN_TELEGRAM_IDS:
+                query = query.filter(
+                    or_(User.role == SITE_ROLE_CLIENT, User.role.is_(None)),
+                    ~User.telegram_id.in_(settings.ADMIN_TELEGRAM_IDS),
+                )
+            else:
+                query = query.filter(User.role == normalized_role)
+
+        if is_active is not None:
+            query = query.filter(User.is_active.is_(bool(is_active)))
+
+        if search:
+            pattern = f"%{search.strip()}%"
+            search_filters = [
+                User.email.ilike(pattern),
+                User.email_normalized.ilike(pattern),
+                User.username.ilike(pattern),
+                User.first_name.ilike(pattern),
+                User.last_name.ilike(pattern),
+            ]
+            if search.strip().isdigit():
+                search_filters.append(User.telegram_id == int(search.strip()))
+            query = query.filter(or_(*search_filters))
+
+        total = query.count()
         skip = max(page - 1, 0) * limit
-        user_docs = list(self.users.find(query).sort("created_at", DESCENDING).skip(skip).limit(limit))
+        user_docs = (
+            query.order_by(User.created_at.desc(), User.id.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
         purchase_stats = self._get_purchase_stats_for_users(
             db,
-            [str(doc.get("_id")) for doc in user_docs],
+            [str(doc.id) for doc in user_docs],
         )
 
         return AdminUserListResponse(
             users=[
                 build_admin_user_record(
                     doc,
-                    purchase_count=purchase_stats.get(str(doc.get("_id")), {}).get("purchase_count", 0),
-                    total_spent_rub=purchase_stats.get(str(doc.get("_id")), {}).get("total_spent_rub", 0.0),
+                    purchase_count=purchase_stats.get(str(doc.id), {}).get("purchase_count", 0),
+                    total_spent_rub=purchase_stats.get(str(doc.id), {}).get("total_spent_rub", 0.0),
                 )
                 for doc in user_docs
             ],
@@ -394,48 +408,42 @@ class SiteAdminService:
 
     def create_user(self, payload: AdminUserCreateRequest) -> AdminUserRecord:
         current_time = self.now_provider()
-
-        user_doc = {
-            "email": payload.email,
-            "email_normalized": payload.email,
-            "password_hash": hash_password(payload.password) if payload.password else None,
-            "email_verified": bool(payload.email and payload.email_verified),
-            "username": payload.username,
-            "first_name": payload.first_name,
-            "last_name": payload.last_name,
-            "telegram_id": payload.telegram_id,
-            "preferred_region": payload.preferred_region,
-            "show_ukraine_prices": payload.preferred_region == "UA",
-            "show_turkey_prices": payload.preferred_region == "TR",
-            "show_india_prices": payload.preferred_region == "IN",
-            "payment_email": payload.payment_email,
-            "platform": payload.platform,
-            "psn_email": payload.psn_email,
-            "role": resolve_site_user_role(payload.role, telegram_id=payload.telegram_id),
-            "psn_accounts": {},
-            "is_active": bool(payload.is_active),
-            "auth_providers": [],
-            "created_at": current_time,
-            "updated_at": current_time,
-            "last_login_at": None,
-            "last_registration_at": current_time,
-            "registration_user_agent": "admin-panel",
-            "registration_ip_address": None,
-        }
-        user_doc = omit_none_fields(user_doc, fields={"telegram_id", "google_id", "vk_id"})
-
-        try:
-            result = self.users.insert_one(user_doc)
-            stored_user = self.users.find_one({"_id": result.inserted_id})
-        except DuplicateKeyError as error:
-            raise _map_duplicate_key_error(error) from error
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
-
-        if not stored_user:
-            raise AuthServiceError(500, "Не удалось создать пользователя.")
-
-        return build_admin_user_record(stored_user)
+        with self._session() as db:
+            user = User(
+                email=payload.email,
+                email_normalized=payload.email,
+                email_verified=bool(payload.email and payload.email_verified),
+                username=payload.username,
+                first_name=payload.first_name,
+                last_name=payload.last_name,
+                telegram_id=payload.telegram_id,
+                preferred_region=payload.preferred_region,
+                show_ukraine_prices=payload.preferred_region == "UA",
+                show_turkey_prices=payload.preferred_region == "TR",
+                show_india_prices=payload.preferred_region == "IN",
+                payment_email=payload.payment_email,
+                platform=payload.platform,
+                psn_email=payload.psn_email,
+                role=resolve_site_user_role(payload.role, telegram_id=payload.telegram_id),
+                is_active=bool(payload.is_active),
+                created_at=current_time,
+                updated_at=current_time,
+                last_login_at=None,
+                last_registration_at=current_time,
+                registration_user_agent="admin-panel",
+                registration_ip_address=None,
+            )
+            if payload.password:
+                user.set_password(payload.password)
+            user.auth_providers = []
+            db.add(user)
+            try:
+                db.commit()
+                db.refresh(user)
+            except IntegrityError as error:
+                db.rollback()
+                raise _map_integrity_error(error) from error
+            return build_admin_user_record(user)
 
     def update_user(
         self,
@@ -445,99 +453,97 @@ class SiteAdminService:
         current_admin: SiteUserPublic,
     ) -> AdminUserRecord:
         resolved_user_id = resolve_user_identifier(user_id)
-        existing_user = self.users.find_one({"_id": resolved_user_id})
-        if not existing_user:
+        if not isinstance(resolved_user_id, int):
             raise AuthServiceError(404, "Пользователь не найден.")
 
-        is_self = str(existing_user.get("_id")) == current_admin.id
-        is_env_admin = is_env_admin_telegram_id(existing_user.get("telegram_id"))
-        next_telegram_id = payload.telegram_id if payload.telegram_id is not None else existing_user.get("telegram_id")
-        next_role = (
-            resolve_site_user_role(payload.role, telegram_id=next_telegram_id)
-            if payload.role is not None or payload.telegram_id is not None
-            else resolve_site_user_role(existing_user.get("role"), telegram_id=next_telegram_id)
-        )
+        with self._session() as db:
+            existing_user = db.query(User).filter(User.id == resolved_user_id).first()
+            if not existing_user:
+                raise AuthServiceError(404, "Пользователь не найден.")
 
-        if is_env_admin and next_role != SITE_ROLE_ADMIN:
-            raise AuthServiceError(400, "Администратор из .env должен оставаться администратором.")
-        if is_self and next_role != SITE_ROLE_ADMIN:
-            raise AuthServiceError(400, "Нельзя снять роль администратора у самого себя.")
-        if is_self and payload.is_active is False:
-            raise AuthServiceError(400, "Нельзя деактивировать собственный аккаунт администратора.")
+            is_self = str(existing_user.id) == current_admin.id
+            is_env_admin = is_env_admin_telegram_id(existing_user.telegram_id)
+            next_telegram_id = payload.telegram_id if payload.telegram_id is not None else existing_user.telegram_id
+            next_role = (
+                resolve_site_user_role(payload.role, telegram_id=next_telegram_id)
+                if payload.role is not None or payload.telegram_id is not None
+                else resolve_site_user_role(existing_user.role, telegram_id=next_telegram_id)
+            )
 
-        update_fields: dict[str, Any] = {
-            "updated_at": self.now_provider(),
-            "role": next_role,
-        }
+            if is_env_admin and next_role != SITE_ROLE_ADMIN:
+                raise AuthServiceError(400, "Администратор из .env должен оставаться администратором.")
+            if is_self and next_role != SITE_ROLE_ADMIN:
+                raise AuthServiceError(400, "Нельзя снять роль администратора у самого себя.")
+            if is_self and payload.is_active is False:
+                raise AuthServiceError(400, "Нельзя деактивировать собственный аккаунт администратора.")
 
-        if payload.email is not None:
-            email_changed = payload.email != existing_user.get("email_normalized")
-            update_fields["email"] = payload.email
-            update_fields["email_normalized"] = payload.email
-            if payload.email_verified is not None:
-                update_fields["email_verified"] = payload.email_verified
-            elif email_changed:
-                update_fields["email_verified"] = False
-        elif payload.email_verified is not None:
-            update_fields["email_verified"] = payload.email_verified
+            existing_user.role = next_role
+            if payload.email is not None:
+                email_changed = payload.email != existing_user.email_normalized
+                existing_user.email = payload.email
+                existing_user.email_normalized = payload.email
+                if payload.email_verified is not None:
+                    existing_user.email_verified = payload.email_verified
+                elif email_changed:
+                    existing_user.email_verified = False
+            elif payload.email_verified is not None:
+                existing_user.email_verified = payload.email_verified
 
-        if payload.password:
-            update_fields["password_hash"] = hash_password(payload.password)
-        if payload.username is not None:
-            update_fields["username"] = payload.username
-        if payload.first_name is not None:
-            update_fields["first_name"] = payload.first_name
-        if payload.last_name is not None:
-            update_fields["last_name"] = payload.last_name
-        if payload.telegram_id is not None:
-            update_fields["telegram_id"] = payload.telegram_id
-        if payload.payment_email is not None:
-            update_fields["payment_email"] = payload.payment_email
-        if payload.platform is not None:
-            update_fields["platform"] = payload.platform
-        if payload.psn_email is not None:
-            update_fields["psn_email"] = payload.psn_email
-        if payload.is_active is not None:
-            update_fields["is_active"] = payload.is_active
+            if payload.password:
+                existing_user.set_password(payload.password)
+            if payload.username is not None:
+                existing_user.username = payload.username
+            if payload.first_name is not None:
+                existing_user.first_name = payload.first_name
+            if payload.last_name is not None:
+                existing_user.last_name = payload.last_name
+            if payload.telegram_id is not None:
+                existing_user.telegram_id = payload.telegram_id
+            if payload.payment_email is not None:
+                existing_user.payment_email = payload.payment_email
+            if payload.platform is not None:
+                existing_user.platform = payload.platform
+            if payload.psn_email is not None:
+                existing_user.psn_email = payload.psn_email
+            if payload.is_active is not None:
+                existing_user.is_active = payload.is_active
 
-        preferred_region = payload.preferred_region or existing_user.get("preferred_region", "TR")
-        if payload.preferred_region is not None:
-            update_fields["preferred_region"] = preferred_region
-            update_fields["show_ukraine_prices"] = preferred_region == "UA"
-            update_fields["show_turkey_prices"] = preferred_region == "TR"
-            update_fields["show_india_prices"] = preferred_region == "IN"
+            if payload.preferred_region is not None:
+                existing_user.preferred_region = payload.preferred_region
+                existing_user.show_ukraine_prices = payload.preferred_region == "UA"
+                existing_user.show_turkey_prices = payload.preferred_region == "TR"
+                existing_user.show_india_prices = payload.preferred_region == "IN"
 
-        try:
-            self.users.update_one({"_id": existing_user["_id"]}, {"$set": update_fields})
-            stored_user = self.users.find_one({"_id": existing_user["_id"]})
-        except DuplicateKeyError as error:
-            raise _map_duplicate_key_error(error) from error
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+            existing_user.updated_at = self.now_provider()
+            db.add(existing_user)
+            try:
+                db.commit()
+                db.refresh(existing_user)
+            except IntegrityError as error:
+                db.rollback()
+                raise _map_integrity_error(error) from error
 
-        if not stored_user:
-            raise AuthServiceError(404, "Пользователь не найден после обновления.")
-
-        return build_admin_user_record(stored_user)
+            return build_admin_user_record(existing_user)
 
     def delete_user(self, user_id: str, *, current_admin: SiteUserPublic) -> None:
         resolved_user_id = resolve_user_identifier(user_id)
-        existing_user = self.users.find_one({"_id": resolved_user_id})
-        if not existing_user:
+        if not isinstance(resolved_user_id, int):
             raise AuthServiceError(404, "Пользователь не найден.")
 
-        if str(existing_user.get("_id")) == current_admin.id:
-            raise AuthServiceError(400, "Нельзя удалить собственный аккаунт администратора.")
-        if is_env_admin_telegram_id(existing_user.get("telegram_id")):
-            raise AuthServiceError(400, "Нельзя удалить администратора из .env.")
+        with self._session() as db:
+            existing_user = db.query(User).filter(User.id == resolved_user_id).first()
+            if not existing_user:
+                raise AuthServiceError(404, "Пользователь не найден.")
 
-        try:
-            self.users.delete_one({"_id": existing_user["_id"]})
-            self.sessions.delete_many({"user_id": existing_user["_id"]})
-            if existing_user.get("email_normalized"):
-                self.codes.delete_many({"email_normalized": existing_user["email_normalized"]})
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+            if str(existing_user.id) == current_admin.id:
+                raise AuthServiceError(400, "Нельзя удалить собственный аккаунт администратора.")
+            if is_env_admin_telegram_id(existing_user.telegram_id):
+                raise AuthServiceError(400, "Нельзя удалить администратора из .env.")
+
+            db.query(SiteAuthSession).filter(SiteAuthSession.user_id == existing_user.id).delete(synchronize_session=False)
+            db.query(SiteAuthCode).filter(SiteAuthCode.user_id == existing_user.id).delete(synchronize_session=False)
+            db.delete(existing_user)
+            db.commit()
 
     def list_products(
         self,
@@ -597,13 +603,11 @@ class SiteAdminService:
             .limit(limit)
             .all()
         )
-        site_favorite_counts = self._get_site_favorite_counts()
-
         return AdminProductListResponse(
             products=[
                 build_admin_product_record(
                     product,
-                    favorites_count=int(favorites_count or 0) + site_favorite_counts.get(product.id, 0),
+                    favorites_count=int(favorites_count or 0),
                 )
                 for product, favorites_count in product_rows
             ],
@@ -785,11 +789,17 @@ class SiteAdminService:
         db.delete(order)
         db.commit()
 
-    def _serialize_help_content(self, content_doc: Optional[dict[str, Any]]) -> AdminHelpContentResponse:
+    def _serialize_help_content(self, content_doc: Optional[Any]) -> AdminHelpContentResponse:
         if not content_doc:
             return AdminHelpContentResponse(**build_default_help_content())
 
-        payload = build_default_help_content(updated_at=content_doc.get("updated_at"))
+        payload = build_default_help_content(updated_at=getattr(content_doc, "updated_at", None))
+        if hasattr(content_doc, "get_payload"):
+            content_payload = content_doc.get_payload()
+        elif isinstance(content_doc, dict):
+            content_payload = dict(content_doc)
+        else:
+            content_payload = {}
 
         for field_name in (
             "eyebrow",
@@ -808,86 +818,38 @@ class SiteAdminService:
             "faq_items",
             "updated_at",
         ):
-            if field_name in content_doc:
-                payload[field_name] = content_doc[field_name]
+            if field_name in content_payload:
+                payload[field_name] = content_payload[field_name]
 
         return AdminHelpContentResponse(**payload)
 
-    def _build_user_query(
-        self,
-        *,
-        search: Optional[str],
-        role: Optional[str],
-        is_active: Optional[bool],
-    ) -> dict[str, Any]:
-        query: dict[str, Any] = {}
+    def _build_user_summary(self, db: Session) -> AdminUserSummary:
+        total = db.query(func.count(User.id)).scalar() or 0
+        active = db.query(func.count(User.id)).filter(User.is_active.is_(True)).scalar() or 0
+        verified = db.query(func.count(User.id)).filter(User.email_verified.is_(True)).scalar() or 0
 
-        if role:
-            normalized_role = resolve_site_user_role(role)
-            if normalized_role == SITE_ROLE_ADMIN and settings.ADMIN_TELEGRAM_IDS:
-                query["$or"] = [
-                    {"role": SITE_ROLE_ADMIN},
-                    {"telegram_id": {"$in": settings.ADMIN_TELEGRAM_IDS}},
-                ]
-            elif normalized_role == SITE_ROLE_CLIENT and settings.ADMIN_TELEGRAM_IDS:
-                query["$and"] = [
-                    {
-                        "$or": [
-                            {"role": SITE_ROLE_CLIENT},
-                            {"role": {"$exists": False}},
-                        ]
-                    },
-                    {"telegram_id": {"$nin": settings.ADMIN_TELEGRAM_IDS}},
-                ]
-            else:
-                query["role"] = normalized_role
-
-        if is_active is not None:
-            query["is_active"] = bool(is_active)
-
-        if search:
-            search = search.strip()
-            regex = {"$regex": re.escape(search), "$options": "i"}
-            search_conditions: list[dict[str, Any]] = [
-                {"email": regex},
-                {"username": regex},
-                {"first_name": regex},
-                {"last_name": regex},
-            ]
-            if search.isdigit():
-                search_conditions.append({"telegram_id": int(search)})
-
-            if "$or" in query or "$and" in query:
-                query = {"$and": [query, {"$or": search_conditions}]}
-            else:
-                query["$or"] = search_conditions
-
-        return query
-
-    def _build_user_summary(self) -> AdminUserSummary:
-        total = self.users.count_documents({})
-        active = self.users.count_documents({"is_active": True})
-        verified = self.users.count_documents({"email_verified": True})
-
-        admin_query: dict[str, Any]
         if settings.ADMIN_TELEGRAM_IDS:
-            admin_query = {
-                "$or": [
-                    {"role": SITE_ROLE_ADMIN},
-                    {"telegram_id": {"$in": settings.ADMIN_TELEGRAM_IDS}},
-                ]
-            }
+            admins = (
+                db.query(func.count(User.id))
+                .filter(
+                    or_(
+                        User.role == SITE_ROLE_ADMIN,
+                        User.telegram_id.in_(settings.ADMIN_TELEGRAM_IDS),
+                    )
+                )
+                .scalar()
+                or 0
+            )
         else:
-            admin_query = {"role": SITE_ROLE_ADMIN}
+            admins = db.query(func.count(User.id)).filter(User.role == SITE_ROLE_ADMIN).scalar() or 0
 
-        admins = self.users.count_documents(admin_query)
-        clients = max(total - admins, 0)
+        clients = max(int(total) - int(admins), 0)
 
         return AdminUserSummary(
-            total=total,
-            active=active,
-            verified=verified,
-            admins=admins,
+            total=int(total),
+            active=int(active),
+            verified=int(verified),
+            admins=int(admins),
             clients=clients,
         )
 
@@ -959,46 +921,7 @@ class SiteAdminService:
         }
 
     def _get_product_favorites_count(self, db: Session, *, product_id: str) -> int:
-        return (
-            db.query(func.count(UserFavoriteProduct.id))
-            .filter(UserFavoriteProduct.product_id == product_id)
-            .scalar()
-            or 0
-        ) + self._get_site_favorite_counts(product_id=product_id).get(product_id, 0)
-
-    def _get_site_favorite_counts(self, *, product_id: Optional[str] = None) -> dict[str, int]:
-        query: dict[str, Any] = {
-            "$or": [
-                {"telegram_id": None},
-                {"telegram_id": {"$exists": False}},
-            ],
-            "favorite_products": {"$elemMatch": {"product_id": product_id}} if product_id else {"$exists": True},
-        }
-        counts: dict[str, int] = {}
-        try:
-            user_docs = self.users.find(query, {"favorite_products": 1})
-        except PyMongoError:
-            return counts
-
-        for user_doc in user_docs:
-            seen_product_ids: set[str] = set()
-            raw_favorites = user_doc.get("favorite_products", [])
-            if not isinstance(raw_favorites, list):
-                continue
-
-            for entry in raw_favorites:
-                if not isinstance(entry, dict):
-                    continue
-                favorite_product_id = str(entry.get("product_id") or "").strip()
-                if not favorite_product_id or favorite_product_id in seen_product_ids:
-                    continue
-                if product_id and favorite_product_id != product_id:
-                    continue
-
-                seen_product_ids.add(favorite_product_id)
-                counts[favorite_product_id] = counts.get(favorite_product_id, 0) + 1
-
-        return counts
+        return db.query(func.count(UserFavoriteProduct.id)).filter(UserFavoriteProduct.product_id == product_id).scalar() or 0
 
     def _get_product_favorites(self, db: Session, *, product_id: str) -> list[AdminProductFavoriteRecord]:
         favorite_rows = (
@@ -1084,3 +1007,4 @@ def get_site_admin_service() -> SiteAdminService:
     if _site_admin_service is None:
         _site_admin_service = SiteAdminService()
     return _site_admin_service
+

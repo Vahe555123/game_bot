@@ -6,23 +6,21 @@ from datetime import datetime, timedelta
 from html import unescape
 from typing import Any, Optional
 
-from bson.errors import InvalidId
-from pymongo.collection import Collection
-from pymongo.errors import PyMongoError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.api.payment import PaymentAPIError, payment_api
 from app.api.payment_india import IndiaPaymentAPIError, india_payment_api
 from app.api.payment_turkey import TurkeyPaymentAPIError, turkey_payment_api
 from app.api.payment_ukraine import UkrainePaymentAPIError, ukraine_payment_api
 from app.auth.exceptions import AuthServiceError
-from app.auth.mongo import get_auth_users_collection
 from app.auth.service import resolve_user_identifier
-from app.auth.telegram_sync import sync_telegram_user_from_site
 from app.models.currency_rate import CurrencyRate
 from app.models.product import Product
+from app.models.psn_account import PSNAccount
 from app.models.purchase_order import SitePurchaseOrder
-from app.utils.encryption import decrypt_password, encrypt_password
+from app.models.user import User
+from app.utils.encryption import decrypt_password
+from app.utils.time import utcnow as shared_utcnow
 from config.settings import settings
 
 from .schemas import PurchaseOrderResponse
@@ -88,7 +86,7 @@ class PaymentGenerationResult:
 
 
 def utcnow() -> datetime:
-    return datetime.utcnow()
+    return shared_utcnow()
 
 
 def normalize_region(region: str) -> str:
@@ -112,34 +110,38 @@ def sanitize_payment_product_name(value: str) -> str:
     return " ".join(normalized.split())
 
 
-def _decrypt_region_secret(account: dict[str, Any], hash_key: str, salt_key: str) -> str:
-    encrypted_value = account.get(hash_key)
-    salt_value = account.get(salt_key)
+def _get_value(source: Any, key: str, default: Any = None) -> Any:
+    if source is None:
+        return default
+    if isinstance(source, dict):
+        return source.get(key, default)
+    return getattr(source, key, default)
+
+
+def _decrypt_region_secret(account: Any, hash_key: str, salt_key: str) -> str:
+    encrypted_value = _get_value(account, hash_key)
+    salt_value = _get_value(account, salt_key)
     if not encrypted_value or not salt_value:
         return ""
     return decrypt_password(encrypted_value, salt_value)
 
 
-def _resolve_psn_account(user_doc: dict[str, Any], region: str) -> dict[str, Any]:
-    accounts = dict(user_doc.get("psn_accounts") or {})
-    region_account = dict(accounts.get(region) or {})
-
-    if region == "UA" and not region_account and user_doc.get("psn_email"):
-        region_account = {
-            "psn_email": user_doc.get("psn_email"),
-        }
-
-    return region_account
+def _resolve_psn_account(user_doc: Any, region: str) -> Any:
+    accounts = _get_value(user_doc, "psn_accounts", []) or []
+    for account in accounts:
+        if (str(_get_value(account, "region") or "").upper()) == region and bool(_get_value(account, "is_active", True)):
+            return account
+    return None
 
 
 def build_checkout_profile_context(
-    user_doc: dict[str, Any],
+    user_doc: Any,
     region: str,
     *,
     overrides: Optional[CheckoutInputOverrides] = None,
 ) -> CheckoutProfileContext:
     current_overrides = overrides or CheckoutInputOverrides()
-    payment_email = current_overrides.purchase_email or (user_doc.get("payment_email") or "").strip().lower()
+    payment_email = current_overrides.purchase_email or (_get_value(user_doc, "payment_email") or "").strip().lower()
     missing_fields: list[str] = []
     if not payment_email:
         missing_fields.append("purchase_email")
@@ -161,8 +163,8 @@ def build_checkout_profile_context(
         )
 
     region_account = _resolve_psn_account(user_doc, region)
-    psn_email = current_overrides.psn_email or (region_account.get("psn_email") or user_doc.get("psn_email") or "").strip().lower()
-    psn_password = current_overrides.psn_password or _decrypt_region_secret(region_account, "psn_password_hash", "psn_password_salt")
+    psn_email = current_overrides.psn_email or (_get_value(region_account, "psn_email") or _get_value(user_doc, "psn_email") or "").strip().lower()
+    psn_password = current_overrides.psn_password or _decrypt_region_secret(region_account or user_doc, "psn_password_hash", "psn_password_salt")
     backup_code = current_overrides.backup_code or ""
 
     if not psn_email:
@@ -249,22 +251,24 @@ class SitePurchaseService:
     def __init__(
         self,
         *,
-        users_collection: Optional[Collection] = None,
         now_provider=utcnow,
     ) -> None:
-        self.users_collection = users_collection or get_auth_users_collection()
         self.now_provider = now_provider
 
-    def get_user_doc(self, user_id: Any) -> dict[str, Any]:
+    def get_user_doc(self, db: Session, user_id: Any) -> User:
         resolved_user_id = resolve_user_identifier(user_id)
-        try:
-            user_doc = self.users_collection.find_one({"_id": resolved_user_id, "is_active": True})
-        except (PyMongoError, InvalidId) as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+        if not isinstance(resolved_user_id, int):
+            raise AuthServiceError(422, "Некорректный идентификатор пользователя.")
 
-        if not user_doc:
+        user = (
+            db.query(User)
+            .options(selectinload(User.psn_accounts))
+            .filter(User.id == resolved_user_id, User.is_active.is_(True))
+            .first()
+        )
+        if not user:
             raise AuthServiceError(404, "Профиль пользователя не найден.")
-        return user_doc
+        return user
 
     async def create_checkout(
         self,
@@ -279,14 +283,14 @@ class SitePurchaseService:
         psn_password: Optional[str] = None,
         backup_code: Optional[str] = None,
     ) -> PurchaseOrderResponse:
-        user_doc = self.get_user_doc(site_user_id)
+        user = self.get_user_doc(db, site_user_id)
         normalized_region = normalize_region(region)
         product = db.query(Product).filter(Product.id == product_id, Product.region == normalized_region).first()
         if not product:
             raise AuthServiceError(404, f"Товар не найден в регионе {normalized_region}.")
 
         profile_context = build_checkout_profile_context(
-            user_doc,
+            user,
             normalized_region,
             overrides=CheckoutInputOverrides(
                 purchase_email=purchase_email,
@@ -296,8 +300,9 @@ class SitePurchaseService:
             ),
         )
         self._persist_checkout_profile(
+            db,
             site_user_id=site_user_id,
-            user_doc=user_doc,
+            user_doc=user,
             region=normalized_region,
             profile_context=profile_context,
             overrides=CheckoutInputOverrides(
@@ -307,12 +312,6 @@ class SitePurchaseService:
                 backup_code=backup_code,
             ),
         )
-        if user_doc.get("telegram_id") is not None:
-            sync_telegram_user_from_site(
-                db=db,
-                users_collection=self.users_collection,
-                site_user_id=site_user_id,
-            )
         current_price = resolve_product_price(product, region=normalized_region, use_ps_plus=use_ps_plus)
         region_info = product.get_region_info()
         rate = CurrencyRate.get_rate_for_price(db, region_info["code"], current_price)
@@ -328,9 +327,9 @@ class SitePurchaseService:
         current_time = self.now_provider()
         order = SitePurchaseOrder(
             order_number=self._generate_unique_order_number(db, now=current_time),
-            site_user_id=str(user_doc["_id"]),
-            user_email=user_doc.get("email"),
-            user_display_name=(user_doc.get("first_name") or user_doc.get("username") or user_doc.get("email")),
+            site_user_id=str(user.id),
+            user_email=user.email,
+            user_display_name=user.full_name,
             product_id=product.id,
             product_region=normalized_region,
             product_name=payment_result.product_name,
@@ -360,57 +359,67 @@ class SitePurchaseService:
 
     def _persist_checkout_profile(
         self,
+        db: Session,
         *,
         site_user_id: str,
-        user_doc: dict[str, Any],
+        user_doc: User,
         region: str,
         profile_context: CheckoutProfileContext,
         overrides: CheckoutInputOverrides,
     ) -> None:
         current_time = self.now_provider()
         resolved_user_id = resolve_user_identifier(site_user_id)
-        update_fields: dict[str, Any] = {}
+        if not isinstance(resolved_user_id, int):
+            raise AuthServiceError(422, "Некорректный идентификатор пользователя.")
+        if resolved_user_id != user_doc.id:
+            raise AuthServiceError(400, "Профиль пользователя не совпадает с выбранным аккаунтом.")
 
-        if profile_context.payment_email and profile_context.payment_email != user_doc.get("payment_email"):
-            update_fields["payment_email"] = profile_context.payment_email
+        update_needed = False
+        current_payment_email = (user_doc.payment_email or "").strip().lower()
+        if profile_context.payment_email and profile_context.payment_email != current_payment_email:
+            user_doc.payment_email = profile_context.payment_email
+            update_needed = True
 
         if region == "UA":
-            existing_accounts = dict(user_doc.get("psn_accounts") or {})
-            region_account = _resolve_psn_account(user_doc, region)
+            region_account = user_doc.get_psn_account_for_region(region)
+            if region_account is None:
+                region_account = PSNAccount(user_id=user_doc.id, region=region)
+                db.add(region_account)
+
             account_changed = False
+            current_psn_email = (region_account.psn_email or user_doc.psn_email or "").strip().lower()
+            if profile_context.psn_email and profile_context.psn_email != current_psn_email:
+                region_account.psn_email = profile_context.psn_email
+                user_doc.psn_email = profile_context.psn_email
+                account_changed = True
+                update_needed = True
 
-            if profile_context.psn_email and region_account.get("psn_email") != profile_context.psn_email:
-                region_account["psn_email"] = profile_context.psn_email
-                update_fields["psn_email"] = profile_context.psn_email
+            if overrides.psn_password is not None:
+                region_account.set_psn_password(overrides.psn_password)
+                user_doc.set_psn_password(overrides.psn_password)
                 account_changed = True
+                update_needed = True
 
-            if overrides.psn_password:
-                encoded_password, password_salt = encrypt_password(overrides.psn_password)
-                region_account["psn_password_hash"] = encoded_password
-                region_account["psn_password_salt"] = password_salt
+            if overrides.backup_code is not None:
+                region_account.set_twofa_code(overrides.backup_code)
                 account_changed = True
-
-            if "backup_code_hash" in region_account:
-                region_account.pop("backup_code_hash", None)
-                account_changed = True
-            if "backup_code_salt" in region_account:
-                region_account.pop("backup_code_salt", None)
-                account_changed = True
+                update_needed = True
+            elif account_changed:
+                region_account.set_twofa_code(None)
+                update_needed = True
 
             if account_changed:
-                region_account["updated_at"] = current_time
-                existing_accounts[region] = region_account
-                update_fields["psn_accounts"] = existing_accounts
+                region_account.updated_at = current_time
+                region_account.is_active = 1
+                db.add(region_account)
 
-        if not update_fields:
+        if not update_needed:
             return
 
-        update_fields["updated_at"] = current_time
-
-        try:
-            self.users_collection.update_one({"_id": resolved_user_id}, {"$set": update_fields})
-        except PyMongoError as error:
-            raise AuthServiceError(503, "MongoDB недоступна. Попробуйте позже.") from error
+        user_doc.updated_at = current_time
+        db.add(user_doc)
+        db.commit()
+        db.refresh(user_doc)
 
     def list_user_orders(
         self,

@@ -1575,6 +1575,11 @@ class FavoriteCRUD:
         if region:
             canon = ProductCRUD.normalize_product_region(region)
             region = canon or str(region).strip().upper() or None
+        else:
+            product = ProductCRUD.get_by_id(db, product_id)
+            if product and product.region:
+                canon = ProductCRUD.normalize_product_region(product.region)
+                region = canon or str(product.region).strip().upper() or None
 
         # Проверяем, что товар не уже в избранном
         existing = db.query(UserFavoriteProduct).filter(

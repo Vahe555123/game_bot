@@ -26,10 +26,7 @@ from app.auth.schemas import (
     TelegramAuthRequest,
     VerifyEmailRequest,
 )
-from app.auth.service import AuthService, build_public_user, get_auth_service
-from app.auth.telegram_sync import sync_site_user_from_telegram, sync_telegram_user_from_site
-from app.database.connection import get_db
-from sqlalchemy.orm import Session
+from app.auth.service import AuthService, get_auth_service
 
 router = APIRouter(prefix="/auth", tags=["Site Auth"])
 
@@ -209,7 +206,6 @@ async def telegram_login(
     payload: TelegramAuthRequest,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     oauth_service = get_oauth_service()
@@ -223,24 +219,6 @@ async def telegram_login(
         )
     except AuthServiceError as error:
         _raise_http_auth_error(error)
-
-    if user.telegram_id is not None:
-        synced_user_doc = await run_in_threadpool(
-            sync_site_user_from_telegram,
-            db=db,
-            users_collection=auth_service.users,
-            site_user_id=user.id,
-            telegram_id=user.telegram_id,
-        )
-        if synced_user_doc:
-            user = build_public_user(synced_user_doc)
-
-        await run_in_threadpool(
-            sync_telegram_user_from_site,
-            db=db,
-            users_collection=auth_service.users,
-            site_user_id=user.id,
-        )
 
     _set_session_cookie(response, session_token)
     return AuthUserResponse(user=user)
@@ -356,27 +334,7 @@ async def logout(
 @router.get("/me", response_model=AuthUserResponse, summary="Текущий пользователь сайта")
 async def get_me(
     current_user: SiteUserPublic = Depends(get_current_site_user),
-    auth_service: AuthService = Depends(get_auth_service),
-    db: Session = Depends(get_db),
 ):
-    if current_user.telegram_id is not None:
-        synced_user_doc = await run_in_threadpool(
-            sync_site_user_from_telegram,
-            db=db,
-            users_collection=auth_service.users,
-            site_user_id=current_user.id,
-            telegram_id=current_user.telegram_id,
-        )
-        if synced_user_doc:
-            current_user = build_public_user(synced_user_doc)
-
-        await run_in_threadpool(
-            sync_telegram_user_from_site,
-            db=db,
-            users_collection=auth_service.users,
-            site_user_id=current_user.id,
-        )
-
     return AuthUserResponse(user=current_user)
 
 
@@ -384,23 +342,8 @@ async def get_me(
 async def get_profile(
     current_user: SiteUserPublic = Depends(get_current_site_user),
     auth_service: AuthService = Depends(get_auth_service),
-    db: Session = Depends(get_db),
 ):
     try:
-        if current_user.telegram_id is not None:
-            await run_in_threadpool(
-                sync_site_user_from_telegram,
-                db=db,
-                users_collection=auth_service.users,
-                site_user_id=current_user.id,
-                telegram_id=current_user.telegram_id,
-            )
-            await run_in_threadpool(
-                sync_telegram_user_from_site,
-                db=db,
-                users_collection=auth_service.users,
-                site_user_id=current_user.id,
-            )
         return await run_in_threadpool(auth_service.get_profile, current_user.id)
     except AuthServiceError as error:
         _raise_http_auth_error(error)
@@ -411,22 +354,13 @@ async def update_profile_preferences(
     payload: SiteProfilePreferencesUpdateRequest,
     current_user: SiteUserPublic = Depends(get_current_site_user),
     auth_service: AuthService = Depends(get_auth_service),
-    db: Session = Depends(get_db),
 ):
     try:
-        response_payload = await run_in_threadpool(
+        return await run_in_threadpool(
             auth_service.update_profile_preferences,
             current_user.id,
             payload,
         )
-        if current_user.telegram_id is not None:
-            await run_in_threadpool(
-                sync_telegram_user_from_site,
-                db=db,
-                users_collection=auth_service.users,
-                site_user_id=current_user.id,
-            )
-        return response_payload
     except AuthServiceError as error:
         _raise_http_auth_error(error)
 
@@ -437,22 +371,13 @@ async def update_psn_account(
     payload: SitePSNAccountUpdateRequest,
     current_user: SiteUserPublic = Depends(get_current_site_user),
     auth_service: AuthService = Depends(get_auth_service),
-    db: Session = Depends(get_db),
 ):
     try:
-        response_payload = await run_in_threadpool(
+        return await run_in_threadpool(
             auth_service.update_psn_account,
             current_user.id,
             region=region,
             payload=payload,
         )
-        if current_user.telegram_id is not None:
-            await run_in_threadpool(
-                sync_telegram_user_from_site,
-                db=db,
-                users_collection=auth_service.users,
-                site_user_id=current_user.id,
-            )
-        return response_payload
     except AuthServiceError as error:
         _raise_http_auth_error(error)
