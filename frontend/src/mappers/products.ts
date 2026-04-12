@@ -103,9 +103,6 @@ function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | nu
 export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct {
   const regionalPrices = (raw.regional_prices || []).map(normalizeRegionalPrice)
   const primaryRegionalPrice = pickPrimaryRegionalPrice(regionalPrices)
-  const normalizedRawRegion = (raw.region || '').trim().toUpperCase() || null
-  const routeRegionalPrice =
-    regionalPrices.find((price) => price.region === normalizedRawRegion) ?? primaryRegionalPrice
   const regionInfo = normalizeRegionInfo(raw.region, raw.region_info)
   const price = resolveDisplayPrice(raw, regionInfo, primaryRegionalPrice)
 
@@ -115,7 +112,7 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     mainName: raw.main_name || raw.name || 'Без названия',
     category: raw.category ?? null,
     region: raw.region ?? null,
-    routeRegion: normalizedRawRegion ?? primaryRegionalPrice?.region ?? null,
+    routeRegion: null, // Убираем routeRegion, так как он вызывает проблемы с URL
     type: raw.type ?? null,
     image: raw.image ?? null,
     platforms: raw.platforms ?? null,
@@ -124,7 +121,7 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     edition: raw.edition ?? null,
     description: raw.description ?? null,
     localization: raw.localization ?? null,
-    localizationName: routeRegionalPrice?.localizationName ?? raw.localization_name ?? primaryRegionalPrice?.localizationName ?? null,
+    localizationName: primaryRegionalPrice?.localizationName ?? raw.localization_name ?? null,
     hasDiscount: Boolean(raw.has_discount),
     discount: raw.discount ?? null,
     discountPercent: raw.discount_percent ?? primaryRegionalPrice?.discountPercent ?? null,

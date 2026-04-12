@@ -130,7 +130,7 @@ function getMissingCheckoutFields(
 }
 
 function buildHighlights(product: CatalogProduct) {
-  const region = resolveRegionPresentation(product.routeRegion || product.region, product.regionInfo?.name)
+  const region = resolveRegionPresentation(product.region, product.regionInfo?.name)
 
   return [
     {
@@ -770,7 +770,7 @@ export function ProductPage() {
         if (!ignore) {
           const fallback =
             mockProducts.find((item) => item.id === productId) ||
-            mockProducts.find((item) => item.routeRegion === requestedRegion) ||
+            mockProducts.find((item) => item.region === requestedRegion) ||
             mockProducts[0]
 
           setProduct(fallback)
@@ -827,7 +827,7 @@ export function ProductPage() {
     if (product) {
       toggleFavorite({
         productId: product.id,
-        region: product.routeRegion || product.region,
+        region: product.region,
       })
     }
   }

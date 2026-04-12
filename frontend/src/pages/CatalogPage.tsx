@@ -127,11 +127,11 @@ function mergeCatalogProducts(current: CatalogProduct[], next: CatalogProduct[])
     return next
   }
 
-  const knownIds = new Set(current.map((product) => `${product.id}-${product.routeRegion || product.region || 'all'}`))
+  const knownIds = new Set(current.map((product) => `${product.id}-${product.region || 'all'}`))
   const merged = [...current]
 
   next.forEach((product) => {
-    const productKey = `${product.id}-${product.routeRegion || product.region || 'all'}`
+    const productKey = `${product.id}-${product.region || 'all'}`
 
     if (!knownIds.has(productKey)) {
       merged.push(product)
@@ -147,7 +147,7 @@ function dedupeCatalogProducts(products: CatalogProduct[]) {
   const result: CatalogProduct[] = []
 
   products.forEach((product) => {
-    const productKey = `${product.id}-${product.routeRegion || product.region || 'all'}`
+    const productKey = `${product.id}-${product.region || 'all'}`
 
     if (!knownIds.has(productKey)) {
       knownIds.add(productKey)
@@ -465,7 +465,7 @@ export function CatalogPage() {
       <div className="mt-5 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:mt-6 md:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
         {isLoading
           ? Array.from({ length: filters.limit }).map((_, index) => <ProductSkeleton key={index} />)
-          : products.map((product) => <ProductCard key={`${product.id}-${product.routeRegion || product.region || 'all'}`} product={product} />)}
+          : products.map((product) => <ProductCard key={`${product.id}-${product.region || 'all'}`} product={product} />)}
       </div>
 
       {!isLoading && products.length === 0 ? (

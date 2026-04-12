@@ -19,7 +19,7 @@ export function ProductCard({ product }: ProductCardProps) {
   const location = useLocation()
 
   const imageUrl = normalizeImageUrl(product.image)
-  const productUrl = `/catalog/${product.id}${product.routeRegion ? `?region=${encodeURIComponent(product.routeRegion)}` : ''}`
+  const productUrl = `/catalog/${product.id}`
   const catalogPath = location.pathname === '/catalog' ? `${location.pathname}${location.search}${location.hash}` : null
   const regionalPrices = getVisibleRegionalPrices(product).slice(0, 3)
   const favoriteActive = isFavorite(product.id)
@@ -31,7 +31,7 @@ export function ProductCard({ product }: ProductCardProps) {
     event.stopPropagation()
     toggleFavorite({
       productId: product.id,
-      region: product.routeRegion || product.region,
+      region: product.region,
     })
   }
 

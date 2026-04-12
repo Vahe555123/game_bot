@@ -129,7 +129,7 @@ export function FavoritesPage() {
                 ? Array.from({ length: Math.min(orderedFavorites.length, 6) }).map((_, index) => (
                     <ProductSkeleton key={index} />
                   ))
-                : products.map((product) => <ProductCard key={`${product.id}-${product.routeRegion || 'all'}`} product={product} />)}
+                : products.map((product) => <ProductCard key={`${product.id}-${product.region || 'all'}`} product={product} />)}
             </div>
 
             {!isLoading && !products.length ? (

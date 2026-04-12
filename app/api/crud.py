@@ -271,6 +271,15 @@ class ProductCRUD:
                 ProductCRUD._normalize_product_identity_name(part)
                 for part in str(search_names).split(',')
             )
+
+        # Добавляем базовое название без подзаголовков (до двоеточия, тире, скобок)
+        main_name = getattr(product, 'main_name', None) or getattr(product, 'name', None)
+        if main_name:
+            # Извлекаем базовое название до специальных символов
+            base_name = re.split(r'[:\-–—(]', str(main_name))[0].strip()
+            if base_name:
+                names.add(ProductCRUD._normalize_product_identity_name(base_name))
+
         names.discard('')
         return {name for name in names if len(name) >= 4}
 
@@ -320,10 +329,22 @@ class ProductCRUD:
         if not identity_names:
             return regional_products
 
+        # Расширенный поиск: ищем по названиям И по search_names
         candidates_query = db.query(Product).filter(
             Product.region.in_(missing_regions),
             Product.type == product.type,
         )
+
+        # Добавляем условие поиска по main_name и search_names
+        name_conditions = []
+        for identity_name in identity_names:
+            if len(identity_name) >= 4:
+                name_conditions.append(Product.main_name.ilike(f'%{identity_name}%'))
+                name_conditions.append(Product.name.ilike(f'%{identity_name}%'))
+                name_conditions.append(Product.search_names.ilike(f'%{identity_name}%'))
+
+        if name_conditions:
+            candidates_query = candidates_query.filter(or_(*name_conditions))
 
         candidates = candidates_query.all()
         for candidate in candidates:

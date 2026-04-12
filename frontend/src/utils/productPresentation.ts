@@ -48,11 +48,11 @@ export function getVisibleRegionalPrices(product: CatalogProduct) {
     return []
   }
 
-  const region = resolveRegionPresentation(product.routeRegion || product.region, product.regionInfo?.name)
+  const region = resolveRegionPresentation(product.region, product.regionInfo?.name)
 
   return [
     {
-      region: product.routeRegion || product.region || region.label,
+      region: product.region || region.label,
       label: region.label,
       name: region.name,
       currencyCode: product.regionInfo?.code || 'RUB',
