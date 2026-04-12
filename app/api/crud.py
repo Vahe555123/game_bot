@@ -2,12 +2,22 @@ from collections import defaultdict
 import re
 import unicodedata
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, case, func, literal, text
+from sqlalchemy import and_, or_, case, func, literal, text, Table, Column, Integer, MetaData, Text, inspect
 from typing import Optional, List, Dict, Any
 from app.models import User, Product, UserFavoriteProduct, Localization
 from app.models.currency_rate import CurrencyRate
 from app.api.schemas import UserCreate, UserUpdate, ProductFilter, PaginationParams, CurrencyRateCreate, CurrencyRateUpdate
 from config.settings import settings
+
+
+PRODUCT_SEARCH_INDEX_TABLE = Table(
+    "product_search_fts",
+    MetaData(),
+    Column("rowid", Integer, primary_key=True),
+    Column("product_id", Text),
+    Column("region", Text),
+    Column("search_text", Text),
+)
 
 class UserCRUD:
     @staticmethod
@@ -118,6 +128,42 @@ class ProductCRUD:
             )
 
         return query
+
+    @staticmethod
+    def _apply_search_filter(query, search: Optional[str]):
+        search_term = ProductCRUD._normalize_search_text(search)
+        if not search_term:
+            return query
+
+        session = getattr(query, "session", None)
+        bind = session.get_bind() if session is not None else None
+        if bind is not None and getattr(bind, "dialect", None) and bind.dialect.name == "sqlite":
+            try:
+                if inspect(bind).has_table("product_search_fts"):
+                    fts_query = " ".join(f"{token}*" for token in search_term.split() if token)
+                    if fts_query:
+                        return query.join(
+                            PRODUCT_SEARCH_INDEX_TABLE,
+                            and_(
+                                PRODUCT_SEARCH_INDEX_TABLE.c.product_id == Product.id,
+                                PRODUCT_SEARCH_INDEX_TABLE.c.region == Product.region,
+                            )
+                        ).filter(PRODUCT_SEARCH_INDEX_TABLE.c.search_text.match(fts_query))
+            except Exception:
+                pass
+
+        search_pattern = f"%{search_term}%"
+        return query.filter(
+            or_(
+                func.normalize_search(Product.id).like(search_pattern),
+                func.normalize_search(Product.main_name).like(search_pattern),
+                func.normalize_search(Product.name).like(search_pattern),
+                func.normalize_search(Product.description).like(search_pattern),
+                func.normalize_search(Product.publisher).like(search_pattern),
+                func.normalize_search(Product.search_names).like(search_pattern),
+                func.normalize_search(Product.tags).like(search_pattern),
+            )
+        )
 
     @staticmethod
     def _get_localization_priority(localization_code: Optional[str]) -> int:
@@ -747,41 +793,7 @@ class ProductCRUD:
             query = query.filter(Product.region == filters.region)
 
         if filters.search:
-            search_term = ProductCRUD._normalize_search_text(filters.search)
-            if search_term:
-                base_query = query.with_entities(
-                    Product.id,
-                    Product.region,
-                    Product.main_name,
-                    Product.name,
-                    Product.description,
-                    Product.publisher,
-                    Product.search_names,
-                    Product.tags,
-                )
-
-                product_data = base_query.all()
-                matching_ids = [
-                    (pid, rid)
-                    for pid, rid, main_name, name, description, publisher, search_names, tags in product_data
-                    if (
-                        (main_name and search_term in ProductCRUD._normalize_search_text(main_name))
-                        or (name and search_term in ProductCRUD._normalize_search_text(name))
-                        or (description and search_term in ProductCRUD._normalize_search_text(description))
-                        or (publisher and search_term in ProductCRUD._normalize_search_text(publisher))
-                        or (search_names and search_term in ProductCRUD._normalize_search_text(search_names))
-                        or (tags and search_term in ProductCRUD._normalize_search_text(tags))
-                    )
-                ]
-
-                if matching_ids:
-                    conditions = [
-                        and_(Product.id == pid, Product.region == rid)
-                        for pid, rid in matching_ids
-                    ]
-                    query = query.filter(or_(*conditions))
-                else:
-                    query = query.filter(Product.id == None)
+            query = ProductCRUD._apply_search_filter(query, filters.search)
 
         if filters.has_discount is not None:
             if filters.has_discount:
@@ -1266,24 +1278,11 @@ class ProductCRUD:
 
         query = ProductCRUD._apply_product_kind_filter(query, getattr(filters, 'product_kind', None))
 
-        search_term = ProductCRUD._normalize_search_text(filters.search) if filters.search else ''
+        if filters.search:
+            query = ProductCRUD._apply_search_filter(query, filters.search)
 
-        # Получаем все товары
+        # Получаем все товары уже после применения фильтров
         all_products = query.all()
-
-        if search_term:
-            all_products = [
-                product
-                for product in all_products
-                if (
-                    search_term in ProductCRUD._normalize_search_text(getattr(product, 'main_name', None))
-                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'name', None))
-                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'search_names', None))
-                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'description', None))
-                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'publisher', None))
-                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'tags', None))
-                )
-            ]
 
         # Группируем по main_name и выбираем лучшую цену
         unique_products = {}
@@ -1450,46 +1449,7 @@ class ProductCRUD:
                 )
 
         if filters.search:
-            # Используем общую нормализацию, чтобы одинаково находить варианты с диакритикой и кириллицей
-            search_term = ProductCRUD._normalize_search_text(filters.search)
-            if search_term:
-                # Создаем базовый запрос для получения товаров с примененными фильтрами
-                # Используем тот же query объект, но получаем только нужные поля
-                base_query = query.with_entities(
-                    Product.id,
-                    Product.region,
-                    Product.main_name,
-                    Product.name,
-                    Product.description,
-                    Product.publisher,
-                    Product.search_names,
-                    Product.tags,
-                )
-                
-                # Загружаем только ID, регионы и названия одним запросом, затем фильтруем в Python
-                product_data = base_query.all()
-                matching_ids = [
-                    (pid, rid) for pid, rid, main_name, name, description, publisher, search_names, tags in product_data
-                    if (
-                        (main_name and search_term in ProductCRUD._normalize_search_text(main_name))
-                        or (name and search_term in ProductCRUD._normalize_search_text(name))
-                        or (description and search_term in ProductCRUD._normalize_search_text(description))
-                        or (publisher and search_term in ProductCRUD._normalize_search_text(publisher))
-                        or (search_names and search_term in ProductCRUD._normalize_search_text(search_names))
-                        or (tags and search_term in ProductCRUD._normalize_search_text(tags))
-                    )
-                ]
-                
-                if matching_ids:
-                    # Фильтруем по найденным ID и регионам
-                    conditions = [
-                        and_(Product.id == pid, Product.region == rid) 
-                        for pid, rid in matching_ids
-                    ]
-                    query = query.filter(or_(*conditions))
-                else:
-                    # Если ничего не найдено, возвращаем пустой результат
-                    query = query.filter(Product.id == None)
+            query = ProductCRUD._apply_search_filter(query, filters.search)
 
         if filters.has_discount is not None and filters.has_discount:
             # Фильтр по скидкам - проверяем только регион товара

@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.api.crud import FavoriteCRUD, ProductCRUD
 from app.api.schemas import PaginationParams, ProductFilter
-from app.database.connection import Base
+from app.database.connection import Base, _ensure_product_search_index, _normalize_search_text
 from app.models import Product, User, UserFavoriteProduct
 
 
@@ -24,8 +24,11 @@ class ProductResolutionTests(unittest.TestCase):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
+            dbapi_connection.create_function("normalize_search", 1, _normalize_search_text)
 
         Base.metadata.create_all(bind=self.engine)
+        with self.engine.begin() as connection:
+            _ensure_product_search_index(connection)
         self.SessionLocal = sessionmaker(
             autocommit=False,
             autoflush=False,

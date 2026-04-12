@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import tempfile
+import unicodedata
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -74,6 +76,105 @@ def _copy_sqlite_sidecars(source: Path, target: Path) -> None:
             shutil.copy2(source_file, target_file)
         except OSError as exc:
             logger.warning("Could not copy SQLite file %s to %s: %s", source_file, target_file, exc)
+
+
+def _normalize_search_text(value: str | None) -> str:
+    if not value:
+        return ""
+
+    normalized = str(value).replace("™", " ").replace("®", " ").replace("©", " ")
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.casefold().replace("ё", "е")
+    normalized = re.sub(r"[^\w\s]+", " ", normalized, flags=re.UNICODE)
+    normalized = re.sub(r"[_\s]+", " ", normalized)
+    return normalized.strip()
+
+
+PRODUCT_SEARCH_FTS_TABLE = "product_search_fts"
+PRODUCT_SEARCH_FTS_FIELDS = (
+    "id",
+    "main_name",
+    "name",
+    "search_names",
+    "description",
+    "publisher",
+    "tags",
+    "edition",
+    "category",
+    "type",
+    "platforms",
+)
+
+
+def _product_search_text_sql(prefix: str) -> str:
+    parts = [f"coalesce({prefix}.{field}, '')" for field in PRODUCT_SEARCH_FTS_FIELDS]
+    return "normalize_search(" + " || ' ' || ".join(parts) + ")"
+
+
+def _ensure_product_search_index(connection) -> None:
+    connection.execute(
+        text(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS product_search_fts "
+            "USING fts5(product_id UNINDEXED, region UNINDEXED, search_text, "
+            "tokenize='unicode61 remove_diacritics 2', prefix='2 3 4 5 6 7 8')"
+        )
+    )
+
+    search_text_new = _product_search_text_sql("new")
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS products_ai AFTER INSERT ON products BEGIN
+                INSERT INTO product_search_fts(rowid, product_id, region, search_text)
+                VALUES (new.rowid, new.id, new.region, {search_text_new});
+            END;
+            """
+        )
+    )
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS products_ad AFTER DELETE ON products BEGIN
+                DELETE FROM product_search_fts WHERE rowid = old.rowid;
+            END;
+            """
+        )
+    )
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS products_au AFTER UPDATE ON products BEGIN
+                DELETE FROM product_search_fts WHERE rowid = old.rowid;
+                INSERT INTO product_search_fts(rowid, product_id, region, search_text)
+                VALUES (new.rowid, new.id, new.region, {search_text_new});
+            END;
+            """
+        )
+    )
+
+    products_count = connection.execute(text("SELECT COUNT(*) FROM products")).scalar() or 0
+    search_index_count = connection.execute(text(f"SELECT COUNT(*) FROM {PRODUCT_SEARCH_FTS_TABLE}")).scalar() or 0
+    if products_count != search_index_count:
+        logger.info(
+            "Rebuilding product search index: products=%s index=%s",
+            products_count,
+            search_index_count,
+        )
+        connection.execute(text(f"DELETE FROM {PRODUCT_SEARCH_FTS_TABLE}"))
+        connection.execute(
+            text(
+                f"""
+                INSERT INTO {PRODUCT_SEARCH_FTS_TABLE}(rowid, product_id, region, search_text)
+                SELECT
+                    rowid,
+                    id,
+                    region,
+                    {_product_search_text_sql("products")}
+                FROM products
+                """
+            )
+        )
 
 
 def _sqlite_fallback_candidates(database_url: str) -> list[Path]:
@@ -166,6 +267,11 @@ def _build_engine(database_url: str):
             cursor.execute("PRAGMA foreign_keys=ON")
             cursor.close()
 
+            try:
+                dbapi_connection.create_function("normalize_search", 1, _normalize_search_text, deterministic=True)
+            except TypeError:
+                dbapi_connection.create_function("normalize_search", 1, _normalize_search_text)
+
     return current_engine
 
 
@@ -180,6 +286,13 @@ SQLITE_INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)",
     "CREATE INDEX IF NOT EXISTS idx_products_region_category ON products(region, category)",
     "CREATE INDEX IF NOT EXISTS idx_products_main_name ON products(main_name)",
+    "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_main_name ON products(normalize_search(main_name))",
+    "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_name ON products(normalize_search(name))",
+    "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_description ON products(normalize_search(description))",
+    "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_publisher ON products(normalize_search(publisher))",
+    "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_search_names ON products(normalize_search(search_names))",
+    "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_tags ON products(normalize_search(tags))",
+    "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_id ON products(normalize_search(id))",
     "CREATE INDEX IF NOT EXISTS idx_products_ps_plus_collection ON products(ps_plus_collection)",
     "CREATE INDEX IF NOT EXISTS idx_products_ea_access ON products(ea_access)",
     "CREATE INDEX IF NOT EXISTS idx_user_favorite_products_product_id ON user_favorite_products(product_id)",
@@ -482,6 +595,7 @@ def create_tables():
             _migrate_user_favorite_products_table(connection)
             for statement in SQLITE_INDEX_STATEMENTS:
                 connection.execute(text(statement))
+            _ensure_product_search_index(connection)
             connection.execute(text("PRAGMA optimize"))
 
     print("Tables initialized")
