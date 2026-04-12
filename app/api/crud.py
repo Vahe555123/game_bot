@@ -1,5 +1,6 @@
 from collections import defaultdict
 import re
+import unicodedata
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, case, func, literal, text
 from typing import Optional, List, Dict, Any
@@ -68,6 +69,31 @@ class ProductCRUD:
         return 'popular'
 
     @staticmethod
+    def _normalize_product_id_token(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        normalized = str(value).strip()
+        if not normalized:
+            return None
+
+        normalized = normalized.split('?', 1)[0].split('#', 1)[0].strip()
+        return normalized or None
+
+    @staticmethod
+    def _normalize_search_text(value: Optional[str]) -> str:
+        if not value:
+            return ''
+
+        normalized = str(value).replace('™', ' ').replace('®', ' ').replace('©', ' ')
+        normalized = unicodedata.normalize('NFKD', normalized)
+        normalized = ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+        normalized = normalized.casefold().replace('ё', 'е')
+        normalized = re.sub(r'[^\w\s]+', ' ', normalized, flags=re.UNICODE)
+        normalized = re.sub(r'[_\s]+', ' ', normalized)
+        return normalized.strip()
+
+    @staticmethod
     def _apply_product_kind_filter(query, product_kind: Optional[str]):
         normalized = (product_kind or '').strip().lower()
 
@@ -94,20 +120,61 @@ class ProductCRUD:
         return query
 
     @staticmethod
-    def _normalize_product_identity_name(value: Optional[str]) -> str:
-        if not value:
-            return ''
+    def _get_localization_priority(localization_code: Optional[str]) -> int:
+        priorities = {
+            'full': 0,
+            'subtitles': 1,
+            'interface': 2,
+            'none': 3,
+        }
+        normalized = (localization_code or '').strip().lower()
+        return priorities.get(normalized, 4)
 
-        normalized = str(value).lower().replace('ё', 'е')
-        normalized = re.sub(r'[™®©℠]', '', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized)
-        return normalized.strip()
+    @staticmethod
+    def _candidate_selection_score(
+        product: Product,
+        region_priority: Dict[str, int],
+        exact_product_id: Optional[str] = None,
+    ) -> tuple[int, int, int, str, str]:
+        region = ProductCRUD.normalize_product_region(getattr(product, 'region', None))
+        if not region:
+            region = (str(getattr(product, 'region', '')).strip().upper() or None)
+
+        exact_id_rank = 1
+        normalized_product_id = ProductCRUD._normalize_product_id_token(getattr(product, 'id', None))
+        if exact_product_id and normalized_product_id == exact_product_id:
+            exact_id_rank = 0
+
+        return (
+            ProductCRUD._get_localization_priority(getattr(product, 'localization', None)),
+            region_priority.get(region, len(region_priority)) if region else len(region_priority),
+            exact_id_rank,
+            ProductCRUD._normalize_search_text(ProductCRUD._get_product_sort_name(product)),
+            normalized_product_id or '',
+        )
+
+    @staticmethod
+    def _collect_product_candidates_by_identifier(db: Session, product_id: str) -> List[Product]:
+        normalized_product_id = ProductCRUD._normalize_product_id_token(product_id)
+        if not normalized_product_id:
+            return []
+
+        return db.query(Product).filter(
+            or_(
+                Product.id == normalized_product_id,
+                Product.search_names.ilike(f"%{normalized_product_id}%"),
+            )
+        ).all()
+
+    @staticmethod
+    def _normalize_product_identity_name(value: Optional[str]) -> str:
+        return ProductCRUD._normalize_search_text(value)
 
     @staticmethod
     def _get_product_identity_names(product: Product) -> set[str]:
         names = {
+            ProductCRUD._normalize_product_identity_name(getattr(product, 'main_name', None)),
             ProductCRUD._normalize_product_identity_name(getattr(product, 'name', None)),
-            ProductCRUD._normalize_product_identity_name(getattr(product, 'name_localized', None)),
         }
 
         search_names = getattr(product, 'search_names', None)
@@ -116,9 +183,6 @@ class ProductCRUD:
                 ProductCRUD._normalize_product_identity_name(part)
                 for part in str(search_names).split(',')
             )
-
-        main_name = ProductCRUD._normalize_product_identity_name(getattr(product, 'main_name', None))
-        names.discard(main_name)
         names.discard('')
         return {name for name in names if len(name) >= 4}
 
@@ -172,9 +236,6 @@ class ProductCRUD:
             Product.region.in_(missing_regions),
             Product.type == product.type,
         )
-
-        if product.main_name:
-            candidates_query = candidates_query.filter(Product.main_name == product.main_name)
 
         candidates = candidates_query.all()
         for candidate in candidates:
@@ -245,11 +306,11 @@ class ProductCRUD:
     @staticmethod
     def _get_product_sort_name(product: Product) -> str:
         """Получить безопасное имя товара для сортировки и группировки."""
-        return (
+        return ProductCRUD._normalize_search_text(
             getattr(product, 'main_name', None)
             or getattr(product, 'name', None)
             or ''
-        ).lower()
+        )
 
     @staticmethod
     def _group_product_rows(
@@ -274,10 +335,10 @@ class ProductCRUD:
                 continue
 
             current_product, _ = current
-            current_priority = region_priority.get(getattr(current_product, 'region', None), len(region_priority))
-            next_priority = region_priority.get(getattr(product, 'region', None), len(region_priority))
+            current_score = ProductCRUD._candidate_selection_score(current_product, region_priority)
+            next_score = ProductCRUD._candidate_selection_score(product, region_priority)
 
-            if next_priority < current_priority:
+            if next_score < current_score:
                 grouped_rows[product.id] = (product, price_rub)
 
         return sorted(
@@ -300,10 +361,10 @@ class ProductCRUD:
                 representatives[product.id] = product
                 continue
 
-            current_priority = region_priority.get(getattr(current, 'region', None), len(region_priority))
-            next_priority = region_priority.get(getattr(product, 'region', None), len(region_priority))
+            current_score = ProductCRUD._candidate_selection_score(current, region_priority)
+            next_score = ProductCRUD._candidate_selection_score(product, region_priority)
 
-            if next_priority < current_priority:
+            if next_score < current_score:
                 representatives[product.id] = product
 
         return representatives
@@ -552,48 +613,101 @@ class ProductCRUD:
         )
 
     @staticmethod
+    def _select_product_variant(
+        candidates: List[Product],
+        requested_region: Optional[str] = None,
+        *,
+        exact_product_id: Optional[str] = None,
+        allow_region_fallback: bool = False,
+    ) -> Optional[Product]:
+        if not candidates:
+            return None
+
+        region_code = ProductCRUD.normalize_product_region(requested_region) if requested_region else None
+        if not region_code and requested_region:
+            region_code = str(requested_region).strip().upper() or None
+
+        if region_code:
+            region_candidates = [
+                product
+                for product in candidates
+                if (ProductCRUD.normalize_product_region(getattr(product, 'region', None))
+                    or (str(getattr(product, 'region', '')).strip().upper() or None)) == region_code
+            ]
+            if region_candidates:
+                candidates = region_candidates
+            elif not allow_region_fallback:
+                return None
+
+        region_priority = ProductCRUD._get_region_priority(None, region_code)
+        return min(
+            candidates,
+            key=lambda product: ProductCRUD._candidate_selection_score(
+                product,
+                region_priority,
+                exact_product_id=exact_product_id,
+            ),
+        )
+
+    @staticmethod
     def get_by_id(db: Session, product_id: str, region: Optional[str] = None) -> Optional[Product]:
         """Получить товар по ID с учетом региона"""
         import logging
         logger = logging.getLogger(__name__)
 
-        logger.info(f"🔎 get_by_id called: product_id={product_id}, region={region}")
+        normalized_product_id = ProductCRUD._normalize_product_id_token(product_id)
+        logger.info(f"🔎 get_by_id called: product_id={normalized_product_id}, region={region}")
 
-        query = db.query(Product).filter(Product.id == product_id)
+        if not normalized_product_id:
+            logger.error("❌ Product NOT found: empty product_id")
+            return None
 
-        # Если указан регион, фильтруем по нему (учитываем TR/UA/IN и алиасы вроде en-tr)
-        if region:
-            candidates = {
-                c
-                for c in (
-                    str(region).strip(),
-                    str(region).strip().upper(),
-                    str(region).strip().lower(),
-                )
-                if c
-            }
-            canon = ProductCRUD.normalize_product_region(region)
-            if canon:
-                candidates.add(canon)
-            if candidates:
-                query = query.filter(Product.region.in_(list(candidates)))
-            logger.info(f"   Filtering by region candidates: {candidates}")
-        else:
-            logger.warning(f"⚠️ Region NOT specified!")
+        candidates = ProductCRUD._collect_product_candidates_by_identifier(db, normalized_product_id)
+        if not candidates:
+            logger.error("❌ Product NOT found!")
+            return None
 
-        product = query.first()
+        product = ProductCRUD._select_product_variant(
+            candidates,
+            region,
+            exact_product_id=normalized_product_id,
+            allow_region_fallback=False,
+        )
 
         if product:
-            logger.info(f"✅ Found product: region={product.region}, localization={product.localization}, name={product.name[:50]}")
+            logger.info(
+                "✅ Found product: region=%s, localization=%s, name=%s",
+                product.region,
+                product.localization,
+                (product.name or '')[:50],
+            )
         else:
-            logger.error(f"❌ Product NOT found!")
+            logger.error("❌ Product NOT found in requested region!")
 
         return product
 
     @staticmethod
+    def get_by_id_with_fallback(db: Session, product_id: str, region: Optional[str] = None) -> Optional[Product]:
+        """Получить товар по ID с мягким фолбэком на другой регион, если запрошенный отсутствует."""
+        normalized_product_id = ProductCRUD._normalize_product_id_token(product_id)
+        if not normalized_product_id:
+            return None
+
+        candidates = ProductCRUD._collect_product_candidates_by_identifier(db, normalized_product_id)
+        return ProductCRUD._select_product_variant(
+            candidates,
+            region,
+            exact_product_id=normalized_product_id,
+            allow_region_fallback=True,
+        )
+
+    @staticmethod
     def get_by_id_all_regions(db: Session, product_id: str) -> List[Product]:
         """Получить товар во всех регионах"""
-        return db.query(Product).filter(Product.id == product_id).all()
+        product = ProductCRUD.get_by_id_with_fallback(db, product_id)
+        if not product:
+            return []
+        return db.query(Product).filter(Product.id == product.id).all()
 
     @staticmethod
     def get_localization_name(db: Session, localization_code: Optional[str]) -> Optional[str]:
@@ -633,45 +747,40 @@ class ProductCRUD:
             query = query.filter(Product.region == filters.region)
 
         if filters.search:
-            # Поиск только по названию товара (main_name), без учета регистра
-            # Используем Python для нормализации строк для надежной работы с кириллицей
-            def _normalize_search_text(value: str) -> str:
-                return value.strip().lower().replace('ё', 'е')
-
-            search_term = _normalize_search_text(filters.search)
+            search_term = ProductCRUD._normalize_search_text(filters.search)
             if search_term:
-                # Создаем базовый запрос для получения товаров с примененными фильтрами
-                # Используем тот же query объект, но получаем только нужные поля
                 base_query = query.with_entities(
                     Product.id,
                     Product.region,
                     Product.main_name,
                     Product.name,
+                    Product.description,
+                    Product.publisher,
                     Product.search_names,
                     Product.tags,
                 )
-                
-                # Загружаем только ID, регионы и названия одним запросом, затем фильтруем в Python
+
                 product_data = base_query.all()
                 matching_ids = [
-                    (pid, rid) for pid, rid, main_name, name, search_names, tags in product_data
+                    (pid, rid)
+                    for pid, rid, main_name, name, description, publisher, search_names, tags in product_data
                     if (
-                        (main_name and search_term in _normalize_search_text(main_name))
-                        or (name and search_term in _normalize_search_text(name))
-                        or (search_names and search_term in _normalize_search_text(search_names))
-                        or (tags and search_term in _normalize_search_text(tags))
+                        (main_name and search_term in ProductCRUD._normalize_search_text(main_name))
+                        or (name and search_term in ProductCRUD._normalize_search_text(name))
+                        or (description and search_term in ProductCRUD._normalize_search_text(description))
+                        or (publisher and search_term in ProductCRUD._normalize_search_text(publisher))
+                        or (search_names and search_term in ProductCRUD._normalize_search_text(search_names))
+                        or (tags and search_term in ProductCRUD._normalize_search_text(tags))
                     )
                 ]
-                
+
                 if matching_ids:
-                    # Фильтруем по найденным ID и регионам
                     conditions = [
-                        and_(Product.id == pid, Product.region == rid) 
+                        and_(Product.id == pid, Product.region == rid)
                         for pid, rid in matching_ids
                     ]
                     query = query.filter(or_(*conditions))
                 else:
-                    # Если ничего не найдено, возвращаем пустой результат
                     query = query.filter(Product.id == None)
 
         if filters.has_discount is not None:
@@ -1157,19 +1266,24 @@ class ProductCRUD:
 
         query = ProductCRUD._apply_product_kind_filter(query, getattr(filters, 'product_kind', None))
 
-        if filters.search:
-            search_term = f"%{filters.search}%"
-            query = query.filter(
-                or_(
-                    Product.search_names.ilike(search_term),
-                    Product.main_name.ilike(search_term),
-                    Product.description.ilike(search_term),
-                    Product.publisher.ilike(search_term)
-                )
-            )
+        search_term = ProductCRUD._normalize_search_text(filters.search) if filters.search else ''
 
         # Получаем все товары
         all_products = query.all()
+
+        if search_term:
+            all_products = [
+                product
+                for product in all_products
+                if (
+                    search_term in ProductCRUD._normalize_search_text(getattr(product, 'main_name', None))
+                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'name', None))
+                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'search_names', None))
+                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'description', None))
+                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'publisher', None))
+                    or search_term in ProductCRUD._normalize_search_text(getattr(product, 'tags', None))
+                )
+            ]
 
         # Группируем по main_name и выбираем лучшую цену
         unique_products = {}
@@ -1336,12 +1450,8 @@ class ProductCRUD:
                 )
 
         if filters.search:
-            # Поиск только по названию товара (main_name), без учета регистра
-            # Используем Python для нормализации строк для надежной работы с кириллицей
-            def _normalize_search_text(value: str) -> str:
-                return value.strip().lower().replace('ё', 'е')
-
-            search_term = _normalize_search_text(filters.search)
+            # Используем общую нормализацию, чтобы одинаково находить варианты с диакритикой и кириллицей
+            search_term = ProductCRUD._normalize_search_text(filters.search)
             if search_term:
                 # Создаем базовый запрос для получения товаров с примененными фильтрами
                 # Используем тот же query объект, но получаем только нужные поля
@@ -1350,6 +1460,8 @@ class ProductCRUD:
                     Product.region,
                     Product.main_name,
                     Product.name,
+                    Product.description,
+                    Product.publisher,
                     Product.search_names,
                     Product.tags,
                 )
@@ -1357,12 +1469,14 @@ class ProductCRUD:
                 # Загружаем только ID, регионы и названия одним запросом, затем фильтруем в Python
                 product_data = base_query.all()
                 matching_ids = [
-                    (pid, rid) for pid, rid, main_name, name, search_names, tags in product_data
+                    (pid, rid) for pid, rid, main_name, name, description, publisher, search_names, tags in product_data
                     if (
-                        (main_name and search_term in _normalize_search_text(main_name))
-                        or (name and search_term in _normalize_search_text(name))
-                        or (search_names and search_term in _normalize_search_text(search_names))
-                        or (tags and search_term in _normalize_search_text(tags))
+                        (main_name and search_term in ProductCRUD._normalize_search_text(main_name))
+                        or (name and search_term in ProductCRUD._normalize_search_text(name))
+                        or (description and search_term in ProductCRUD._normalize_search_text(description))
+                        or (publisher and search_term in ProductCRUD._normalize_search_text(publisher))
+                        or (search_names and search_term in ProductCRUD._normalize_search_text(search_names))
+                        or (tags and search_term in ProductCRUD._normalize_search_text(tags))
                     )
                 ]
                 
@@ -1570,22 +1684,48 @@ class ProductCRUD:
 
 class FavoriteCRUD:
     @staticmethod
+    def _resolve_favorite_product_candidates(
+        db: Session,
+        product_id: str,
+        region: Optional[str] = None,
+    ) -> tuple[List[str], Optional[Product], Optional[str]]:
+        normalized_product_id = ProductCRUD._normalize_product_id_token(product_id)
+        if not normalized_product_id:
+            return [], None, None
+
+        resolved_product = ProductCRUD.get_by_id_with_fallback(db, normalized_product_id, region)
+        candidate_ids = [normalized_product_id]
+        if resolved_product and resolved_product.id:
+            candidate_ids.insert(0, resolved_product.id)
+
+        candidate_ids = list(dict.fromkeys(candidate_ids))
+        resolved_region = None
+        if resolved_product and resolved_product.region:
+            resolved_region = (
+                ProductCRUD.normalize_product_region(resolved_product.region)
+                or str(resolved_product.region).strip().upper()
+                or None
+            )
+        elif region:
+            resolved_region = ProductCRUD.normalize_product_region(region) or str(region).strip().upper() or None
+
+        return candidate_ids, resolved_product, resolved_region
+
+    @staticmethod
     def add_to_favorites(db: Session, user_id: int, product_id: str, region: Optional[str] = None) -> Optional[UserFavoriteProduct]:
         """Добавить товар в избранное"""
-        if region:
-            canon = ProductCRUD.normalize_product_region(region)
-            region = canon or str(region).strip().upper() or None
-        else:
-            product = ProductCRUD.get_by_id(db, product_id)
-            if product and product.region:
-                canon = ProductCRUD.normalize_product_region(product.region)
-                region = canon or str(product.region).strip().upper() or None
+        product_ids, product, resolved_region = FavoriteCRUD._resolve_favorite_product_candidates(db, product_id, region)
+        if not product_ids or not product:
+            return None
+
+        product_id = product.id
+        region = resolved_region
 
         # Проверяем, что товар не уже в избранном
         existing = db.query(UserFavoriteProduct).filter(
             and_(
                 UserFavoriteProduct.user_id == user_id,
-                UserFavoriteProduct.product_id == product_id
+                UserFavoriteProduct.product_id.in_(product_ids)
             )
         ).first()
 
@@ -1606,10 +1746,14 @@ class FavoriteCRUD:
     @staticmethod
     def remove_from_favorites(db: Session, user_id: int, product_id: str) -> bool:
         """Удалить товар из избранного"""
+        product_ids, _, _ = FavoriteCRUD._resolve_favorite_product_candidates(db, product_id)
+        if not product_ids:
+            return False
+
         favorite = db.query(UserFavoriteProduct).filter(
             and_(
                 UserFavoriteProduct.user_id == user_id,
-                UserFavoriteProduct.product_id == product_id
+                UserFavoriteProduct.product_id.in_(product_ids)
             )
         ).first()
 
@@ -1629,10 +1773,14 @@ class FavoriteCRUD:
     @staticmethod
     def is_favorite(db: Session, user_id: int, product_id: str) -> bool:
         """Проверить, находится ли товар в избранном у пользователя"""
+        product_ids, _, _ = FavoriteCRUD._resolve_favorite_product_candidates(db, product_id)
+        if not product_ids:
+            return False
+
         return db.query(UserFavoriteProduct).filter(
             and_(
                 UserFavoriteProduct.user_id == user_id,
-                UserFavoriteProduct.product_id == product_id
+                UserFavoriteProduct.product_id.in_(product_ids)
             )
         ).first() is not None
 

@@ -455,6 +455,8 @@ def get_product(
 
     product_orm = product_crud.get_by_id(db, product_id, normalized_region)
     if not product_orm:
+        product_orm = product_crud.get_by_id_with_fallback(db, product_id, normalized_region)
+    if not product_orm:
         raise HTTPException(status_code=404, detail="Товар не найден")
 
     logger.info(f"✅ Found product: region={product_orm.region}, localization={product_orm.localization}")
@@ -495,37 +497,20 @@ async def add_to_favorites(
 
     logger.info(f"✅ User found: {user.id}, preferred_region: {user.preferred_region}")
 
-    # Сначала пробуем найти товар без региона (любой регион)
-    products = product_crud.get_by_id_all_regions(db, favorite_data.product_id)
-    logger.info(f"🔍 Found {len(products)} products with id {favorite_data.product_id} across all regions")
+    region_raw = favorite_data.region
+    product = product_crud.get_by_id(db, favorite_data.product_id, region_raw)
+    if not product:
+        product = product_crud.get_by_id_with_fallback(db, favorite_data.product_id, region_raw)
 
-    if not products:
+    if not product:
         logger.error(f"❌ Product not found in any region: {favorite_data.product_id}")
         raise HTTPException(status_code=404, detail="Товар не найден")
 
-    # Используем регион из запроса или первый найденный товар (с нормализацией TR/UA/IN)
-    region_raw = favorite_data.region
-    product = None
-
-    if region_raw:
-        target = product_crud.normalize_product_region(region_raw) or str(region_raw).strip().upper()
-        product = next(
-            (
-                p
-                for p in products
-                if (product_crud.normalize_product_region(p.region) or str(p.region or "").strip().upper()) == target
-            ),
-            None,
-        )
-        if product:
-            logger.info(f"✅ Using product from specified region: {product.region}, name: {product.name}")
-
-    if not product:
-        product = products[0]
-        logger.info(f"✅ Using product from fallback region: {product.region}, name: {product.name}")
-
     store_region = product_crud.normalize_product_region(product.region) or (str(product.region or "").strip().upper() or None)
+    logger.info(f"✅ Using product from resolved region: {product.region}, name: {product.name}")
     favorite = favorite_crud.add_to_favorites(db, user.id, favorite_data.product_id, store_region)
+    if not favorite:
+        raise HTTPException(status_code=404, detail="Товар не найден")
     logger.info(f"✅ Favorite added successfully: {favorite.id}, region: {favorite.region}")
     return {"message": "Товар добавлен в избранное", "favorite_id": favorite.id}
 
@@ -568,7 +553,21 @@ async def get_user_favorites(telegram_id: int, db: Session = Depends(get_db)):
                 product_to_show = regional_product
                 logger.info(f"✅ Showing favorite in saved region: {favorite.region}")
             else:
-                logger.warning(f"⚠️ Saved region {favorite.region} not found for product {favorite.product_id}, using default")
+                regional_product = product_crud.get_by_id_with_fallback(db, favorite.product_id, favorite.region)
+                if regional_product:
+                    product_to_show = regional_product
+                    logger.info(
+                        f"✅ Fallback favorite region resolved: {favorite.product_id} -> {regional_product.region}"
+                    )
+                else:
+                    logger.warning(f"⚠️ Saved region {favorite.region} not found for product {favorite.product_id}, using default")
+
+        if not product_to_show:
+            product_to_show = product_crud.get_by_id_with_fallback(db, favorite.product_id)
+
+        if not product_to_show:
+            logger.warning(f"⚠️ Unable to resolve favorite product {favorite.product_id}, skipping")
+            continue
 
         # В избранном показываем цены из всех регионов для сравнения
         product_dict = product_crud.prepare_product_with_all_regions(product_to_show, db, user)

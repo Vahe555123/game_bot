@@ -54,6 +54,8 @@ async def add_site_favorite(
     product_id = payload.product_id.strip()
     region = payload.region.strip().upper() if payload.region else None
     favorite = FavoriteCRUD.add_to_favorites(db, _resolve_site_user_id(current_user), product_id, region)
+    if not favorite:
+        raise HTTPException(status_code=404, detail="Товар не найден")
 
     return {
         "product_id": product_id,
