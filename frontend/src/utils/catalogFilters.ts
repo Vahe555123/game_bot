@@ -33,7 +33,8 @@ const GAME_LANGUAGE_OPTION_VALUES = new Set(GAME_LANGUAGE_OPTIONS.map((option) =
 export const SORT_OPTIONS = [
   { value: 'popular', label: 'Популярность' },
   { value: 'alphabet', label: 'По алфавиту' },
-  { value: 'price_asc', label: 'По цене' },
+  { value: 'price_asc', label: 'Цена: по возрастанию' },
+  { value: 'price_desc', label: 'Цена: по убыванию' },
 ] as const
 
 const SORT_OPTION_VALUES = new Set(SORT_OPTIONS.map((option) => option.value))
