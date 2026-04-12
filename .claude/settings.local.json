@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(sqlite3:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(ls -la *.db)",
+      "Bash(ls -lh *.db)",
+      "Bash(python:*)"
     ]
   }
 }
