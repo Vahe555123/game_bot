@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, UniqueConstraint, ForeignKeyConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from app.database.connection import Base
@@ -10,7 +10,7 @@ class UserFavoriteProduct(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
-    product_id = Column(String(100), ForeignKey('products.id', ondelete='CASCADE'), nullable=False)
+    product_id = Column(String(100), nullable=False)
     region = Column(String(10), nullable=True, comment='Регион товара (UA, TR, IN)')
     created_at = Column(DateTime, default=utcnow, comment='Дата добавления в избранное')
 
@@ -23,7 +23,15 @@ class UserFavoriteProduct(Base):
     )
 
     # Уникальное ограничение: один пользователь может добавить товар в избранное только один раз
-    __table_args__ = (UniqueConstraint('user_id', 'product_id', name='unique_user_product_favorite'),)
+    __table_args__ = (
+        UniqueConstraint('user_id', 'product_id', name='unique_user_product_favorite'),
+        ForeignKeyConstraint(
+            ['product_id', 'region'],
+            ['products.id', 'products.region'],
+            ondelete='CASCADE',
+            name='fk_user_favorite_products_product_region',
+        ),
+    )
 
     def __repr__(self):
         return f"<UserFavoriteProduct(user_id={self.user_id}, product_id={self.product_id})>"

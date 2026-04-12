@@ -199,6 +199,26 @@ def _sqlite_table_columns(connection, table_name: str) -> dict[str, dict]:
     return {row["name"]: dict(row) for row in rows}
 
 
+def _sqlite_foreign_key_groups(connection, table_name: str) -> list[list[dict]]:
+    rows = connection.execute(text(f'PRAGMA foreign_key_list("{table_name}")')).mappings().all()
+    grouped: dict[int, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(row["id"], []).append(dict(row))
+    return [sorted(group, key=lambda item: item["seq"]) for group in grouped.values()]
+
+
+def _favorite_foreign_key_matches(group: list[dict]) -> bool:
+    if len(group) != 2:
+        return False
+
+    if group[0].get("table") != "products" or group[1].get("table") != "products":
+        return False
+
+    from_columns = [row.get("from") for row in group]
+    to_columns = [row.get("to") for row in group]
+    return from_columns == ["product_id", "region"] and to_columns == ["id", "region"]
+
+
 def _migrate_users_table(connection) -> None:
     from app.models.user import User
 
@@ -307,6 +327,106 @@ def _migrate_users_table(connection) -> None:
     connection.execute(text('DROP TABLE "users_legacy"'))
 
 
+def _migrate_user_favorite_products_table(connection) -> None:
+    from app.models.favorite import UserFavoriteProduct
+
+    if not _sqlite_table_exists(connection, "user_favorite_products"):
+        return
+
+    columns = _sqlite_table_columns(connection, "user_favorite_products")
+    desired_columns = [
+        "id",
+        "user_id",
+        "product_id",
+        "region",
+        "created_at",
+    ]
+
+    foreign_key_groups = _sqlite_foreign_key_groups(connection, "user_favorite_products")
+    has_expected_foreign_key = any(_favorite_foreign_key_matches(group) for group in foreign_key_groups)
+    needs_rebuild = any(column not in columns for column in desired_columns) or not has_expected_foreign_key
+
+    if not needs_rebuild:
+        return
+
+    connection.execute(text('ALTER TABLE "user_favorite_products" RENAME TO "user_favorite_products_legacy"'))
+    UserFavoriteProduct.__table__.create(bind=connection, checkfirst=True)
+
+    legacy_rows = connection.execute(
+        text(
+            'SELECT "id", "user_id", "product_id", "region", "created_at" '
+            'FROM "user_favorite_products_legacy"'
+        )
+    ).mappings().all()
+
+    normalized_rows: list[dict[str, object]] = []
+    for legacy_row in legacy_rows:
+        product_id = legacy_row.get("product_id")
+        if not product_id:
+            logger.warning("Skipping legacy favorite without product_id: %s", legacy_row)
+            continue
+
+        legacy_region = legacy_row.get("region")
+        resolved_region = None
+        if legacy_region:
+            region_exists = connection.execute(
+                text(
+                    'SELECT 1 FROM "products" '
+                    'WHERE "id" = :product_id AND "region" = :region '
+                    'LIMIT 1'
+                ),
+                {"product_id": product_id, "region": legacy_region},
+            ).first()
+            if region_exists is not None:
+                resolved_region = str(legacy_region).strip().upper() or None
+
+        if resolved_region is None:
+            resolved_region = connection.execute(
+                text(
+                    'SELECT "region" FROM "products" '
+                    'WHERE "id" = :product_id '
+                    'ORDER BY CASE "region" '
+                    "WHEN 'TR' THEN 0 "
+                    "WHEN 'IN' THEN 1 "
+                    "WHEN 'UA' THEN 2 "
+                    "ELSE 99 END, "
+                    '"region" '
+                    'LIMIT 1'
+                ),
+                {"product_id": product_id},
+            ).scalar()
+            if resolved_region is not None:
+                resolved_region = str(resolved_region).strip().upper() or None
+
+        if resolved_region is None:
+            logger.warning(
+                "Skipping legacy favorite %s because product %s is missing in products table",
+                legacy_row.get("id"),
+                product_id,
+            )
+            continue
+
+        normalized_rows.append(
+            {
+                "id": legacy_row.get("id"),
+                "user_id": legacy_row.get("user_id"),
+                "product_id": product_id,
+                "region": resolved_region,
+                "created_at": legacy_row.get("created_at"),
+            }
+        )
+
+    if normalized_rows:
+        connection.execute(
+            text(
+                'INSERT INTO "user_favorite_products" ("id", "user_id", "product_id", "region", "created_at") '
+                'VALUES (:id, :user_id, :product_id, :region, :created_at)'
+            ),
+            normalized_rows,
+        )
+    connection.execute(text('DROP TABLE "user_favorite_products_legacy"'))
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -359,6 +479,7 @@ def create_tables():
     if _is_sqlite_url(RAW_DATABASE_URL):
         with engine.begin() as connection:
             _migrate_users_table(connection)
+            _migrate_user_favorite_products_table(connection)
             for statement in SQLITE_INDEX_STATEMENTS:
                 connection.execute(text(statement))
             connection.execute(text("PRAGMA optimize"))
