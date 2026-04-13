@@ -28,6 +28,7 @@ VK_TOKEN_URL = "https://oauth.vk.com/access_token"
 VK_USERINFO_URL = "https://api.vk.com/method/users.get"
 VK_ID_AUTHORIZE_URL = "https://id.vk.com/authorize"
 VK_ID_TOKEN_URL = "https://id.vk.com/oauth2/auth"
+VK_ID_USERINFO_URL = "https://id.vk.com/oauth2/user_info"
 VK_API_VERSION = "5.199"
 
 
@@ -79,6 +80,22 @@ def _has_configured_vk_secret() -> bool:
     placeholder_markers = ("replace", "your_", "ваш", "секрет", "ключ")
     mojibake_markers = ("р’р", "рљ", "р®")
     return not any(marker in lowered for marker in (*placeholder_markers, *mojibake_markers))
+
+
+def _extract_vk_id_profile(profile_payload: dict[str, Any]) -> dict[str, Any] | None:
+    profile = profile_payload.get("user") or profile_payload.get("response")
+    if isinstance(profile, list):
+        profile = profile[0] if profile else None
+    if not isinstance(profile, dict):
+        return None
+
+    user_id = profile.get("user_id") or profile.get("id")
+    return {
+        "id": user_id,
+        "screen_name": profile.get("screen_name") or profile.get("domain"),
+        "first_name": profile.get("first_name"),
+        "last_name": profile.get("last_name"),
+    }
 
 
 class OAuthService:
@@ -281,11 +298,26 @@ class OAuthService:
 
                 profile_payload = profile_response.json()
                 if profile_payload.get("error"):
-                    raise AuthServiceError(400, "Не удалось получить профиль VK.")
+                    vk_id_profile_response = client.get(
+                        VK_ID_USERINFO_URL,
+                        params={
+                            "access_token": access_token,
+                            "client_id": settings.VK_CLIENT_ID,
+                        },
+                    )
+                    if vk_id_profile_response.status_code >= 400:
+                        raise AuthServiceError(400, "Не удалось получить профиль VK.")
+                    profile_payload = vk_id_profile_response.json()
+                    if profile_payload.get("error"):
+                        raise AuthServiceError(400, "Не удалось получить профиль VK.")
+
                 profile_items = profile_payload.get("response") or []
-                if not profile_items:
+                if profile_items:
+                    profile = profile_items[0]
+                else:
+                    profile = _extract_vk_id_profile(profile_payload)
+                if not profile:
                     raise AuthServiceError(400, "VK не вернул данные профиля.")
-                profile = profile_items[0]
         except httpx.HTTPError as error:
             raise AuthServiceError(503, "VK OAuth временно недоступен.") from error
         except ValueError as error:

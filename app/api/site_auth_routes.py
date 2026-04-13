@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -29,6 +30,7 @@ from app.auth.schemas import (
 from app.auth.service import AuthService, get_auth_service
 
 router = APIRouter(prefix="/auth", tags=["Site Auth"])
+logger = logging.getLogger(__name__)
 
 
 def _raise_http_auth_error(error: AuthServiceError) -> None:
@@ -261,12 +263,15 @@ async def google_oauth_callback(
             ip_address=_get_client_ip(request),
         )
     except AuthServiceError as auth_error:
+        logger.warning("Google OAuth callback failed: %s", auth_error.message)
         return _oauth_error_redirect(auth_error.message)
 
-    _set_session_cookie(response, result.session_token)
-    response.status_code = 302
-    response.headers["Location"] = build_public_redirect_url(result.next_path, auth_provider="google")
-    return response
+    redirect_response = RedirectResponse(
+        url=build_public_redirect_url(result.next_path, auth_provider="google"),
+        status_code=302,
+    )
+    _set_session_cookie(redirect_response, result.session_token)
+    return redirect_response
 
 
 @router.get("/oauth/vk/start", summary="Начать вход через VK")
@@ -311,12 +316,15 @@ async def vk_oauth_callback(
             ip_address=_get_client_ip(request),
         )
     except AuthServiceError as auth_error:
+        logger.warning("VK OAuth callback failed: %s", auth_error.message)
         return _oauth_error_redirect(auth_error.message)
 
-    _set_session_cookie(response, result.session_token)
-    response.status_code = 302
-    response.headers["Location"] = build_public_redirect_url(result.next_path, auth_provider="vk")
-    return response
+    redirect_response = RedirectResponse(
+        url=build_public_redirect_url(result.next_path, auth_provider="vk"),
+        status_code=302,
+    )
+    _set_session_cookie(redirect_response, result.session_token)
+    return redirect_response
 
 
 @router.post("/logout", response_model=AuthActionResponse, summary="Выйти из аккаунта")
