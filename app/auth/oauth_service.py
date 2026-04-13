@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import secrets
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -24,6 +26,8 @@ GOOGLE_USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 VK_AUTHORIZE_URL = "https://oauth.vk.com/authorize"
 VK_TOKEN_URL = "https://oauth.vk.com/access_token"
 VK_USERINFO_URL = "https://api.vk.com/method/users.get"
+VK_ID_AUTHORIZE_URL = "https://id.vk.com/authorize"
+VK_ID_TOKEN_URL = "https://id.vk.com/oauth2/auth"
 VK_API_VERSION = "5.199"
 
 
@@ -52,6 +56,29 @@ def build_public_redirect_url(path: str, **query: str) -> str:
                 existing_params[key] = value
     existing_params.update({key: value for key, value in query.items() if value})
     return urlunparse(parsed._replace(query=urlencode(existing_params)))
+
+
+def _base64_urlsafe_no_padding(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _create_pkce_verifier() -> str:
+    return secrets.token_urlsafe(64)[:128]
+
+
+def _create_pkce_challenge(verifier: str) -> str:
+    return _base64_urlsafe_no_padding(hashlib.sha256(verifier.encode("ascii")).digest())
+
+
+def _has_configured_vk_secret() -> bool:
+    secret = (settings.VK_CLIENT_SECRET or "").strip()
+    if not secret:
+        return False
+
+    lowered = secret.casefold()
+    placeholder_markers = ("replace", "your_", "ваш", "секрет", "ключ")
+    mojibake_markers = ("р’р", "рљ", "р®")
+    return not any(marker in lowered for marker in (*placeholder_markers, *mojibake_markers))
 
 
 class OAuthService:
@@ -102,14 +129,16 @@ class OAuthService:
         return f"{GOOGLE_AUTHORIZE_URL}?{urlencode(params)}"
 
     def build_vk_authorization_url(self, next_path: Optional[str] = None) -> str:
-        if not settings.VK_CLIENT_ID or not settings.VK_CLIENT_SECRET:
+        if not settings.VK_CLIENT_ID:
             raise AuthServiceError(503, "VK OAuth не настроен на сервере.")
 
         safe_next_path = normalize_next_path(next_path)
+        code_verifier = _create_pkce_verifier()
         state = create_signed_oauth_state(
             {
                 "provider": "vk",
                 "next_path": safe_next_path,
+                "code_verifier": code_verifier,
                 "iat": int(time.time()),
             },
             settings.AUTH_OAUTH_STATE_SECRET,
@@ -120,9 +149,10 @@ class OAuthService:
             "response_type": "code",
             "scope": "email",
             "state": state,
-            "display": "page",
+            "code_challenge": _create_pkce_challenge(code_verifier),
+            "code_challenge_method": "S256",
         }
-        return f"{VK_AUTHORIZE_URL}?{urlencode(params)}"
+        return f"{VK_ID_AUTHORIZE_URL}?{urlencode(params)}"
 
     def handle_google_callback(
         self,
@@ -192,29 +222,45 @@ class OAuthService:
         *,
         code: str,
         state: str,
+        device_id: Optional[str],
         user_agent: Optional[str],
         ip_address: Optional[str],
     ) -> OAuthLoginResult:
-        if not settings.VK_CLIENT_ID or not settings.VK_CLIENT_SECRET:
+        if not settings.VK_CLIENT_ID:
             raise AuthServiceError(503, "VK OAuth не настроен на сервере.")
 
         state_payload = self._parse_state(state, expected_provider="vk")
+        code_verifier = str(state_payload.get("code_verifier") or "")
+        if not code_verifier:
+            raise AuthServiceError(400, "VK OAuth state не содержит PKCE проверку.")
+        if not device_id:
+            raise AuthServiceError(400, "VK не вернул device_id для завершения входа.")
 
         try:
             with httpx.Client(timeout=20.0) as client:
-                token_response = client.get(
-                    VK_TOKEN_URL,
-                    params={
-                        "client_id": settings.VK_CLIENT_ID,
-                        "client_secret": settings.VK_CLIENT_SECRET,
-                        "redirect_uri": settings.VK_REDIRECT_URI,
-                        "code": code,
-                    },
+                token_params = {
+                    "client_id": settings.VK_CLIENT_ID,
+                    "redirect_uri": settings.VK_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "code_verifier": code_verifier,
+                    "device_id": device_id,
+                    "state": state,
+                }
+                if _has_configured_vk_secret():
+                    token_params["client_secret"] = settings.VK_CLIENT_SECRET
+
+                token_response = client.post(
+                    VK_ID_TOKEN_URL,
+                    data=token_params,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
                 if token_response.status_code >= 400:
                     raise AuthServiceError(400, "Не удалось завершить вход через VK.")
 
                 token_payload = token_response.json()
+                if token_payload.get("error"):
+                    raise AuthServiceError(400, "Не удалось завершить вход через VK.")
                 access_token = token_payload.get("access_token")
                 user_id = token_payload.get("user_id")
                 email = token_payload.get("email")
@@ -234,6 +280,8 @@ class OAuthService:
                     raise AuthServiceError(400, "Не удалось получить профиль VK.")
 
                 profile_payload = profile_response.json()
+                if profile_payload.get("error"):
+                    raise AuthServiceError(400, "Не удалось получить профиль VK.")
                 profile_items = profile_payload.get("response") or []
                 if not profile_items:
                     raise AuthServiceError(400, "VK не вернул данные профиля.")
@@ -308,6 +356,7 @@ class OAuthService:
         return {
             "provider": provider,
             "next_path": normalize_next_path(payload.get("next_path")),
+            "code_verifier": payload.get("code_verifier"),
         }
 
 

@@ -2,10 +2,12 @@ import hashlib
 import hmac
 import time
 import unittest
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
-from app.auth.oauth_service import OAuthService
+from app.auth.oauth_service import OAuthService, VK_ID_AUTHORIZE_URL
 from app.auth.schemas import TelegramAuthRequest
+from app.auth.security import verify_signed_oauth_state
 from config.settings import settings
 
 
@@ -93,6 +95,33 @@ class OAuthServiceTelegramTests(unittest.TestCase):
         self.assertEqual(session_token, "session-token")
         self.assertEqual(len(fake_auth_service.calls), 1)
         self.assertEqual(fake_auth_service.calls[0]["telegram_id"], 123456789)
+
+
+class OAuthServiceVKTests(unittest.TestCase):
+    def test_vk_authorization_url_uses_vk_id_pkce_flow(self):
+        oauth_service = OAuthService(auth_service=FakeAuthService())
+
+        with (
+            patch.object(settings, "VK_CLIENT_ID", "vk-client-id"),
+            patch.object(settings, "VK_CLIENT_SECRET", ""),
+            patch.object(settings, "PUBLIC_APP_URL", "https://play-save.ru"),
+            patch.object(settings, "AUTH_OAUTH_STATE_SECRET", "test-state-secret"),
+        ):
+            url = oauth_service.build_vk_authorization_url("/profile")
+
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        state = params["state"][0]
+        state_payload = verify_signed_oauth_state(state, "test-state-secret")
+
+        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", VK_ID_AUTHORIZE_URL)
+        self.assertEqual(params["client_id"], ["vk-client-id"])
+        self.assertEqual(params["response_type"], ["code"])
+        self.assertEqual(params["code_challenge_method"], ["S256"])
+        self.assertIn("code_challenge", params)
+        self.assertEqual(state_payload["provider"], "vk")
+        self.assertEqual(state_payload["next_path"], "/profile")
+        self.assertTrue(state_payload["code_verifier"])
 
 
 if __name__ == "__main__":

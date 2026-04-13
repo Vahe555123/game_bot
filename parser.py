@@ -14,60 +14,9 @@ import pickle
 import sys
 import hashlib
 from typing import List, Dict, Set, Tuple, Optional
-from pathlib import Path
-
-try:
-    from app.database.connection import DATABASE_URL as ACTIVE_DATABASE_URL
-    from app.database.connection import _normalize_search_text as _db_normalize_search_text
-except Exception:
-    ACTIVE_DATABASE_URL = None
-    _db_normalize_search_text = None
 
 
 load_dotenv()
-
-
-def get_active_sqlite_db_path(default: str = "products.db") -> str:
-    """
-    Возвращает путь к активной SQLite-базе.
-
-    Сначала пытается взять уже выбранный writable путь из app.database.connection,
-    затем fallback на DATABASE_URL из окружения, и только потом на локальный products.db.
-    """
-    database_url = ACTIVE_DATABASE_URL or os.getenv("DATABASE_URL", "")
-    if database_url.startswith("sqlite"):
-        try:
-            from sqlalchemy.engine import make_url
-
-            url = make_url(database_url)
-            database = url.database
-            if database and database != ":memory:":
-                path = Path(database).expanduser()
-                if not path.is_absolute():
-                    path = (Path.cwd() / path).resolve(strict=False)
-                else:
-                    path = path.resolve(strict=False)
-                return str(path)
-        except Exception:
-            pass
-
-    return str((Path.cwd() / default).resolve(strict=False))
-
-
-async def register_sqlite_functions(db) -> None:
-    """
-    Регистрирует SQLite-функции, которые нужны для expression indexes и поиска.
-
-    Важно: aiosqlite-подключения не наследуют функции из SQLAlchemy engine,
-    поэтому их надо регистрировать отдельно для каждого соединения.
-    """
-    if _db_normalize_search_text is None:
-        return
-
-    try:
-        await db.create_function("normalize_search", 1, _db_normalize_search_text, deterministic=True)
-    except TypeError:
-        await db.create_function("normalize_search", 1, _db_normalize_search_text)
 
 
 # Configuration
@@ -272,12 +221,11 @@ class CurrencyConverter:
 
     def __init__(self):
         self.rates_cache = {}
-        self.db_path = get_active_sqlite_db_path()
+        self.db_path = "products.db"
 
     async def load_rates(self):
         """Загружает курсы валют из БД"""
         async with aiosqlite.connect(self.db_path) as db:
-            await register_sqlite_functions(db)
             cursor = await db.execute("""
                 SELECT currency_from, currency_to, price_min, price_max, rate
                 FROM currency_rates
@@ -319,7 +267,7 @@ class CurrencyConverter:
         key = f"{from_currency}_to_{to_currency}"
 
         if key not in self.rates_cache:
-            print(f"⚠️ Курс {from_currency} -> {to_currency} не найден!")
+            print(f"[!]️ Курс {from_currency} -> {to_currency} не найден!")
             return 0
 
         # Ищем подходящий диапазон
@@ -505,14 +453,20 @@ def print_progress_bar(current: int, total: int, elapsed: float, prefix: str = "
     # Прогресс-бар
     bar_length = 40
     filled_length = int(bar_length * progress)
-    bar = '█' * filled_length + '░' * (bar_length - filled_length)
+    bar = '#' * filled_length + '-' * (bar_length - filled_length)
 
     # Скорость
     items_per_sec = current / elapsed if elapsed > 0 else 0
 
-    print(f"\r{prefix} |{bar}| {percent:.1f}% [{current}/{total}] | "
-          f"{format_time(elapsed)} | {items_per_sec:.1f}/с | ETA: {eta_str} {suffix}",
-          end='', flush=True)
+    try:
+        print(f"\r{prefix} |{bar}| {percent:.1f}% [{current}/{total}] | "
+              f"{format_time(elapsed)} | {items_per_sec:.1f}/s | ETA: {eta_str} {suffix}",
+              end='', flush=True)
+    except UnicodeEncodeError:
+        # Fallback для проблем с кодировкой
+        print(f"\r{prefix} |{bar}| {percent:.1f}% [{current}/{total}] | "
+              f"{format_time(elapsed)} | {items_per_sec:.1f}/s | ETA: {eta_str}",
+              end='', flush=True)
 
 
 def get_params(url: str):
@@ -3469,9 +3423,9 @@ async def get_all_ps_plus_subscriptions(session: aiohttp.ClientSession):
         'All': deluxe_set  # Все игры из Deluxe (для обратной совместимости)
     }
 
-    print(f"\n✓ PS Plus Extra: {len(extra_set)} игр")
-    print(f"✓ PS Plus Deluxe (только Deluxe): {len(only_deluxe)} игр")
-    print(f"✓ Всего в Deluxe: {len(deluxe_set)} игр")
+    print(f"\n[OK] PS Plus Extra: {len(extra_set)} игр")
+    print(f"[OK] PS Plus Deluxe (только Deluxe): {len(only_deluxe)} игр")
+    print(f"[OK] Всего в Deluxe: {len(deluxe_set)} игр")
 
     return result
 
@@ -3481,7 +3435,7 @@ async def add_update_table():
     Создает таблицу update_info в SQLite БД (если не существует)
     Используется для отслеживания обновлений товаров
     """
-    db_path = get_active_sqlite_db_path()
+    db_path = "products.db"
     async with aiosqlite.connect(db_path) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS update_info (
@@ -3507,7 +3461,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("=" * 80)
 
     # Подключение к SQLite
-    db_path = get_active_sqlite_db_path()
+    db_path = "products.db"
 
     # Подготовка данных для вставки
     products_to_insert = []
@@ -3655,7 +3609,6 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("=" * 80)
 
     async with aiosqlite.connect(db_path) as db:
-        await register_sqlite_functions(db)
         if clear_db:
             print("Очистка таблицы products...")
             await db.execute("DELETE FROM products")
@@ -3682,7 +3635,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
         print(f"Вставка {len(products_to_insert)} продуктов...")
         await db.executemany(insert_sql, products_to_insert)
         await db.commit()
-        print(f"✓ Успешно вставлено {len(products_to_insert)} продуктов")
+        print(f"[OK] Успешно вставлено {len(products_to_insert)} продуктов")
 
     # Статистика
     end = perf_counter()
@@ -4157,7 +4110,7 @@ async def main():
 
         start = perf_counter()
 
-        print("📂 Загрузка result.pkl...")
+        print(" Загрузка result.pkl...")
         with open("result.pkl", "rb") as file:
             result = pickle.load(file)
         print(f" Загружено {len(result)} записей из result.pkl")
@@ -4207,12 +4160,12 @@ async def main():
         start = perf_counter()
 
         # Загружаем существующие данные
-        print("📂 Загрузка products.pkl...")
+        print(" Загрузка products.pkl...")
         with open("products.pkl", "rb") as file:
             all_products = pickle.load(file)
         print(f" Загружено {len(all_products)} product URLs")
 
-        print("\n📂 Загрузка result.pkl...")
+        print("\n Загрузка result.pkl...")
         with open("result.pkl", "rb") as file:
             existing_result = pickle.load(file)
         print(f" Загружено {len(existing_result)} уже спарсенных записей")
@@ -4295,7 +4248,7 @@ async def main():
                 promo = await get_all_ps_plus_subscriptions(session)
                 with open("promo.pkl", "wb") as file:
                     pickle.dump(promo, file)
-                print(f"✓ Промо сохранено в promo.pkl")
+                print(f"[OK] Промо сохранено в promo.pkl")
 
         # Парсим товары
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
@@ -4439,7 +4392,7 @@ async def main():
             # Проверяем формат (старый список или новый dict)
             if isinstance(promo_data, dict):
                 promo = promo_data
-                print(f"\n✓ Загружено из promo.pkl: Extra={len(promo.get('Extra', set()))}, Deluxe={len(promo.get('Deluxe', set()))}")
+                print(f"\n[OK] Загружено из promo.pkl: Extra={len(promo.get('Extra', set()))}, Deluxe={len(promo.get('Deluxe', set()))}")
             else:
                 # Старый формат - конвертируем в новый
                 all_set = set(promo_data) if promo_data else set()
@@ -4448,22 +4401,22 @@ async def main():
                     'Deluxe': set(),
                     'All': all_set
                 }
-                print(f"\n✓ Загружено {len(all_set)} промо из promo.pkl (старый формат, конвертировано)")
+                print(f"\n[OK] Загружено {len(all_set)} промо из promo.pkl (старый формат, конвертировано)")
         else:
-            print("\n⚠ promo.pkl не найден, создаем новый...")
+            print("\n[!] promo.pkl не найден, создаем новый...")
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as temp_session:
                 promo = await get_all_ps_plus_subscriptions(temp_session)
                 with open("promo.pkl", "wb") as file:
                     pickle.dump(promo, file)
-                print(f"✓ Промо сохранено в promo.pkl")
+                print(f"[OK] Промо сохранено в promo.pkl")
 
         existing_result = []
         if os.path.exists("result.pkl"):
             with open("result.pkl", "rb") as file:
                 existing_result = pickle.load(file)
-            print(f"✓ Загружено {len(existing_result)} записей из result.pkl")
+            print(f"[OK] Загружено {len(existing_result)} записей из result.pkl")
         else:
-            print("⚠ result.pkl не найден (будет создан новый)")
+            print("[!] result.pkl не найден (будет создан новый)")
 
         all_parsed_records = []
 
@@ -4476,12 +4429,12 @@ async def main():
 
             if ua_url:
                 if "store.playstation.com" not in ua_url or "/ru-ua/" not in ua_url:
-                    print("⚠ Неверный формат UA URL, пропускаем...")
+                    print("[!] Неверный формат UA URL, пропускаем...")
                 else:
                     ua_url = ua_url.rstrip('/')
                     is_concept = "concept" in ua_url
 
-                    print(f"✓ UA URL: {ua_url}")
+                    print(f"[OK] UA URL: {ua_url}")
                     print(f"  Тип: {'concept' if is_concept else 'product'}")
 
                     # Разворачиваем concept если нужно
@@ -4492,7 +4445,7 @@ async def main():
                             print("  ✗ Не удалось развернуть concept")
                             ua_product_urls = []
                         else:
-                            print(f"  ✓ Получено {len(ua_product_urls)} product URLs")
+                            print(f"  [OK] Получено {len(ua_product_urls)} product URLs")
                     else:
                         ua_product_urls = [ua_url]
 
@@ -4503,7 +4456,7 @@ async def main():
                             parsed_data = await parse(session, url, regions=["UA"])
                             if parsed_data:
                                 all_parsed_records.extend(parsed_data)
-                                print(f"  ✓ Спарсено: {len(parsed_data)} запись(ей)")
+                                print(f"  [OK] Спарсено: {len(parsed_data)} запись(ей)")
                                 for record in parsed_data:
                                     print(f"    • {record.get('name')} - {record.get('region')} - {record.get('price_rub', 0):.2f} RUB")
                             else:
@@ -4519,12 +4472,12 @@ async def main():
 
             if tr_url:
                 if "store.playstation.com" not in tr_url or "/en-tr/" not in tr_url:
-                    print("⚠ Неверный формат TR URL, пропускаем...")
+                    print("[!] Неверный формат TR URL, пропускаем...")
                 else:
                     tr_url = tr_url.rstrip('/')
                     is_tr_concept = "concept" in tr_url
 
-                    print(f"✓ TR URL: {tr_url}")
+                    print(f"[OK] TR URL: {tr_url}")
                     print(f"  Тип: {'concept' if is_tr_concept else 'product'}")
 
                     # Разворачиваем concept если нужно
@@ -4535,7 +4488,7 @@ async def main():
                             print("  ✗ Не удалось развернуть concept")
                             tr_product_urls = []
                         else:
-                            print(f"  ✓ Получено {len(tr_product_urls)} product URLs")
+                            print(f"  [OK] Получено {len(tr_product_urls)} product URLs")
                     else:
                         tr_product_urls = [tr_url]
 
@@ -4546,7 +4499,7 @@ async def main():
                             parsed_data = await parse_tr(session, url)
                             if parsed_data:
                                 all_parsed_records.extend(parsed_data)
-                                print(f"  ✓ Спарсено: {len(parsed_data)} запись(ей)")
+                                print(f"  [OK] Спарсено: {len(parsed_data)} запись(ей)")
                                 for record in parsed_data:
                                     print(f"    • {record.get('name')} - TR - {record.get('price_rub', 0):.2f} RUB")
                             else:
@@ -4562,12 +4515,12 @@ async def main():
 
             if in_url:
                 if "store.playstation.com" not in in_url or "/en-in/" not in in_url:
-                    print("⚠ Неверный формат IN URL, пропускаем...")
+                    print("[!] Неверный формат IN URL, пропускаем...")
                 else:
                     in_url = in_url.rstrip('/')
                     is_in_concept = "concept" in in_url
 
-                    print(f"✓ IN URL: {in_url}")
+                    print(f"[OK] IN URL: {in_url}")
                     print(f"  Тип: {'concept' if is_in_concept else 'product'}")
 
                     # Разворачиваем concept если нужно
@@ -4578,7 +4531,7 @@ async def main():
                             print("  ✗ Не удалось развернуть concept")
                             in_product_urls = []
                         else:
-                            print(f"  ✓ Получено {len(in_product_urls)} product URLs")
+                            print(f"  [OK] Получено {len(in_product_urls)} product URLs")
                     else:
                         in_product_urls = [in_url]
 
@@ -4589,7 +4542,7 @@ async def main():
                             parsed_data = await parse_in(session, url)
                             if parsed_data:
                                 all_parsed_records.extend(parsed_data)
-                                print(f"  ✓ Спарсено: {len(parsed_data)} запись(ей)")
+                                print(f"  [OK] Спарсено: {len(parsed_data)} запись(ей)")
                                 for record in parsed_data:
                                     print(f"    • {record.get('name')} - IN - {record.get('price_rub', 0):.2f} RUB")
                             else:
@@ -4610,9 +4563,9 @@ async def main():
             tr_records = [r for r in all_parsed_records if r.get("region") == "TR"]
             in_records = [r for r in all_parsed_records if r.get("region") == "IN"]
 
-            print(f"✓ UA записей: {len(ua_records)}")
-            print(f"✓ TR записей: {len(tr_records)}")
-            print(f"✓ IN записей: {len(in_records)}")
+            print(f"[OK] UA записей: {len(ua_records)}")
+            print(f"[OK] TR записей: {len(tr_records)}")
+            print(f"[OK] IN записей: {len(in_records)}")
 
             # Матчинг и объединение
             print("\n" + "=" * 80)
@@ -4623,54 +4576,54 @@ async def main():
 
             # 1. Добавляем UA записи как есть (они полные)
             final_records.extend(ua_records)
-            print(f"✓ Добавлено {len(ua_records)} UA записей")
+            print(f"[OK] Добавлено {len(ua_records)} UA записей")
 
             # 2. Матчим и объединяем TR записи с UA данными
             if tr_records and ua_records:
-                print(f"\n🔄 Матчинг TR записей ({len(tr_records)}) с UA...")
+                print(f"\n Матчинг TR записей ({len(tr_records)}) с UA...")
                 tr_matches = match_products_by_id(ua_records, tr_records, "TR")
 
                 for ua_item, tr_item in tr_matches:
                     merged_tr = merge_region_data(ua_item, tr_item, "TR")
                     final_records.append(merged_tr)
 
-                print(f"✓ Создано {len(tr_matches)} полных TR записей")
+                print(f"[OK] Создано {len(tr_matches)} полных TR записей")
 
                 # Добавляем несовпавшие TR записи как есть (неполные, но хоть что-то)
                 matched_tr_ids = {tr_item.get("id") for _, tr_item in tr_matches}
                 unmatched_tr = [item for item in tr_records if item.get("id") not in matched_tr_ids]
                 if unmatched_tr:
-                    print(f"⚠ {len(unmatched_tr)} TR записей не смогли сматчиться (добавлены как есть)")
+                    print(f"[!] {len(unmatched_tr)} TR записей не смогли сматчиться (добавлены как есть)")
                     final_records.extend(unmatched_tr)
             elif tr_records:
-                print(f"\n⚠ TR записи ({len(tr_records)}) добавлены без матчинга (нет UA данных)")
+                print(f"\n[!] TR записи ({len(tr_records)}) добавлены без матчинга (нет UA данных)")
                 final_records.extend(tr_records)
 
             # 3. Матчим и объединяем IN записи с UA данными
             if in_records and ua_records:
-                print(f"\n🔄 Матчинг IN записей ({len(in_records)}) с UA...")
+                print(f"\n Матчинг IN записей ({len(in_records)}) с UA...")
                 in_matches = match_products_by_id(ua_records, in_records, "IN")
 
                 for ua_item, in_item in in_matches:
                     merged_in = merge_region_data(ua_item, in_item, "IN")
                     final_records.append(merged_in)
 
-                print(f"✓ Создано {len(in_matches)} полных IN записей")
+                print(f"[OK] Создано {len(in_matches)} полных IN записей")
 
                 # Добавляем несовпавшие IN записи как есть
                 matched_in_ids = {in_item.get("id") for _, in_item in in_matches}
                 unmatched_in = [item for item in in_records if item.get("id") not in matched_in_ids]
                 if unmatched_in:
-                    print(f"⚠ {len(unmatched_in)} IN записей не смогли сматчиться (добавлены как есть)")
+                    print(f"[!] {len(unmatched_in)} IN записей не смогли сматчиться (добавлены как есть)")
                     final_records.extend(unmatched_in)
             elif in_records:
-                print(f"\n⚠ IN записи ({len(in_records)}) добавлены без матчинга (нет UA данных)")
+                print(f"\n[!] IN записи ({len(in_records)}) добавлены без матчинга (нет UA данных)")
                 final_records.extend(in_records)
 
             print("\n" + "=" * 80)
             print(" ИТОГО ФИНАЛЬНЫХ ЗАПИСЕЙ")
             print("=" * 80)
-            print(f"✓ Всего: {len(final_records)} записей")
+            print(f"[OK] Всего: {len(final_records)} записей")
             for record in final_records:
                 print(f"  • {record.get('name')} ({record.get('edition') or 'базовая'}) - {record.get('region')} - {record.get('price_rub', 0):.2f} RUB")
 
@@ -4681,9 +4634,9 @@ async def main():
             initial_count = len(final_records)
             final_records = process_ps_plus_only_editions(final_records)
             if len(final_records) != initial_count:
-                print(f"✓ Обработано: было {initial_count}, стало {len(final_records)} записей")
+                print(f"[OK] Обработано: было {initial_count}, стало {len(final_records)} записей")
             else:
-                print("✓ Все издания имеют цены или не требуют обработки")
+                print("[OK] Все издания имеют цены или не требуют обработки")
 
             # Проверяем и обновляем result.pkl
             print("\n" + "=" * 80)
@@ -4712,7 +4665,7 @@ async def main():
 
             # Обновляем существующие товары
             if found_items:
-                print(f"\n🔄 Обновление существующих товаров ({len(found_items)}):")
+                print(f"\n Обновление существующих товаров ({len(found_items)}):")
                 for record, (idx, existing_item) in found_items:
                     # Обновляем существующую запись
                     existing_result[idx].update({
@@ -4725,14 +4678,14 @@ async def main():
                         'rating': record.get('rating', existing_item.get('rating', 0.0)),
                         'image': record.get('image', existing_item.get('image', '')),
                     })
-                    print(f"  ✓ Обновлен: {record.get('name')} - {record.get('region')}")
+                    print(f"  [OK] Обновлен: {record.get('name')} - {record.get('region')}")
 
             # Добавляем новые товары
             if new_items:
                 print(f"\n➕ Добавление новых товаров ({len(new_items)}):")
                 for record in new_items:
                     existing_result.append(record)
-                    print(f"  ✓ Добавлен: {record.get('name')} - {record.get('region')}")
+                    print(f"  [OK] Добавлен: {record.get('name')} - {record.get('region')}")
 
             # Удаляем возможные дубликаты (дополнительная защита)
             initial_count = len(existing_result)
@@ -4745,7 +4698,7 @@ async def main():
             # Сохраняем
             with open("result.pkl", "wb") as file:
                 pickle.dump(existing_result, file)
-            print(f"\n✓ result.pkl обновлен ({len(existing_result)} записей)")
+            print(f"\n[OK] result.pkl обновлен ({len(existing_result)} записей)")
             print(f"  • Обновлено: {len(found_items)}")
             print(f"  • Добавлено: {len(new_items)}")
             if duplicates_removed > 0:
@@ -4762,13 +4715,13 @@ async def main():
             action = input("\nВыберите действие (1, 2 или 3): ").strip()
 
             if action == "1":
-                print("\n✓ Готово! Изменения сохранены в result.pkl")
+                print("\n[OK] Готово! Изменения сохранены в result.pkl")
                 return
             elif action == "2":
                 print("\n" + "=" * 80)
                 print(" ЗАГРУЗКА СПАРСЕННЫХ ЗАПИСЕЙ В БД")
                 print("=" * 80)
-                print(f"✓ Будет загружено {len(final_records)} записей")
+                print(f"[OK] Будет загружено {len(final_records)} записей")
                 await process_specific_products_to_db(final_records, promo, start)
                 return
             elif action == "3":
@@ -4816,7 +4769,7 @@ async def main():
         print("=" * 80)
         limit_products = None  # Без ограничений
     else:
-        print("\n⚠ Неверный выбор! Используется полный парсинг по умолчанию")
+        print("\n[!] Неверный выбор! Используется полный парсинг по умолчанию")
         print("=" * 80)
         print(" РЕЖИМ ПОЛНОГО ПАРСИНГА")
         print("=" * 80)
@@ -4852,7 +4805,7 @@ async def main():
             promo = await get_all_ps_plus_subscriptions(session)
             with open("promo.pkl", "wb") as file:
                 pickle.dump(promo, file)
-            print(f"✓ Промо сохранено в promo.pkl")
+            print(f"[OK] Промо сохранено в promo.pkl")
 
         # Get products URLs (with cache)
         if os.path.exists("products.pkl"):
@@ -5004,7 +4957,7 @@ async def main():
 
         # Ограничиваем количество товаров для тестового режима
         if limit_products is not None and len(products) > limit_products:
-            print(f"\n⚠ Тестовый режим: ограничиваем парсинг до {limit_products} товаров")
+            print(f"\n[!] Тестовый режим: ограничиваем парсинг до {limit_products} товаров")
             print(f"  Было: {len(products)} товаров")
             products = products[:limit_products]
             print(f"  Стало: {len(products)} товаров")

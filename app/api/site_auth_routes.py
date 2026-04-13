@@ -78,7 +78,7 @@ def _oauth_error_redirect(message: str, *, next_path: Optional[str] = None) -> R
 async def get_auth_providers():
     return AuthProvidersResponse(
         google_enabled=bool(settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET),
-        vk_enabled=bool(settings.VK_CLIENT_ID and settings.VK_CLIENT_SECRET),
+        vk_enabled=bool(settings.VK_CLIENT_ID),
         telegram_enabled=bool(settings.TELEGRAM_BOT_TOKEN and settings.TELEGRAM_BOT_USERNAME),
         telegram_bot_username=settings.TELEGRAM_BOT_USERNAME or None,
     )
@@ -287,12 +287,16 @@ async def vk_oauth_callback(
     response: Response,
     code: Optional[str] = Query(None),
     state: Optional[str] = Query(None),
+    redirect_state: Optional[str] = Query(None),
+    device_id: Optional[str] = Query(None),
     error: Optional[str] = Query(None),
 ):
     if error:
         return _oauth_error_redirect("Вход через VK был отменен.")
 
-    if not code or not state:
+    state_value = state or redirect_state
+
+    if not code or not state_value:
         return _oauth_error_redirect("VK не вернул код авторизации.")
 
     oauth_service = get_oauth_service()
@@ -301,7 +305,8 @@ async def vk_oauth_callback(
         result = await run_in_threadpool(
             oauth_service.handle_vk_callback,
             code=code,
-            state=state,
+            state=state_value,
+            device_id=device_id,
             user_agent=request.headers.get("user-agent"),
             ip_address=_get_client_ip(request),
         )
