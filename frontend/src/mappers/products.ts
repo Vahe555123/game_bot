@@ -121,7 +121,7 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     edition: raw.edition ?? null,
     description: raw.description ?? null,
     localization: raw.localization ?? null,
-    localizationName: primaryRegionalPrice?.localizationName ?? raw.localization_name ?? null,
+    localizationName: raw.localization_name ?? primaryRegionalPrice?.localizationName ?? null,
     hasDiscount: Boolean(raw.has_discount),
     discount: raw.discount ?? null,
     discountPercent: raw.discount_percent ?? primaryRegionalPrice?.discountPercent ?? null,

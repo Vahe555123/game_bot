@@ -212,11 +212,36 @@ class ProductCRUD:
         priorities = {
             'full': 0,
             'subtitles': 1,
-            'interface': 2,
-            'none': 3,
+            'interface': 1,
+            'none': 2,
         }
         normalized = (localization_code or '').strip().lower()
-        return priorities.get(normalized, 4)
+        return priorities.get(normalized, 3)
+
+    @staticmethod
+    def _get_localization_name_fallback(localization_code: Optional[str]) -> Optional[str]:
+        normalized = (localization_code or '').strip().lower()
+        names = {
+            'full': 'Полностью на русском',
+            'subtitles': 'Русские субтитры',
+            'interface': 'Русские субтитры',
+            'none': 'Нет русского языка',
+        }
+        return names.get(normalized)
+
+    @staticmethod
+    def _select_best_localization_code(regional_products: List[Product]) -> Optional[str]:
+        best_code: Optional[str] = None
+        best_priority = 99
+
+        for regional_product in regional_products:
+            localization_code = getattr(regional_product, 'localization', None)
+            priority = ProductCRUD._get_localization_priority(localization_code)
+            if priority < best_priority:
+                best_priority = priority
+                best_code = localization_code
+
+        return best_code
 
     @staticmethod
     def _candidate_selection_score(
@@ -828,7 +853,7 @@ class ProductCRUD:
         if localization:
             return localization.name_ru
 
-        return None
+        return ProductCRUD._get_localization_name_fallback(localization_code)
 
     @staticmethod
     def get_list(
@@ -1033,9 +1058,10 @@ class ProductCRUD:
         regional_prices = regional_price_data['regional_prices']
         min_price = regional_price_data['min_price_rub']
         min_price_old = regional_price_data['min_old_price_rub']
+        best_localization_code = ProductCRUD._select_best_localization_code(regional_products) or product.localization
         localization_name = ProductCRUD._get_localization_name_cached(
             db,
-            product.localization,
+            best_localization_code,
             localization_cache,
         )
 
@@ -1052,7 +1078,7 @@ class ProductCRUD:
             'rating': product.rating,
             'edition': product.edition,
             'platforms': product.platforms,
-            'localization': product.localization,
+            'localization': best_localization_code,
             'localization_name': localization_name,
             'has_discount': any(price['has_discount'] for price in regional_prices),
             'discount': product.discount,
@@ -1273,7 +1299,8 @@ class ProductCRUD:
         min_price = regional_price_data['min_price_rub']
         min_price_old = regional_price_data['min_old_price_rub']
 
-        localization_name = ProductCRUD.get_localization_name(db, product.localization)
+        best_localization_code = ProductCRUD._select_best_localization_code(regional_products) or product.localization
+        localization_name = ProductCRUD.get_localization_name(db, best_localization_code)
         canon_region = ProductCRUD.normalize_product_region(product.region)
         display_region = canon_region if canon_region else product.region
 
@@ -1290,7 +1317,7 @@ class ProductCRUD:
             'rating': product.rating,
             'edition': product.edition,
             'platforms': product.platforms,
-            'localization': product.localization,
+            'localization': best_localization_code,
             'localization_name': localization_name,
             'has_discount': any(p['has_discount'] for p in regional_prices) if regional_prices else False,
             'discount': product.discount,

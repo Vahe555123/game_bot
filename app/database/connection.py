@@ -18,6 +18,33 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_LOCALIZATIONS = (
+    {
+        "code": "full",
+        "name_ru": "Полностью на русском",
+        "name_en": "Full Russian",
+        "description": "Озвучка и субтитры на русском",
+    },
+    {
+        "code": "subtitles",
+        "name_ru": "Русские субтитры",
+        "name_en": "Russian subtitles",
+        "description": "Субтитры или интерфейс на русском",
+    },
+    {
+        "code": "interface",
+        "name_ru": "Русские субтитры",
+        "name_en": "Russian interface",
+        "description": "Интерфейс на русском",
+    },
+    {
+        "code": "none",
+        "name_ru": "Нет русского языка",
+        "name_en": "No Russian",
+        "description": "Игра не имеет русской локализации",
+    },
+)
+
 
 def _is_sqlite_url(database_url: str) -> bool:
     try:
@@ -562,6 +589,22 @@ def _migrate_user_favorite_products_table(connection) -> None:
     connection.execute(text('DROP TABLE "user_favorite_products_legacy"'))
 
 
+def _seed_default_localizations(connection) -> None:
+    for localization in DEFAULT_LOCALIZATIONS:
+        connection.execute(
+            text(
+                """
+                INSERT INTO localizations (code, name_ru, name_en, description, created_at)
+                SELECT :code, :name_ru, :name_en, :description, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM localizations WHERE code = :code
+                )
+                """
+            ),
+            localization,
+        )
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -616,6 +659,7 @@ def create_tables():
             _migrate_currency_rates_table(connection)
             _migrate_users_table(connection)
             _migrate_user_favorite_products_table(connection)
+            _seed_default_localizations(connection)
             for statement in SQLITE_INDEX_STATEMENTS:
                 connection.execute(text(statement))
             _ensure_product_search_index(connection)

@@ -4,7 +4,12 @@ import { Link, useLocation } from 'react-router-dom'
 import { useFavorites } from '../../context/FavoritesContext'
 import type { CatalogProduct } from '../../types/catalog'
 import { normalizeImageUrl } from '../../utils/format'
-import { getProductPsPlusSavingsPercent, getProductTitle, getVisibleRegionalPrices } from '../../utils/productPresentation'
+import {
+  getProductLocalizationPresentation,
+  getProductPsPlusSavingsPercent,
+  getProductTitle,
+  getVisibleRegionalPrices,
+} from '../../utils/productPresentation'
 import { FavoriteButton } from './FavoriteButton'
 import { LocalizationBadge } from './LocalizationBadge'
 import { PsPlusSavingsBadge } from './PsPlusSavingsBadge'
@@ -25,6 +30,7 @@ export function ProductCard({ product }: ProductCardProps) {
   const favoriteActive = isFavorite(product.id)
   const productTitle = getProductTitle(product)
   const psPlusSavingsPercent = getProductPsPlusSavingsPercent(product)
+  const localization = getProductLocalizationPresentation(product)
 
   function handleFavoriteClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -93,7 +99,7 @@ export function ProductCard({ product }: ProductCardProps) {
             </span>
           ) : null}
           <LocalizationBadge
-            localizationName={product.localizationName}
+            localizationName={localization.fullLabel}
             className="px-2.5 py-1 text-[11px] shadow-lg backdrop-blur-sm md:text-xs"
           />
         </div>

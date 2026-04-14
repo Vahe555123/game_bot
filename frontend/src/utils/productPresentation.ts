@@ -201,13 +201,9 @@ export function getBestLocalizationPresentation(localizationNames: Array<string 
 }
 
 export function getProductLocalizationPresentation(product: Pick<CatalogProduct, 'localizationName' | 'regionalPrices'>) {
-  const localizationNames = product.regionalPrices.map((price) => price.localizationName)
+  const localizationNames = [...product.regionalPrices.map((price) => price.localizationName), product.localizationName]
 
-  if (localizationNames.length > 0) {
-    return getBestLocalizationPresentation(localizationNames)
-  }
-
-  return getLocalizationPresentation(product.localizationName)
+  return getBestLocalizationPresentation(localizationNames)
 }
 
 export function shouldShowOldPrice(

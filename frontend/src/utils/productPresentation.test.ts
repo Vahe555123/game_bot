@@ -142,6 +142,21 @@ describe('getProductLocalizationPresentation', () => {
     expect(localization.status).toBe('full')
     expect(localization.shortLabel).toBe('Полностью на русском')
   })
+
+  it('uses product localization when regional names are missing', () => {
+    const product = buildProduct({
+      localizationName: 'Русские субтитры',
+      regionalPrices: [
+        buildRegionalPrice('TR', 'Турция', 1499, null),
+        buildRegionalPrice('IN', 'Индия', 1799, null),
+      ],
+    })
+
+    const localization = getProductLocalizationPresentation(product)
+
+    expect(localization.status).toBe('partial')
+    expect(localization.shortLabel).toBe('Русские субтитры')
+  })
 })
 
 describe('shouldShowOldPrice', () => {
