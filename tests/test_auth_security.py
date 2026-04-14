@@ -49,6 +49,29 @@ class AuthSecurityTests(unittest.TestCase):
         self.assertEqual(verify_signed_oauth_state(token, "secret-key"), payload)
         self.assertIsNone(verify_signed_oauth_state(token, "wrong-secret"))
 
+    def test_signed_oauth_state_contains_only_vk_safe_characters(self):
+        import re
+        vk_safe_pattern = re.compile(r'^[a-zA-Z0-9_-]+$')
+        payload = {"p": "vk", "n": "/profile", "v": "code-verifier-value", "i": 1700000000}
+        token = create_signed_oauth_state(payload, "secret-key")
+
+        self.assertRegex(token, vk_safe_pattern)
+        self.assertNotIn(".", token)
+
+    def test_signed_oauth_state_backward_compatible_with_dot_separator(self):
+        import json
+        import base64
+        import hashlib
+        import hmac
+
+        payload = {"provider": "google", "next_path": "/profile", "iat": 123456}
+        serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+        payload_part = base64.urlsafe_b64encode(serialized).decode("ascii").rstrip("=")
+        signature = hmac.new("secret-key".encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).hexdigest()
+        legacy_token = f"{payload_part}.{signature}"
+
+        self.assertEqual(verify_signed_oauth_state(legacy_token, "secret-key"), payload)
+
 
 if __name__ == "__main__":
     unittest.main()

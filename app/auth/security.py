@@ -92,18 +92,25 @@ def _urlsafe_b64decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(f"{value}{padding}".encode("ascii"))
 
 
+_SHA256_HEX_LENGTH: Final[int] = 64
+
+
 def create_signed_oauth_state(payload: dict[str, Any], secret: str) -> str:
     serialized = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     payload_part = _urlsafe_b64encode(serialized)
     signature = hmac.new(secret.encode("utf-8"), payload_part.encode("ascii"), hashlib.sha256).hexdigest()
-    return f"{payload_part}.{signature}"
+    return f"{payload_part}{signature}"
 
 
 def verify_signed_oauth_state(state: str, secret: str) -> dict[str, Any] | None:
-    try:
-        payload_part, signature = state.split(".", 1)
-    except ValueError:
+    if len(state) <= _SHA256_HEX_LENGTH:
         return None
+
+    if "." in state:
+        payload_part, signature = state.split(".", 1)
+    else:
+        payload_part = state[:-_SHA256_HEX_LENGTH]
+        signature = state[-_SHA256_HEX_LENGTH:]
 
     expected_signature = hmac.new(
         secret.encode("utf-8"),
