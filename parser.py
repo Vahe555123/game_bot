@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 from json import dumps, loads
+import json as json_module
 from random import choice
 from bs4 import BeautifulSoup as bs
 from time import perf_counter
@@ -13,6 +14,7 @@ import os
 import pickle
 import sys
 import hashlib
+import traceback
 import unicodedata
 from typing import List, Dict, Set, Tuple, Optional
 
@@ -89,6 +91,92 @@ class ParserConfig:
 
 # Глобальный экземпляр конфигурации
 parser_config = ParserConfig()
+
+PARSER_LOGS_DIR = "parser_logs"
+CHECKPOINT_FILE = "parser_checkpoint.json"
+
+
+class ParseLogger:
+    """Логирование ошибок парсинга в файл для каждого запуска"""
+
+    def __init__(self):
+        os.makedirs(PARSER_LOGS_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.log_path = os.path.join(PARSER_LOGS_DIR, f"parse_{timestamp}.log")
+        self._file = open(self.log_path, "w", encoding="utf-8")
+        self._counts = {"PRODUCT_ERROR": 0, "PRICE_MISSING": 0, "PARSE_EXCEPTION": 0}
+        self._write(f"Лог парсинга запущен: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{'=' * 100}\n")
+
+    def _write(self, line: str):
+        self._file.write(line + "\n")
+        self._file.flush()
+
+    def _ts(self) -> str:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    def log_product_error(self, url: str, reason: str):
+        self._counts["PRODUCT_ERROR"] += 1
+        self._write(f"[{self._ts()}] PRODUCT_ERROR | URL: {url} | Причина: {reason}")
+
+    def log_region_price_error(self, url: str, product_name: str, region: str, reason: str):
+        self._counts["PRICE_MISSING"] += 1
+        self._write(f"[{self._ts()}] PRICE_MISSING | URL: {url} | Продукт: {product_name} | Регион: {region} | Причина: {reason}")
+
+    def log_parse_exception(self, url: str, exc: BaseException):
+        self._counts["PARSE_EXCEPTION"] += 1
+        tb = traceback.format_exception(type(exc), exc, exc.__traceback__)
+        short = str(exc) or type(exc).__name__
+        self._write(f"[{self._ts()}] PARSE_EXCEPTION | URL: {url} | Причина: {short}")
+        self._write("  " + "  ".join(tb))
+
+    def log_summary(self, total_products: int = 0, parsed_count: int = 0):
+        total_errors = sum(self._counts.values())
+        self._write(f"\n{'=' * 100}")
+        self._write(f"ИТОГО ЗА СЕССИЮ")
+        self._write(f"{'=' * 100}")
+        if total_products:
+            self._write(f"Всего товаров для парсинга: {total_products}")
+            self._write(f"Успешно спарсено записей: {parsed_count}")
+        self._write(f"Всего ошибок: {total_errors}")
+        for error_type, count in self._counts.items():
+            self._write(f"  {error_type}: {count}")
+        self._write(f"{'=' * 100}")
+        self._file.close()
+        print(f"\n Лог ошибок сохранен: {self.log_path} (ошибок: {total_errors})")
+
+    def close(self):
+        if not self._file.closed:
+            self._file.close()
+
+
+def save_checkpoint(started_at: str, total_products: int, parsed_index: int, results_count: int, db_cleared: bool = False):
+    data = {
+        "started_at": started_at,
+        "total_products": total_products,
+        "parsed_index": parsed_index,
+        "results_count": results_count,
+        "db_cleared": db_cleared,
+        "phase": "parsing",
+    }
+    tmp_path = CHECKPOINT_FILE + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json_module.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, CHECKPOINT_FILE)
+
+
+def load_checkpoint() -> Optional[Dict]:
+    if not os.path.exists(CHECKPOINT_FILE):
+        return None
+    try:
+        with open(CHECKPOINT_FILE, "r", encoding="utf-8") as f:
+            return json_module.load(f)
+    except Exception:
+        return None
+
+
+def remove_checkpoint():
+    if os.path.exists(CHECKPOINT_FILE):
+        os.remove(CHECKPOINT_FILE)
 
 
 # Регионы для парсинга
@@ -1204,7 +1292,7 @@ async def get_localization_for_region(session: aiohttp.ClientSession, product_id
     return None, None
 
 
-async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
+async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, logger: ParseLogger = None):
     """
     Парсит товар из указанных регионов
 
@@ -1213,6 +1301,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
         url: URL товара (ru-ua)
         regions: Список регионов для парсинга ["UA", "TR", "IN"].
                  По умолчанию None = все регионы
+        logger: Опциональный ParseLogger для записи ошибок
 
     Returns:
         List[Dict]: Список товаров по регионам
@@ -1475,6 +1564,9 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
             result = []
 
             if "errors" in ua:
+                if logger:
+                    errors_text = str(ua.get("errors", ""))[:200]
+                    logger.log_product_error(url, f"GraphQL вернул errors: {errors_text}")
                 return []
 
             if "name" in ua["data"]["productRetrieve"]["concept"]:
@@ -1519,6 +1611,8 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                             stars = 0.0
 
                         if not publisher:
+                            if logger:
+                                logger.log_product_error(url, f"Продукт {ID} ({name}) пропущен: нет publisher")
                             continue
                         category = []
                         if product["localizedGenres"]:
@@ -1930,6 +2024,14 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                                 in_record["ps_plus_collection"] = ps_plus_collection_in
                                 result.append(in_record)
 
+                            if logger:
+                                if "UA" in regions and uah_price <= 0 and not ps_plus_collection_ua:
+                                    logger.log_region_price_error(url, name, "UA", "UAH цена = 0 и нет PS Plus подписки")
+                                if "TR" in regions and trl_price <= 0 and not ps_plus_collection_tr:
+                                    logger.log_region_price_error(url, name, "TR", "TRY цена = 0 и нет PS Plus подписки")
+                                if "IN" in regions and inr_price <= 0 and not ps_plus_collection_in:
+                                    logger.log_region_price_error(url, name, "IN", "INR цена = 0 и нет PS Plus подписки")
+
                     # Обрабатываем издания с PS Plus без цены
                     if result:
                         result = process_ps_plus_only_editions(result)
@@ -1942,6 +2044,8 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                     stars = stars_json["cache"][f"Product:{ID}"]["starRating"]["averageRating"]
 
                     if not publisher:
+                        if logger:
+                            logger.log_product_error(url, f"Addon {ID} пропущен: нет publisher")
                         return result
 
                     category = [ua_price_product["skus"][0]["name"]]
@@ -2262,6 +2366,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
                         })
                         result.append(tr_record)
 
+                    if logger:
+                        if "UA" in regions and uah_price <= 0:
+                            logger.log_region_price_error(url, name, "UA", "UAH цена = 0 (addon)")
+                        if "TR" in regions and trl_price <= 0:
+                            logger.log_region_price_error(url, name, "TR", "TRY цена = 0 (addon)")
+
                 # Обрабатываем издания с PS Plus без цены
                 if result:
                     result = process_ps_plus_only_editions(result)
@@ -2274,10 +2384,14 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None):
         except (asyncio.CancelledError, KeyboardInterrupt):
                 return []
 
-        except:
+        except Exception as _exc:
+            if logger:
+                logger.log_parse_exception(url, _exc)
             counter += 1
             await asyncio.sleep(5)
     else:
+        if logger:
+            logger.log_product_error(url, f"Все {counter} попыток исчерпаны, товар пропущен")
         return []
 
 
@@ -3642,110 +3756,83 @@ async def add_update_table():
     """
     await ensure_database_schema()
 
-async def process_and_save_to_db(result: list, promo: list, start_time: float, clear_db: bool = True):
-    """
-    Обработка спарсенных данных и сохранение в SQLite БД
+INSERT_PRODUCTS_SQL = """
+    INSERT OR REPLACE INTO products (
+        id, category, region, type, name, main_name, image, compound,
+        platforms, publisher, localization, rating, info, price, old_price,
+        ps_price, plus_types, ea_price, ps_plus, ea_access, discount,
+        discount_end, tags, edition, description, price_uah, old_price_uah,
+        price_try, old_price_try, price_inr, old_price_inr, price_rub,
+        price_rub_region, ps_plus_price_uah, ps_plus_price_try, ps_plus_price_inr,
+        players_min, players_max, players_online, name_localized, search_names,
+        discount_percent, ps_plus_collection, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?)
+"""
 
-    Args:
-        result: Список спарсенных продуктов
-        promo: Список промо названий (для обратной совместимости) ИЛИ dict с ключами 'Extra', 'Deluxe', 'All'
-        start_time: Время начала парсинга (для расчета общего времени)
-        clear_db: Очищать ли БД перед вставкой (по умолчанию True)
-    """
-    print("\n" + "=" * 80)
-    print("ОБРАБОТКА И СОХРАНЕНИЕ ДАННЫХ")
-    print("=" * 80)
 
-    # Подключение к SQLite
-    await ensure_database_schema()
-    db_path = SQLITE_DB_PATH
+def _resolve_promo_sets(promo) -> Tuple[set, set, set]:
+    if isinstance(promo, dict):
+        return promo.get('Extra', set()), promo.get('Deluxe', set()), promo.get('All', set())
+    all_set = set(promo) if promo else set()
+    return all_set, set(), all_set
 
-    # Подготовка данных для вставки
+
+def _prepare_products_for_db(result: list, promo) -> list:
+    extra_set, deluxe_set, all_set = _resolve_promo_sets(promo)
     products_to_insert = []
 
-    # Обрабатываем promo - может быть список (старый формат) или dict (новый формат)
-    if isinstance(promo, dict):
-        # Новый формат: {'Extra': set, 'Deluxe': set, 'All': set}
-        extra_set = promo.get('Extra', set())
-        deluxe_set = promo.get('Deluxe', set())
-        all_set = promo.get('All', set())  # Все игры из Deluxe
-    else:
-        # Старый формат: список (для обратной совместимости)
-        all_set = set(promo) if promo else set()
-        extra_set = all_set  # Если старый формат, считаем что все в Extra/Deluxe
-        deluxe_set = set()
-
-    print(f"Обработка {len(result)} продуктов...")
-
     for product in result:
-        # Пропускаем продукты без цен
         if not product.get("price_uah") and not product.get("price_try") and not product.get("price_inr"):
             continue
 
-        # Пропускаем подписки PS Plus и EA Play
         name = product.get("name", "")
         if "Подписка PlayStation Plus" in name or "EA Play на" in name:
             continue
 
-        # Определяем PS Plus коллекцию
-        # ps_plus_collection уже определен в парсере по CTA типу
-        # Берем значение напрямую из product
         ps_plus_collection = product.get("ps_plus_collection")
 
-        # Вычисляем минимальную старую цену (для отображения скидки)
         old_prices_rub = []
         old_price_uah = product.get("old_price_uah", 0.0)
         old_price_try = product.get("old_price_try", 0.0)
         old_price_inr = product.get("old_price_inr", 0.0)
-
         if old_price_uah > 0:
             old_prices_rub.append(currency_converter.convert(old_price_uah, "UAH", "RUB"))
         if old_price_try > 0:
             old_prices_rub.append(currency_converter.convert(old_price_try, "TRY", "RUB"))
         if old_price_inr > 0:
             old_prices_rub.append(currency_converter.convert(old_price_inr, "INR", "RUB"))
-
         old_price_rub = min(old_prices_rub) if old_prices_rub else None
 
-        # Вычисляем минимальную PS Plus цену
         ps_plus_prices_rub = []
         ps_plus_price_uah = product.get("ps_plus_price_uah")
         ps_plus_price_try = product.get("ps_plus_price_try")
         ps_plus_price_inr = product.get("ps_plus_price_inr")
-
         if ps_plus_price_uah:
             ps_plus_prices_rub.append(currency_converter.convert(ps_plus_price_uah, "UAH", "RUB"))
         if ps_plus_price_try:
             ps_plus_prices_rub.append(currency_converter.convert(ps_plus_price_try, "TRY", "RUB"))
         if ps_plus_price_inr:
             ps_plus_prices_rub.append(currency_converter.convert(ps_plus_price_inr, "INR", "RUB"))
-
         ps_plus_price_rub = min(ps_plus_prices_rub) if ps_plus_prices_rub else None
 
-        # Вычисляем минимальную цену в рублях
         prices_with_regions = []
         price_uah = product.get("price_uah", 0.0)
         price_try = product.get("price_try", 0.0)
         price_inr = product.get("price_inr", 0.0)
-
         if price_uah > 0:
-            price_rub_ua = currency_converter.convert(price_uah, "UAH", "RUB")
-            prices_with_regions.append((price_rub_ua, "UA"))
+            prices_with_regions.append((currency_converter.convert(price_uah, "UAH", "RUB"), "UA"))
         if price_try > 0:
-            price_rub_tr = currency_converter.convert(price_try, "TRY", "RUB")
-            prices_with_regions.append((price_rub_tr, "TR"))
+            prices_with_regions.append((currency_converter.convert(price_try, "TRY", "RUB"), "TR"))
         if price_inr > 0:
-            price_rub_in = currency_converter.convert(price_inr, "INR", "RUB")
-            prices_with_regions.append((price_rub_in, "IN"))
+            prices_with_regions.append((currency_converter.convert(price_inr, "INR", "RUB"), "IN"))
 
-        # Минимальная цена и её регион
         price_rub = 0
         price_rub_region = None
         if prices_with_regions:
             price_rub, price_rub_region = min(prices_with_regions, key=lambda x: x[0])
 
-        # Подготавливаем данные для вставки
-        # Конвертируем category из списка в строку
         category_str = product.get("category", [])
         if isinstance(category_str, list):
             category_str = ",".join(category_str)
@@ -3764,11 +3851,11 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
             product.get("localization"),
             product.get("rating", 0.0),
             product.get("info"),
-            price_rub,  # price - цена в рублях
-            old_price_rub,  # old_price - старая цена в рублях
-            ps_plus_price_rub,  # ps_price - PS Plus цена в рублях
-            None,  # plus_types - DEPRECATED, будет удалено
-            None,  # ea_price - DEPRECATED, будет удалено
+            price_rub,
+            old_price_rub,
+            ps_plus_price_rub,
+            None,
+            None,
             product.get("ps_plus", 0),
             product.get("ea_access", 0),
             product.get("discount_percent", 0),
@@ -3782,8 +3869,8 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
             product.get("old_price_try", 0.0),
             product.get("price_inr", 0.0),
             product.get("old_price_inr", 0.0),
-            price_rub,  # price_rub - цена в рублях
-            price_rub_region,  # price_rub_region - регион цены
+            price_rub,
+            price_rub_region,
             product.get("ps_plus_price_uah"),
             product.get("ps_plus_price_try"),
             product.get("ps_plus_price_inr"),
@@ -3798,14 +3885,52 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
             product.get("updated_at")
         ))
 
+    return products_to_insert
+
+
+async def save_batch_to_db(result: list, promo, clear_db: bool = False):
+    """Инкрементальное сохранение порции результатов в БД (INSERT OR REPLACE)"""
+    products_to_insert = _prepare_products_for_db(result, promo)
+    if not products_to_insert:
+        return 0
+
+    await ensure_database_schema()
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        await prepare_sqlite_connection(db)
+        if clear_db:
+            await db.execute("DELETE FROM products")
+            await db.commit()
+        await db.executemany(INSERT_PRODUCTS_SQL, products_to_insert)
+        await db.commit()
+
+    return len(products_to_insert)
+
+
+async def process_and_save_to_db(result: list, promo: list, start_time: float, clear_db: bool = True):
+    """
+    Обработка спарсенных данных и сохранение в SQLite БД
+
+    Args:
+        result: Список спарсенных продуктов
+        promo: Список промо названий (для обратной совместимости) ИЛИ dict с ключами 'Extra', 'Deluxe', 'All'
+        start_time: Время начала парсинга (для расчета общего времени)
+        clear_db: Очищать ли БД перед вставкой (по умолчанию True)
+    """
+    print("\n" + "=" * 80)
+    print("ОБРАБОТКА И СОХРАНЕНИЕ ДАННЫХ")
+    print("=" * 80)
+
+    await ensure_database_schema()
+
+    print(f"Обработка {len(result)} продуктов...")
+    products_to_insert = _prepare_products_for_db(result, promo)
     print(f"Подготовлено {len(products_to_insert)} продуктов для вставки")
 
-    #Save to SQLite
     print("\n" + "=" * 80)
     print("Сохранение в SQLite базу данных")
     print("=" * 80)
 
-    async with aiosqlite.connect(db_path) as db:
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
         await prepare_sqlite_connection(db)
         if clear_db:
             print("Очистка таблицы products...")
@@ -3813,25 +3938,8 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
             await db.commit()
             print("Таблица очищена")
 
-        # Подготовка SQL запроса для вставки
-        insert_sql = """
-            INSERT OR REPLACE INTO products (
-                id, category, region, type, name, main_name, image, compound,
-                platforms, publisher, localization, rating, info, price, old_price,
-                ps_price, plus_types, ea_price, ps_plus, ea_access, discount,
-                discount_end, tags, edition, description, price_uah, old_price_uah,
-                price_try, old_price_try, price_inr, old_price_inr, price_rub,
-                price_rub_region, ps_plus_price_uah, ps_plus_price_try, ps_plus_price_inr,
-                players_min, players_max, players_online, name_localized, search_names,
-                discount_percent, ps_plus_collection, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?)
-        """
-
-        # Вставка данных
         print(f"Вставка {len(products_to_insert)} продуктов...")
-        await db.executemany(insert_sql, products_to_insert)
+        await db.executemany(INSERT_PRODUCTS_SQL, products_to_insert)
         await db.commit()
         print(f"[OK] Успешно вставлено {len(products_to_insert)} продуктов")
 
@@ -5161,45 +5269,125 @@ async def main():
             products = products[:limit_products]
             print(f"  Стало: {len(products)} товаров")
 
-        # Parse products
+        # --- Checkpoint / Resume ---
+        start_index = 0
+        result = []
+        db_cleared = False
+        checkpoint = load_checkpoint()
+
+        if checkpoint and checkpoint.get("phase") == "parsing":
+            cp_total = checkpoint.get("total_products", 0)
+            cp_index = checkpoint.get("parsed_index", 0)
+            cp_results = checkpoint.get("results_count", 0)
+            cp_started = checkpoint.get("started_at", "?")
+            cp_db_cleared = checkpoint.get("db_cleared", False)
+
+            print("\n" + "=" * 80)
+            print(" НАЙДЕН CHECKPOINT")
+            print("=" * 80)
+            print(f" Начат: {cp_started}")
+            print(f" Прогресс: {cp_index}/{cp_total} товаров ({cp_results} записей)")
+            print(f" БД уже очищена: {'да' if cp_db_cleared else 'нет'}")
+            print("=" * 80)
+
+            resume_choice = input("\n Продолжить с места остановки? (y/n, по умолчанию y): ").strip().lower()
+            if resume_choice in ("", "y", "д", "yes", "да"):
+                if os.path.exists("result.pkl"):
+                    with open("result.pkl", "rb") as file:
+                        result = pickle.load(file)
+                    print(f" Загружено {len(result)} записей из result.pkl")
+                start_index = cp_index
+                db_cleared = cp_db_cleared
+                print(f" Продолжаем с позиции {start_index}/{len(products)}")
+            else:
+                print(" Начинаем заново...")
+                remove_checkpoint()
+        else:
+            remove_checkpoint()
+
+        started_at = datetime.now().isoformat()
+
+        # --- Parse products ---
         print("\n" + "=" * 80)
         print(" Парсинг продуктов")
         if limit_products is not None:
             print(f" (Ограничение: {limit_products} товаров)")
+        if start_index > 0:
+            print(f" (Продолжение с позиции {start_index})")
         print("=" * 80)
 
+        parse_logger = ParseLogger()
         shift = parser_config.BATCH_SIZE_PRODUCTS
-        result = []
         parse_start = perf_counter()
 
-        for i in range(0, len(products), shift):
-            # Перезагружаем конфигурацию на каждой итерации
-            parser_config.load_config()
-            shift = parser_config.BATCH_SIZE_PRODUCTS
+        total_products = len(products)
+        save_interval = max(1, total_products // 100)
+        next_save_threshold = start_index + save_interval
+        current = start_index
 
-            _result = sum(await asyncio.gather(*[parse(session, products[j]) for j in range(i, min(len(products), i+shift))]), [])
-            result.extend(_result)
-            await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
+        _interrupted = False
 
-            # Удаляем дубликаты после каждого батча
-            uni(result)
+        try:
+            for i in range(start_index, total_products, shift):
+                parser_config.load_config()
+                shift = parser_config.BATCH_SIZE_PRODUCTS
 
-            current = min(len(products), i+shift)
-            elapsed = perf_counter() - parse_start
-            print_progress_bar(current, len(products), elapsed, prefix=" Парсинг", suffix=f"| Спарсено: {len(result)}")
+                batch_end = min(total_products, i + shift)
+                _result = sum(await asyncio.gather(
+                    *[parse(session, products[j], logger=parse_logger) for j in range(i, batch_end)]
+                ), [])
+                result.extend(_result)
+                await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
+
+                uni(result)
+
+                current = batch_end
+                elapsed = perf_counter() - parse_start
+                print_progress_bar(current, total_products, elapsed, prefix=" Парсинг", suffix=f"| Спарсено: {len(result)}")
+
+                # Сохраняем result.pkl и checkpoint после каждого батча
+                with open("result.pkl", "wb") as file:
+                    pickle.dump(result, file)
+                save_checkpoint(started_at, total_products, current, len(result), db_cleared)
+
+                # Инкрементальное сохранение в БД каждый 1%
+                if current >= next_save_threshold or current >= total_products:
+                    pct = round(current / total_products * 100)
+                    print(f"\n  [{pct}%] Сохранение {len(result)} записей в БД...")
+                    saved = await save_batch_to_db(result, promo, clear_db=(not db_cleared))
+                    if not db_cleared:
+                        db_cleared = True
+                        save_checkpoint(started_at, total_products, current, len(result), db_cleared)
+                    print(f"  [{pct}%] Сохранено {saved} продуктов в БД")
+                    next_save_threshold = current + save_interval
+
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            _interrupted = True
+            print("\n\n  Парсинг прерван!")
+            print(f"  Сохраняем прогресс: {len(result)} записей...")
+            with open("result.pkl", "wb") as file:
+                pickle.dump(result, file)
+            save_checkpoint(started_at, total_products, current, len(result), db_cleared)
+            print(f"  Checkpoint сохранен ({current}/{total_products}). При следующем запуске можно продолжить.")
 
         print()
 
-    end = perf_counter()
-    total_time = end - start
-    print(f"\n Парсинг продуктов завершен за {total_time:.2f} сек ({total_time/60:.1f} мин)")
+    if not _interrupted:
+        end = perf_counter()
+        total_time = end - start
+        print(f"\n Парсинг продуктов завершен за {total_time:.2f} сек ({total_time/60:.1f} мин)")
 
-    with open("result.pkl", "wb") as file:
-        pickle.dump(result, file)
-    print(f" Результаты сохранены в result.pkl")
+        with open("result.pkl", "wb") as file:
+            pickle.dump(result, file)
+        print(f" Результаты сохранены в result.pkl")
 
-    # Обработка и загрузка в БД
-    await process_and_save_to_db(result, promo, start)
+        # Финальное сохранение в БД
+        await process_and_save_to_db(result, promo, start, clear_db=False)
+
+        remove_checkpoint()
+        print(" Checkpoint удален (парсинг завершен)")
+
+    parse_logger.log_summary(total_products=total_products, parsed_count=len(result))
 
 
 if __name__ == "__main__":
