@@ -205,6 +205,7 @@ REGIONS = {
 _FREE_PRICE_TEXTS = frozenset({
     "бесплатно", "free", "бесплатная версия",
     "free version", "free trial", "бесплатная пробная версия",
+    "ücretsiz",
 })
 
 _PURCHASE_CTA_TYPES = frozenset({"ADD_TO_CART", "PREORDER", "BUY_NOW", "DOWNLOAD"})
@@ -1785,11 +1786,15 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     discount_end = datetime.fromtimestamp(int(price["price"]["endTime"])//1000)
 
                         is_free_ua = any(
-                            p["type"] in ["ADD_TO_CART", "BUY_NOW"] and is_free_price_text(p["price"].get("discountedPrice", ""))
+                            p["type"] in _PURCHASE_CTA_TYPES and is_free_price_text(p["price"].get("discountedPrice", ""))
                             for p in product.get("webctas", [])
                         )
+                        ua_webctas = product.get("webctas", [])
+                        is_unavailable_ua = bool(ua_webctas) and all(p.get("type") == "UNAVAILABLE" for p in ua_webctas)
                         is_free_tr = False
                         is_free_in = False
+                        is_unavailable_tr = False
+                        is_unavailable_in = False
 
                         if tr_price_products:
                             for trl_product in tr_price_products:
@@ -1829,9 +1834,11 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                             if "UPSELL_EA_ACCESS_DISCOUNT" == trl["type"]:
                                                 ea_price_tr = parse_price_value(trl["price"].get("discountedValue", 0))
                                     is_free_tr = any(
-                                        p["type"] in ["ADD_TO_CART", "BUY_NOW"] and is_free_price_text(p["price"].get("discountedPrice", ""))
+                                        p["type"] in _PURCHASE_CTA_TYPES and is_free_price_text(p["price"].get("discountedPrice", ""))
                                         for p in trl_product.get("webctas", [])
                                     )
+                                    tr_webctas = trl_product.get("webctas", [])
+                                    is_unavailable_tr = bool(tr_webctas) and all(p.get("type") == "UNAVAILABLE" for p in tr_webctas)
                                     break
 
                         # Обработка цен из индийского региона
@@ -1872,9 +1879,11 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                             if "UPSELL_EA_ACCESS_DISCOUNT" == inp["type"]:
                                                 ea_price_in = parse_price_value(inp["price"].get("discountedValue", 0), divide_by_100=False)
                                     is_free_in = any(
-                                        p["type"] in ["ADD_TO_CART", "BUY_NOW"] and is_free_price_text(p["price"].get("discountedPrice", ""))
+                                        p["type"] in _PURCHASE_CTA_TYPES and is_free_price_text(p["price"].get("discountedPrice", ""))
                                         for p in in_product.get("webctas", [])
                                     )
+                                    in_webctas = in_product.get("webctas", [])
+                                    is_unavailable_in = bool(in_webctas) and all(p.get("type") == "UNAVAILABLE" for p in in_webctas)
                                     break
 
                         edition = product["edition"]
@@ -2078,11 +2087,11 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                 result.append(in_record)
 
                             if logger:
-                                if "UA" in regions and uah_price <= 0 and not ps_plus_collection_ua and not is_free_ua:
+                                if "UA" in regions and uah_price <= 0 and not ps_plus_collection_ua and not is_free_ua and not is_unavailable_ua:
                                     logger.log_region_price_error(url, name, "UA", "UAH цена = 0 и нет PS Plus подписки")
-                                if "TR" in regions and trl_price <= 0 and not ps_plus_collection_tr and not is_free_tr:
+                                if "TR" in regions and trl_price <= 0 and not ps_plus_collection_tr and not is_free_tr and not is_unavailable_tr:
                                     logger.log_region_price_error(url, name, "TR", "TRY цена = 0 и нет PS Plus подписки")
-                                if "IN" in regions and inr_price <= 0 and not ps_plus_collection_in and not is_free_in:
+                                if "IN" in regions and inr_price <= 0 and not ps_plus_collection_in and not is_free_in and not is_unavailable_in:
                                     logger.log_region_price_error(url, name, "IN", "INR цена = 0 и нет PS Plus подписки")
 
                     # Обрабатываем издания с PS Plus без цены
@@ -2408,17 +2417,25 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
 
+                    _ua_addon_webctas = ua_price_product.get("webctas", [])
                     is_free_addon_ua = any(
-                        p["type"] in ["ADD_TO_CART", "BUY_NOW"] and is_free_price_text(p["price"].get("discountedPrice", ""))
-                        for p in ua_price_product.get("webctas", [])
+                        p["type"] in _PURCHASE_CTA_TYPES and is_free_price_text(p["price"].get("discountedPrice", ""))
+                        for p in _ua_addon_webctas
                     )
+                    is_unavailable_addon_ua = bool(_ua_addon_webctas) and all(p.get("type") == "UNAVAILABLE" for p in _ua_addon_webctas)
+
                     is_free_addon_tr = False
+                    is_unavailable_addon_tr = False
                     if isinstance(tr_price_products, dict) and tr_price_products.get("webctas"):
+                        _tr_addon_webctas = tr_price_products.get("webctas", [])
                         is_free_addon_tr = any(
-                            p["type"] in ["ADD_TO_CART", "BUY_NOW"] and is_free_price_text(p["price"].get("discountedPrice", ""))
-                            for p in tr_price_products.get("webctas", [])
+                            p["type"] in _PURCHASE_CTA_TYPES and is_free_price_text(p["price"].get("discountedPrice", ""))
+                            for p in _tr_addon_webctas
                         )
+                        is_unavailable_addon_tr = bool(_tr_addon_webctas) and all(p.get("type") == "UNAVAILABLE" for p in _tr_addon_webctas)
+
                     is_free_addon_in = False
+                    is_unavailable_addon_in = False
                     if isinstance(in_price_products, (dict, list)):
                         _in_webctas = []
                         if isinstance(in_price_products, dict):
@@ -2426,9 +2443,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         elif isinstance(in_price_products, list) and len(in_price_products) > 0 and isinstance(in_price_products[0], dict):
                             _in_webctas = in_price_products[0].get("webctas", [])
                         is_free_addon_in = any(
-                            p["type"] in ["ADD_TO_CART", "BUY_NOW"] and is_free_price_text(p["price"].get("discountedPrice", ""))
+                            p["type"] in _PURCHASE_CTA_TYPES and is_free_price_text(p["price"].get("discountedPrice", ""))
                             for p in _in_webctas
                         )
+                        is_unavailable_addon_in = bool(_in_webctas) and all(p.get("type") == "UNAVAILABLE" for p in _in_webctas)
 
                     # UA запись - только если UA в списке регионов
                     if "UA" in regions and (uah_price > 0 or ps_plus_collection_ua or is_free_addon_ua):
@@ -2539,11 +2557,11 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         result.append(in_record)
 
                     if logger:
-                        if "UA" in regions and uah_price <= 0 and not ps_plus_collection_ua and not is_free_addon_ua:
+                        if "UA" in regions and uah_price <= 0 and not ps_plus_collection_ua and not is_free_addon_ua and not is_unavailable_addon_ua:
                             logger.log_region_price_error(url, name, "UA", "UAH цена = 0 (addon)")
-                        if "TR" in regions and trl_price <= 0 and not ps_plus_collection_tr and not is_free_addon_tr:
+                        if "TR" in regions and trl_price <= 0 and not ps_plus_collection_tr and not is_free_addon_tr and not is_unavailable_addon_tr:
                             logger.log_region_price_error(url, name, "TR", "TRY цена = 0 (addon)")
-                        if "IN" in regions and inr_price <= 0 and not ps_plus_collection_in and not is_free_addon_in:
+                        if "IN" in regions and inr_price <= 0 and not ps_plus_collection_in and not is_free_addon_in and not is_unavailable_addon_in:
                             logger.log_region_price_error(url, name, "IN", "INR цена = 0 (addon)")
 
                 # Обрабатываем издания с PS Plus без цены
