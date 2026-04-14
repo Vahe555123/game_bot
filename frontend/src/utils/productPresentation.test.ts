@@ -242,7 +242,7 @@ function buildProduct(overrides: Partial<CatalogProduct>): CatalogProduct {
     favoritesCount: 0,
     priceRub: null,
     oldPriceRub: null,
-    displayPrice: 'Цена по запросу',
+    displayPrice: null,
     displayOldPrice: null,
     regionalPrices: [],
     tags: [],

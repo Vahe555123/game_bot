@@ -4,9 +4,9 @@ const regionMap: Record<string, { label: string; name: string }> = {
   IN: { label: 'IN', name: 'Индия' },
 }
 
-export function formatCurrency(value?: number | null, currencyCode?: string) {
+export function formatCurrency(value?: number | null, currencyCode?: string): string | null {
   if (value === null || value === undefined) {
-    return 'Цена по запросу'
+    return null
   }
 
   const currency = currencyCode || 'RUB'
@@ -23,7 +23,7 @@ export function formatCurrency(value?: number | null, currencyCode?: string) {
 }
 
 export type DualCurrencyPriceDisplay = {
-  primary: string
+  primary: string | null
   secondary: string | null
 }
 
@@ -56,8 +56,9 @@ export function formatDualCurrencyInline(
   localValue?: number | null,
   currencyCode?: string | null,
   rubValue?: number | null,
-) {
+): string | null {
   const display = getDualCurrencyPriceDisplay(localValue, currencyCode, rubValue)
+  if (!display.primary) return null
   return display.secondary ? `${display.primary} / ${display.secondary}` : display.primary
 }
 

@@ -111,7 +111,7 @@ export type CatalogProduct = {
   favoritesCount: number
   priceRub: number | null
   oldPriceRub: number | null
-  displayPrice: string
+  displayPrice: string | null
   displayOldPrice: string | null
   regionalPrices: ProductRegionPrice[]
   tags: string[]

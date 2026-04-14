@@ -1690,6 +1690,9 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         if product["invariantName"]:
                             all_region_names.add(product["invariantName"])
 
+                        tr_name = ""
+                        in_name = ""
+
                         # Добавляем названия из TR региона (если парсили TR)
                         if "TR" in regions and tr_price_products:
                             for trl_product in tr_price_products:
@@ -2023,9 +2026,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                 ps_plus_price_rub_tr = currency_converter.convert(ps_price_tr, "TRY", "RUB") if ps_price_tr else None
 
                                 tr_record = base_data.copy()
+                                if tr_name:
+                                    tr_record["name"] = tr_name
+                                    tr_record["name_localized"] = tr_name if tr_name != main_name else None
                                 tr_record.update({
                                     "region": "TR",
-                                    "localization": localization_tr if localization_tr else localization_code,
+                                    "localization": localization_tr if localization_tr else None,
                                     "price": price_rub_tr,
                                     "old_price": old_price_rub_tr,
                                     "ps_price": ps_plus_price_rub_tr,
@@ -2060,9 +2066,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                 ps_plus_price_rub_in = currency_converter.convert(ps_price_in, "INR", "RUB") if ps_price_in else None
 
                                 in_record = base_data.copy()
+                                if in_name:
+                                    in_record["name"] = in_name
+                                    in_record["name_localized"] = in_name if in_name != main_name else None
                                 in_record.update({
                                     "region": "IN",
-                                    "localization": localization_in if localization_in else localization_code,
+                                    "localization": localization_in if localization_in else None,
                                     "price": price_rub_in,
                                     "old_price": old_price_rub_in,
                                     "ps_price": ps_plus_price_rub_in,
@@ -2150,6 +2159,9 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                     all_region_names_addon.add(main_name)  # Основное название
                     if ua_price_product["invariantName"]:
                         all_region_names_addon.add(ua_price_product["invariantName"])
+
+                    tr_name = ""
+                    in_name = ""
 
                     # Добавляем названия из TR региона (если парсили TR)
                     if "TR" in regions and tr_price_products:
@@ -2366,10 +2378,8 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                     # Определяем локализацию для каждого региона
                     localization_code = get_localization_code_addon(voice_languages, subtitles)
-                    # Для TR и IN: если функция вернула данные (даже пустые строки), вызываем get_localization_code_addon
-                    # None означает ошибку парсинга - используем localization_code как fallback
-                    localization_tr = get_localization_code_addon(voice_languages_tr, subtitles_tr) if (voice_languages_tr is not None and subtitles_tr is not None) else localization_code
-                    localization_in = get_localization_code_addon(voice_languages_in, subtitles_in) if (voice_languages_in is not None and subtitles_in is not None) else localization_code
+                    localization_tr = get_localization_code_addon(voice_languages_tr, subtitles_tr) if (voice_languages_tr is not None and subtitles_tr is not None) else None
+                    localization_in = get_localization_code_addon(voice_languages_in, subtitles_in) if (voice_languages_in is not None and subtitles_in is not None) else None
 
                     if not uah_price:
                         uah_price = uah_old_price
@@ -2495,9 +2505,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         ps_plus_price_rub_tr = currency_converter.convert(ps_price_tr, "TRY", "RUB") if ps_price_tr else None
 
                         tr_record = base_data.copy()
+                        if tr_name:
+                            tr_record["name"] = tr_name
+                            tr_record["name_localized"] = tr_name if tr_name != main_name else None
                         tr_record.update({
                             "region": "TR",
-                            "localization": localization_tr if localization_tr else localization_code,
+                            "localization": localization_tr if localization_tr else None,
                             "price": price_rub_tr,
                             "old_price": old_price_rub_tr,
                             "ps_price": ps_plus_price_rub_tr,
@@ -2531,9 +2544,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         ps_plus_price_rub_in = currency_converter.convert(ps_price_in, "INR", "RUB") if ps_price_in else None
 
                         in_record = base_data.copy()
+                        if in_name:
+                            in_record["name"] = in_name
+                            in_record["name_localized"] = in_name if in_name != main_name else None
                         in_record.update({
                             "region": "IN",
-                            "localization": localization_in if localization_in else localization_code,
+                            "localization": localization_in if localization_in else None,
                             "price": price_rub_in,
                             "old_price": old_price_rub_in,
                             "ps_price": ps_plus_price_rub_in,

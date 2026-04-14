@@ -83,7 +83,7 @@ function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | nu
     raw.price_with_currency?.trim() ||
     (fallbackPrice !== null
       ? formatCurrency(fallbackPrice, raw.rub_price || raw.min_price_rub || primaryRegionalPrice?.priceRub ? 'RUB' : regionInfo?.code)
-      : 'Цена по запросу')
+      : null)
 
   const displayOldPrice =
     fallbackOldPrice !== null
