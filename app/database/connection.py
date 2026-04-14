@@ -332,6 +332,28 @@ def _favorite_foreign_key_matches(group: list[dict]) -> bool:
     return from_columns == ["product_id", "region"] and to_columns == ["id", "region"]
 
 
+def _migrate_currency_rates_table(connection) -> None:
+    if not _sqlite_table_exists(connection, "currency_rates"):
+        return
+
+    columns = _sqlite_table_columns(connection, "currency_rates")
+    if "updated_at" not in columns:
+        connection.execute(text('ALTER TABLE "currency_rates" ADD COLUMN "updated_at" DATETIME'))
+        connection.execute(
+            text(
+                'UPDATE "currency_rates" '
+                'SET "updated_at" = COALESCE("created_at", CURRENT_TIMESTAMP) '
+                'WHERE "updated_at" IS NULL'
+            )
+        )
+
+    if "created_by" not in columns:
+        connection.execute(text('ALTER TABLE "currency_rates" ADD COLUMN "created_by" INTEGER'))
+
+    if "description" not in columns:
+        connection.execute(text('ALTER TABLE "currency_rates" ADD COLUMN "description" TEXT'))
+
+
 def _migrate_users_table(connection) -> None:
     from app.models.user import User
 
@@ -591,6 +613,7 @@ def create_tables():
 
     if _is_sqlite_url(RAW_DATABASE_URL):
         with engine.begin() as connection:
+            _migrate_currency_rates_table(connection)
             _migrate_users_table(connection)
             _migrate_user_favorite_products_table(connection)
             for statement in SQLITE_INDEX_STATEMENTS:

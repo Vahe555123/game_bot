@@ -13,10 +13,13 @@ import os
 import pickle
 import sys
 import hashlib
+import unicodedata
 from typing import List, Dict, Set, Tuple, Optional
 
 
 load_dotenv()
+
+SQLITE_DB_PATH = os.getenv("PARSER_SQLITE_DB_PATH", "products.db")
 
 
 # Configuration
@@ -221,11 +224,16 @@ class CurrencyConverter:
 
     def __init__(self):
         self.rates_cache = {}
-        self.db_path = "products.db"
+        self.missing_rates_warned = set()
+        self.db_path = SQLITE_DB_PATH
 
     async def load_rates(self):
         """Загружает курсы валют из БД"""
+        self.rates_cache = {}
+        self.missing_rates_warned = set()
+        await ensure_database_schema()
         async with aiosqlite.connect(self.db_path) as db:
+            await prepare_sqlite_connection(db)
             cursor = await db.execute("""
                 SELECT currency_from, currency_to, price_min, price_max, rate
                 FROM currency_rates
@@ -266,7 +274,11 @@ class CurrencyConverter:
 
         key = f"{from_currency}_to_{to_currency}"
 
+        if key not in self.rates_cache and key in self.missing_rates_warned:
+            return 0
+
         if key not in self.rates_cache:
+            self.missing_rates_warned.add(key)
             print(f"[!]️ Курс {from_currency} -> {to_currency} не найден!")
             return 0
 
@@ -3430,13 +3442,185 @@ async def get_all_ps_plus_subscriptions(session: aiohttp.ClientSession):
     return result
 
 
-async def add_update_table():
-    """
-    Создает таблицу update_info в SQLite БД (если не существует)
-    Используется для отслеживания обновлений товаров
-    """
-    db_path = "products.db"
-    async with aiosqlite.connect(db_path) as db:
+PRODUCT_TABLE_COLUMNS = (
+    ("id", "TEXT"),
+    ("category", "TEXT"),
+    ("region", "TEXT"),
+    ("type", "TEXT"),
+    ("name", "TEXT"),
+    ("main_name", "TEXT"),
+    ("image", "TEXT"),
+    ("compound", "TEXT"),
+    ("platforms", "TEXT"),
+    ("publisher", "TEXT"),
+    ("localization", "TEXT"),
+    ("rating", "REAL"),
+    ("info", "TEXT"),
+    ("price", "REAL"),
+    ("old_price", "REAL"),
+    ("ps_price", "REAL"),
+    ("plus_types", "TEXT"),
+    ("ea_price", "REAL"),
+    ("ps_plus", "INTEGER"),
+    ("ea_access", "TEXT"),
+    ("discount", "REAL"),
+    ("discount_end", "TEXT"),
+    ("tags", "TEXT"),
+    ("edition", "TEXT"),
+    ("description", "TEXT"),
+    ("price_uah", "REAL"),
+    ("old_price_uah", "REAL"),
+    ("price_try", "REAL"),
+    ("old_price_try", "REAL"),
+    ("price_inr", "REAL"),
+    ("old_price_inr", "REAL"),
+    ("price_rub", "REAL"),
+    ("price_rub_region", "TEXT"),
+    ("ps_plus_price_uah", "REAL"),
+    ("ps_plus_price_try", "REAL"),
+    ("ps_plus_price_inr", "REAL"),
+    ("players_min", "INTEGER"),
+    ("players_max", "INTEGER"),
+    ("players_online", "INTEGER"),
+    ("name_localized", "TEXT"),
+    ("search_names", "TEXT"),
+    ("discount_percent", "INTEGER"),
+    ("ps_plus_collection", "TEXT"),
+    ("created_at", "TIMESTAMP"),
+    ("updated_at", "TIMESTAMP"),
+)
+
+
+PRODUCT_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_products_region ON products(region)",
+    "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)",
+    "CREATE INDEX IF NOT EXISTS idx_products_region_category ON products(region, category)",
+    "CREATE INDEX IF NOT EXISTS idx_products_main_name ON products(main_name)",
+    "CREATE INDEX IF NOT EXISTS idx_products_ps_plus_collection ON products(ps_plus_collection)",
+    "CREATE INDEX IF NOT EXISTS idx_products_ea_access ON products(ea_access)",
+)
+
+
+CURRENCY_RATE_COLUMNS = (
+    ("updated_at", "TIMESTAMP"),
+    ("created_by", "INTEGER"),
+    ("description", "TEXT"),
+)
+
+
+DEFAULT_CURRENCY_RATES = (
+    ("UAH", "RUB", 0, 1000, 2.5, 1),
+    ("UAH", "RUB", 1000, None, 2.5, 1),
+    ("TRY", "RUB", 0, 1000, 3.0, 1),
+    ("TRY", "RUB", 1000, None, 3.0, 1),
+    ("INR", "RUB", 0, 1000, 1.2, 1),
+    ("INR", "RUB", 1000, None, 1.2, 1),
+)
+
+
+def normalize_search_text(value: str | None) -> str:
+    if not value:
+        return ""
+
+    normalized = str(value).replace("в„ў", " ").replace("В®", " ").replace("В©", " ")
+    normalized = unicodedata.normalize("NFKD", normalized)
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = normalized.casefold().replace("С‘", "Рµ")
+    normalized = re.sub(r"[^\w\s]+", " ", normalized, flags=re.UNICODE)
+    normalized = re.sub(r"[_\s]+", " ", normalized)
+    return normalized.strip()
+
+
+async def prepare_sqlite_connection(db: aiosqlite.Connection):
+    await db.execute("PRAGMA journal_mode=WAL")
+    await db.execute("PRAGMA busy_timeout=30000")
+    try:
+        await db.create_function("normalize_search", 1, normalize_search_text, deterministic=True)
+    except TypeError:
+        await db.create_function("normalize_search", 1, normalize_search_text)
+
+
+async def get_table_columns(db: aiosqlite.Connection, table_name: str) -> Set[str]:
+    cursor = await db.execute(f'PRAGMA table_info("{table_name}")')
+    rows = await cursor.fetchall()
+    await cursor.close()
+    return {row[1] for row in rows}
+
+
+async def seed_missing_currency_rates(db: aiosqlite.Connection):
+    for currency_from in ("UAH", "TRY", "INR"):
+        cursor = await db.execute(
+            """
+            SELECT 1 FROM currency_rates
+            WHERE currency_from = ? AND currency_to = 'RUB' AND is_active = 1
+            LIMIT 1
+            """,
+            (currency_from,),
+        )
+        exists = await cursor.fetchone()
+        await cursor.close()
+        if exists:
+            continue
+
+        rows = [row for row in DEFAULT_CURRENCY_RATES if row[0] == currency_from]
+        await db.executemany(
+            """
+            INSERT INTO currency_rates (
+                currency_from, currency_to, price_min, price_max, rate,
+                is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            rows,
+        )
+
+
+async def ensure_database_schema():
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        await prepare_sqlite_connection(db)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS currency_rates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                currency_from TEXT NOT NULL,
+                currency_to TEXT NOT NULL,
+                price_min REAL NOT NULL,
+                price_max REAL,
+                rate REAL NOT NULL,
+                is_active INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP,
+                created_by INTEGER,
+                description TEXT
+            )
+        """)
+
+        existing_rate_columns = await get_table_columns(db, "currency_rates")
+        for name, column_type in CURRENCY_RATE_COLUMNS:
+            if name not in existing_rate_columns:
+                await db.execute(f'ALTER TABLE currency_rates ADD COLUMN "{name}" {column_type}')
+
+        await db.execute("""
+            UPDATE currency_rates
+            SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
+            WHERE updated_at IS NULL
+        """)
+        await seed_missing_currency_rates(db)
+
+        column_sql = ",\n                ".join(
+            f"{name} {column_type}" for name, column_type in PRODUCT_TABLE_COLUMNS
+        )
+        await db.execute(f"""
+            CREATE TABLE IF NOT EXISTS products (
+                {column_sql},
+                PRIMARY KEY (id, region)
+            )
+        """)
+
+        existing_columns = await get_table_columns(db, "products")
+        for name, column_type in PRODUCT_TABLE_COLUMNS:
+            if name not in existing_columns:
+                await db.execute(f'ALTER TABLE products ADD COLUMN "{name}" {column_type}')
+
         await db.execute("""
             CREATE TABLE IF NOT EXISTS update_info (
                 id TEXT,
@@ -3444,7 +3628,19 @@ async def add_update_table():
                 currency INTEGER
             )
         """)
+
+        for index_sql in PRODUCT_INDEXES:
+            await db.execute(index_sql)
+
         await db.commit()
+
+
+async def add_update_table():
+    """
+    Создает таблицу update_info в SQLite БД (если не существует)
+    Используется для отслеживания обновлений товаров
+    """
+    await ensure_database_schema()
 
 async def process_and_save_to_db(result: list, promo: list, start_time: float, clear_db: bool = True):
     """
@@ -3461,7 +3657,8 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("=" * 80)
 
     # Подключение к SQLite
-    db_path = "products.db"
+    await ensure_database_schema()
+    db_path = SQLITE_DB_PATH
 
     # Подготовка данных для вставки
     products_to_insert = []
@@ -3609,6 +3806,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("=" * 80)
 
     async with aiosqlite.connect(db_path) as db:
+        await prepare_sqlite_connection(db)
         if clear_db:
             print("Очистка таблицы products...")
             await db.execute("DELETE FROM products")
@@ -4046,6 +4244,7 @@ async def main():
     print("\n" + "=" * 80)
     print(" ЗАГРУЗКА КУРСОВ ВАЛЮТ")
     print("=" * 80)
+    await ensure_database_schema()
     await currency_converter.load_rates()
     print("=" * 80)
 
