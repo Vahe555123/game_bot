@@ -57,6 +57,7 @@ export function getVisibleRegionalPrices(product: CatalogProduct) {
       name: region.name,
       currencyCode: product.regionInfo?.code || 'RUB',
       flag: null,
+      available: true,
       priceLocal: null,
       oldPriceLocal: null,
       psPlusPriceLocal: null,

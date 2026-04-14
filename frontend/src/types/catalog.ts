@@ -9,6 +9,7 @@ export type RawRegionalPrice = {
   flag?: string | null
   name?: string | null
   currency_code?: string | null
+  available?: boolean
   price_local?: number | null
   old_price_local?: number | null
   ps_plus_price_local?: number | null
@@ -69,6 +70,7 @@ export type ProductRegionPrice = {
   name: string
   currencyCode: string | null
   flag: string | null
+  available: boolean
   priceLocal: number | null
   oldPriceLocal: number | null
   psPlusPriceLocal: number | null

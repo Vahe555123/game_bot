@@ -10,6 +10,30 @@ type RegionalPriceListProps = {
   className?: string
 }
 
+function UnavailableRegionRow({
+  price,
+  variant,
+}: {
+  price: ProductRegionPrice
+  variant: 'card' | 'detail'
+}) {
+  return (
+    <div
+      className={clsx(
+        'rounded-2xl border border-white/5 bg-white/[0.02]',
+        variant === 'card' ? 'px-2.5 py-2 md:px-3 md:py-2.5' : 'px-4 py-3.5',
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className={clsx('truncate font-semibold text-slate-500', variant === 'card' ? 'text-sm' : 'text-base')}>
+          {price.name}
+        </p>
+        <span className="shrink-0 text-xs text-slate-600">Недоступно</span>
+      </div>
+    </div>
+  )
+}
+
 function RegionalPriceRow({
   price,
   variant,
@@ -17,6 +41,10 @@ function RegionalPriceRow({
   price: ProductRegionPrice
   variant: 'card' | 'detail'
 }) {
+  if (!price.available) {
+    return <UnavailableRegionRow price={price} variant={variant} />
+  }
+
   const showOldPrice = shouldShowOldPrice(price)
   const currentPrice = getDualCurrencyPriceDisplay(price.priceLocal, price.currencyCode, price.priceRub)
   const oldPrice = showOldPrice

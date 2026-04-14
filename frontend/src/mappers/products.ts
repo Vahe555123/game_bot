@@ -44,6 +44,7 @@ function normalizeRegionalPrice(price: RawRegionalPrice): ProductRegionPrice {
     name: price.name || fallback?.name || 'Неизвестный регион',
     currencyCode: price.currency_code || fallback?.code || null,
     flag: price.flag || null,
+    available: price.available !== false,
     priceLocal: price.price_local ?? null,
     oldPriceLocal: price.old_price_local ?? null,
     psPlusPriceLocal: price.ps_plus_price_local ?? null,
@@ -59,7 +60,7 @@ function normalizeRegionalPrice(price: RawRegionalPrice): ProductRegionPrice {
 
 function pickPrimaryRegionalPrice(regionalPrices: ProductRegionPrice[]) {
   return regionalPrices
-    .filter((price) => typeof price.priceRub === 'number')
+    .filter((price) => price.available && typeof price.priceRub === 'number')
     .sort((left, right) => (left.priceRub ?? Number.POSITIVE_INFINITY) - (right.priceRub ?? Number.POSITIVE_INFINITY))[0]
 }
 

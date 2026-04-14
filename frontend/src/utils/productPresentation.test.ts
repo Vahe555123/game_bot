@@ -198,6 +198,7 @@ function buildRegionalPrice(
     name,
     currencyCode: 'RUB',
     flag: null,
+    available: true,
     priceLocal: null,
     oldPriceLocal: null,
     psPlusPriceLocal: null,

@@ -272,12 +272,26 @@ class ProductCRUD:
         if not normalized_product_id:
             return []
 
-        return db.query(Product).filter(
+        candidates = db.query(Product).filter(
             or_(
                 Product.id == normalized_product_id,
                 Product.search_names.ilike(f"%{normalized_product_id}%"),
             )
         ).all()
+
+        if candidates:
+            return candidates
+
+        normalized_search = ProductCRUD._normalize_search_text(product_id)
+        if normalized_search and len(normalized_search) >= 4:
+            return db.query(Product).filter(
+                or_(
+                    func.lower(Product.main_name).like(f"%{normalized_search}%"),
+                    func.lower(Product.name).like(f"%{normalized_search}%"),
+                )
+            ).all()
+
+        return []
 
     @staticmethod
     def _normalize_product_identity_name(value: Optional[str]) -> str:
@@ -297,13 +311,15 @@ class ProductCRUD:
                 for part in str(search_names).split(',')
             )
 
-        # Добавляем базовое название без подзаголовков (до двоеточия, тире, скобок)
         main_name = getattr(product, 'main_name', None) or getattr(product, 'name', None)
         if main_name:
-            # Извлекаем базовое название до специальных символов
             base_name = re.split(r'[:\-–—(]', str(main_name))[0].strip()
             if base_name:
                 names.add(ProductCRUD._normalize_product_identity_name(base_name))
+
+        product_id = getattr(product, 'id', None)
+        if product_id:
+            names.add(ProductCRUD._normalize_product_identity_name(product_id))
 
         names.discard('')
         return {name for name in names if len(name) >= 4}
@@ -321,6 +337,53 @@ class ProductCRUD:
 
         price = getattr(product, price_field, None)
         return bool(price and price > 0)
+
+    @staticmethod
+    def _is_strong_equivalent_match(
+        seed_names: set[str],
+        candidate_names: set[str],
+        seed_product: Product,
+        candidate: Product,
+    ) -> bool:
+        seed_id = ProductCRUD._normalize_product_identity_name(getattr(seed_product, 'id', None))
+        candidate_id = ProductCRUD._normalize_product_identity_name(getattr(candidate, 'id', None))
+
+        if seed_id and candidate_id and seed_id == candidate_id:
+            return True
+
+        seed_search = getattr(seed_product, 'search_names', '') or ''
+        candidate_search = getattr(candidate, 'search_names', '') or ''
+        raw_candidate_id = getattr(candidate, 'id', '') or ''
+        raw_seed_id = getattr(seed_product, 'id', '') or ''
+        if raw_candidate_id and raw_candidate_id in seed_search:
+            return True
+        if raw_seed_id and raw_seed_id in candidate_search:
+            return True
+
+        seed_main = ProductCRUD._normalize_product_identity_name(
+            getattr(seed_product, 'main_name', None) or getattr(seed_product, 'name', None)
+        )
+        candidate_main = ProductCRUD._normalize_product_identity_name(
+            getattr(candidate, 'main_name', None) or getattr(candidate, 'name', None)
+        )
+        if seed_main and candidate_main and seed_main == candidate_main:
+            return True
+
+        common = seed_names & candidate_names
+        if not common:
+            return False
+
+        longest_common = max(common, key=len)
+        seed_longest = max(seed_names, key=len) if seed_names else ''
+        candidate_longest = max(candidate_names, key=len) if candidate_names else ''
+
+        if longest_common == seed_longest or longest_common == candidate_longest:
+            return True
+
+        if len(longest_common) >= 10:
+            return True
+
+        return False
 
     @staticmethod
     def _augment_regional_products_with_equivalents(
@@ -354,13 +417,15 @@ class ProductCRUD:
         if not identity_names:
             return regional_products
 
-        # Расширенный поиск: ищем по названиям И по search_names
         candidates_query = db.query(Product).filter(
             Product.region.in_(missing_regions),
             Product.type == product.type,
         )
 
-        # Добавляем условие поиска по main_name и search_names
+        product_category = getattr(product, 'category', None)
+        if product_category:
+            candidates_query = candidates_query.filter(Product.category == product_category)
+
         name_conditions = []
         for identity_name in identity_names:
             if len(identity_name) >= 4:
@@ -385,7 +450,9 @@ class ProductCRUD:
                 continue
 
             candidate_names = ProductCRUD._get_product_identity_names(candidate)
-            if identity_names.isdisjoint(candidate_names):
+            if not ProductCRUD._is_strong_equivalent_match(
+                identity_names, candidate_names, product, candidate
+            ):
                 continue
 
             regional_by_code[candidate_region] = candidate
@@ -606,6 +673,7 @@ class ProductCRUD:
                     'flag': region_info['flag'],
                     'name': region_info['name'],
                     'currency_code': region_info['code'],
+                    'available': True,
                     'price_local': price,
                     'old_price_local': old_price if old_price and old_price > 0 else None,
                     'ps_plus_price_local': ps_plus_price if ps_plus_price and ps_plus_price > 0 else None,
@@ -623,6 +691,33 @@ class ProductCRUD:
             if min_price_rub is None or price_rub < min_price_rub:
                 min_price_rub = price_rub
                 min_old_price_rub = old_price_rub
+
+        present_regions = {p['region'] for p in regional_prices}
+        for region_code in ('TR', 'IN', 'UA'):
+            if region_code not in present_regions:
+                region_info = region_mapping.get(region_code)
+                if region_info:
+                    regional_prices.append({
+                        'region': region_code,
+                        'flag': region_info['flag'],
+                        'name': region_info['name'],
+                        'currency_code': region_info['code'],
+                        'available': False,
+                        'price_local': None,
+                        'old_price_local': None,
+                        'ps_plus_price_local': None,
+                        'price_rub': None,
+                        'old_price_rub': None,
+                        'ps_plus_price_rub': None,
+                        'has_discount': False,
+                        'discount_percent': None,
+                        'ps_plus_discount_percent': None,
+                        'localization_code': None,
+                        'localization_name': None,
+                    })
+
+        region_order = {'TR': 0, 'IN': 1, 'UA': 2}
+        regional_prices.sort(key=lambda p: region_order.get(p['region'], 99))
 
         max_discount_percent = None
         discounts = [price.get('discount_percent') for price in regional_prices if price.get('discount_percent')]

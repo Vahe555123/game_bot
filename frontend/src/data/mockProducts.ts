@@ -38,6 +38,7 @@ export const mockProducts: CatalogProduct[] = [
         name: 'Турция',
         currencyCode: 'TRY',
         flag: null,
+        available: true,
         priceLocal: null,
         oldPriceLocal: null,
         psPlusPriceLocal: null,
