@@ -30,6 +30,7 @@ VK_ID_AUTHORIZE_URL = "https://id.vk.com/authorize"
 VK_ID_TOKEN_URL = "https://id.vk.com/oauth2/auth"
 VK_ID_USERINFO_URL = "https://id.vk.com/oauth2/user_info"
 VK_API_VERSION = "5.199"
+VK_OAUTH_STATE_MAX_LENGTH = 240
 
 
 @dataclass
@@ -64,7 +65,7 @@ def _base64_urlsafe_no_padding(value: bytes) -> str:
 
 
 def _create_pkce_verifier() -> str:
-    return secrets.token_urlsafe(64)[:128]
+    return secrets.token_urlsafe(32)
 
 
 def _create_pkce_challenge(verifier: str) -> str:
@@ -151,15 +152,16 @@ class OAuthService:
 
         safe_next_path = normalize_next_path(next_path)
         code_verifier = _create_pkce_verifier()
-        state = create_signed_oauth_state(
-            {
-                "provider": "vk",
-                "next_path": safe_next_path,
-                "code_verifier": code_verifier,
-                "iat": int(time.time()),
-            },
-            settings.AUTH_OAUTH_STATE_SECRET,
-        )
+        state_payload = {
+            "p": "vk",
+            "n": safe_next_path,
+            "v": code_verifier,
+            "i": int(time.time()),
+        }
+        state = create_signed_oauth_state(state_payload, settings.AUTH_OAUTH_STATE_SECRET)
+        if len(state) > VK_OAUTH_STATE_MAX_LENGTH:
+            state_payload["n"] = settings.AUTH_DEFAULT_REDIRECT_PATH
+            state = create_signed_oauth_state(state_payload, settings.AUTH_OAUTH_STATE_SECRET)
         params = {
             "client_id": settings.VK_CLIENT_ID,
             "redirect_uri": settings.VK_REDIRECT_URI,
@@ -377,8 +379,8 @@ class OAuthService:
         if not payload:
             raise AuthServiceError(400, "OAuth state недействителен.")
 
-        provider = payload.get("provider")
-        issued_at = payload.get("iat")
+        provider = payload.get("provider") or payload.get("p")
+        issued_at = payload.get("iat") if "iat" in payload else payload.get("i")
         if provider != expected_provider or not isinstance(issued_at, int):
             raise AuthServiceError(400, "OAuth state недействителен.")
 
@@ -387,8 +389,8 @@ class OAuthService:
 
         return {
             "provider": provider,
-            "next_path": normalize_next_path(payload.get("next_path")),
-            "code_verifier": payload.get("code_verifier"),
+            "next_path": normalize_next_path(payload.get("next_path") or payload.get("n")),
+            "code_verifier": payload.get("code_verifier") or payload.get("v"),
         }
 
 

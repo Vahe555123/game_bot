@@ -76,6 +76,19 @@ def _oauth_error_redirect(message: str, *, next_path: Optional[str] = None) -> R
     return RedirectResponse(url=redirect_url, status_code=302)
 
 
+def _oauth_state_candidates(*values: Optional[str]) -> list[str]:
+    candidates: list[str] = []
+    for value in values:
+        if not value or value in candidates:
+            continue
+        candidates.append(value)
+    return candidates
+
+
+def _is_invalid_oauth_state_error(error: AuthServiceError) -> bool:
+    return error.status_code == 400 and "OAuth state" in error.message
+
+
 @router.get("/providers", response_model=AuthProvidersResponse, summary="Доступные способы входа")
 async def get_auth_providers():
     return AuthProvidersResponse(
@@ -299,25 +312,34 @@ async def vk_oauth_callback(
     if error:
         return _oauth_error_redirect("Вход через VK был отменен.")
 
-    state_value = state or redirect_state
+    state_candidates = _oauth_state_candidates(redirect_state, state)
 
-    if not code or not state_value:
+    if not code or not state_candidates:
         return _oauth_error_redirect("VK не вернул код авторизации.")
 
     oauth_service = get_oauth_service()
 
-    try:
-        result = await run_in_threadpool(
-            oauth_service.handle_vk_callback,
-            code=code,
-            state=state_value,
-            device_id=device_id,
-            user_agent=request.headers.get("user-agent"),
-            ip_address=_get_client_ip(request),
-        )
-    except AuthServiceError as auth_error:
-        logger.warning("VK OAuth callback failed: %s", auth_error.message)
-        return _oauth_error_redirect(auth_error.message)
+    result = None
+    for index, state_value in enumerate(state_candidates):
+        try:
+            result = await run_in_threadpool(
+                oauth_service.handle_vk_callback,
+                code=code,
+                state=state_value,
+                device_id=device_id,
+                user_agent=request.headers.get("user-agent"),
+                ip_address=_get_client_ip(request),
+            )
+            break
+        except AuthServiceError as auth_error:
+            has_next_candidate = index + 1 < len(state_candidates)
+            if has_next_candidate and _is_invalid_oauth_state_error(auth_error):
+                continue
+            logger.warning("VK OAuth callback failed: %s", auth_error.message)
+            return _oauth_error_redirect(auth_error.message)
+
+    if result is None:
+        return _oauth_error_redirect("OAuth state недействителен.")
 
     redirect_response = RedirectResponse(
         url=build_public_redirect_url(result.next_path, auth_provider="vk"),

@@ -14,7 +14,6 @@ import { TextField } from './FormField'
 import { SocialAuthPanel } from './SocialAuthPanel'
 import {
   buildAuthModalPath,
-  buildAuthModalReturnPath,
   resolveAuthSuccessPath,
   type AuthModalView,
 } from './authModalState'
@@ -91,7 +90,7 @@ export function AuthModal({ view, onClose }: AuthModalProps) {
 
   const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
   const oauthError = searchParams.get('auth_error')
-  const oauthReturnPath = buildAuthModalReturnPath(location)
+  const oauthReturnPath = resolveAuthSuccessPath(location)
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

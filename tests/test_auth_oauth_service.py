@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from app.auth.oauth_service import OAuthService, VK_ID_AUTHORIZE_URL, VK_ID_TOKEN_URL
 from app.auth.schemas import TelegramAuthRequest
-from app.auth.security import create_signed_oauth_state, verify_signed_oauth_state
+from app.auth.security import create_signed_oauth_state
 from config.settings import settings
 
 
@@ -108,20 +108,39 @@ class OAuthServiceVKTests(unittest.TestCase):
             patch.object(settings, "AUTH_OAUTH_STATE_SECRET", "test-state-secret"),
         ):
             url = oauth_service.build_vk_authorization_url("/profile")
+            parsed = urlparse(url)
+            params = parse_qs(parsed.query)
+            state = params["state"][0]
+            state_payload = oauth_service._parse_state(state, expected_provider="vk")
 
-        parsed = urlparse(url)
-        params = parse_qs(parsed.query)
-        state = params["state"][0]
-        state_payload = verify_signed_oauth_state(state, "test-state-secret")
 
         self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", VK_ID_AUTHORIZE_URL)
         self.assertEqual(params["client_id"], ["vk-client-id"])
         self.assertEqual(params["response_type"], ["code"])
         self.assertEqual(params["code_challenge_method"], ["S256"])
         self.assertIn("code_challenge", params)
+        self.assertLessEqual(len(state), 240)
         self.assertEqual(state_payload["provider"], "vk")
         self.assertEqual(state_payload["next_path"], "/profile")
-        self.assertTrue(state_payload["code_verifier"])
+        self.assertGreaterEqual(len(state_payload["code_verifier"]), 43)
+
+    def test_vk_authorization_url_falls_back_when_state_would_be_too_long(self):
+        oauth_service = OAuthService(auth_service=FakeAuthService())
+
+        with (
+            patch.object(settings, "VK_CLIENT_ID", "vk-client-id"),
+            patch.object(settings, "VK_CLIENT_SECRET", ""),
+            patch.object(settings, "PUBLIC_APP_URL", "https://play-save.ru"),
+            patch.object(settings, "AUTH_DEFAULT_REDIRECT_PATH", "/profile"),
+            patch.object(settings, "AUTH_OAUTH_STATE_SECRET", "test-state-secret"),
+        ):
+            url = oauth_service.build_vk_authorization_url("/catalog?" + ("q=x&" * 120))
+            params = parse_qs(urlparse(url).query)
+            state = params["state"][0]
+            state_payload = oauth_service._parse_state(state, expected_provider="vk")
+
+        self.assertLessEqual(len(state), 240)
+        self.assertEqual(state_payload["next_path"], "/profile")
 
     def test_vk_callback_falls_back_to_vk_id_user_info(self):
         fake_auth_service = FakeAuthService()
