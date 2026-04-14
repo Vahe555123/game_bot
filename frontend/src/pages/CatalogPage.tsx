@@ -430,7 +430,7 @@ export function CatalogPage() {
             </button>
 
             <div className="mr-auto rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:mr-0 sm:w-auto md:px-4 md:text-sm">
-              <span className="font-semibold text-white">{total}</span> товаров1
+              <span className="font-semibold text-white">{total}</span> 
               {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
             </div>
 

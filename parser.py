@@ -207,6 +207,9 @@ _FREE_PRICE_TEXTS = frozenset({
     "free version", "free trial", "бесплатная пробная версия",
 })
 
+_PURCHASE_CTA_TYPES = frozenset({"ADD_TO_CART", "PREORDER", "BUY_NOW", "DOWNLOAD"})
+_PRICE_CTA_TYPES = frozenset({"ADD_TO_CART", "PREORDER", "BUY_NOW"})
+
 
 def is_free_price_text(text: str) -> bool:
     if not text:
@@ -1745,12 +1748,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         ps_price_in = None
                         ea_price_in = None
                         for price in product["webctas"]:
-                            if price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] or ("UPSELL" in price["type"] and ("EA_ACCESS" in price["type"] or "PS_PLUS" in price["type"]) and "TRIAL" not in price["type"]):
+                            if price["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in price["type"] and ("EA_ACCESS" in price["type"] or "PS_PLUS" in price["type"]) and "TRIAL" not in price["type"]):
                                 if price["type"] == "PREORDER":
                                     product_type = "Предзаказ"
-                                if price["price"]["discountedPrice"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not uah_price:
+                                if price["price"]["discountedPrice"] and price["type"] in _PURCHASE_CTA_TYPES and not uah_price:
                                     uah_price = parse_price_value(price["price"].get("discountedValue", 0))
-                                if price["price"]["basePrice"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not uah_old_price:
+                                if price["price"]["basePrice"] and price["type"] in _PURCHASE_CTA_TYPES and not uah_old_price:
                                     uah_old_price = parse_price_value(price["price"].get("basePriceValue", 0))
                                 if "PS_PLUS" in price["type"] and price["price"]["discountedPrice"] == "Входит в подписку":
                                     ps_plus = True
@@ -1776,9 +1779,9 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     ps_price_ua = parse_price_value(price["price"].get("discountedValue", 0))
                                 if "UPSELL_EA_ACCESS_DISCOUNT" == price["type"]:
                                     ea_price_ua = parse_price_value(price["price"].get("discountedValue", 0))
-                                if price["price"]["discountText"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"]:
+                                if price["price"]["discountText"] and price["type"] in _PURCHASE_CTA_TYPES:
                                     discount = price["price"]["discountText"]
-                                if price["price"]["endTime"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"]:
+                                if price["price"]["endTime"] and price["type"] in _PURCHASE_CTA_TYPES:
                                     discount_end = datetime.fromtimestamp(int(price["price"]["endTime"])//1000)
 
                         is_free_ua = any(
@@ -1795,11 +1798,11 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     eq_id = trl_product["id"] == ID
                                 if eq_id:
                                     for trl in trl_product["webctas"]:
-                                        if trl["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] or ("UPSELL" in trl["type"] and ("EA_ACCESS" in trl["type"] or "PS_PLUS" in trl["type"]) and "TRIAL" not in trl["type"]):
+                                        if trl["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in trl["type"] and ("EA_ACCESS" in trl["type"] or "PS_PLUS" in trl["type"]) and "TRIAL" not in trl["type"]):
                                         # if trl["type"] in ["ADD_TO_CART", "PREORDER"] or "UPSELL" in trl["type"]:
-                                            if trl["price"]["discountedPrice"] and trl["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not trl_price:
+                                            if trl["price"]["discountedPrice"] and trl["type"] in _PURCHASE_CTA_TYPES and not trl_price:
                                                 trl_price = parse_price_value(trl["price"].get("discountedValue", 0))
-                                            if trl["price"]["basePrice"] and trl["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not trl_old_price:
+                                            if trl["price"]["basePrice"] and trl["type"] in _PURCHASE_CTA_TYPES and not trl_old_price:
                                                 trl_old_price = parse_price_value(trl["price"].get("basePriceValue", 0))
                                             if "PS_PLUS" in trl["type"] and trl["price"]["discountedPrice"] == "Included":
                                                 ps_plus = True
@@ -1839,10 +1842,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     eq_id = in_product["id"] == ID
                                 if eq_id:
                                     for inp in in_product["webctas"]:
-                                        if inp["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] or ("UPSELL" in inp["type"] and ("EA_ACCESS" in inp["type"] or "PS_PLUS" in inp["type"]) and "TRIAL" not in inp["type"]):
-                                            if inp["price"]["discountedPrice"] and inp["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not inr_price:
+                                        if inp["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in inp["type"] and ("EA_ACCESS" in inp["type"] or "PS_PLUS" in inp["type"]) and "TRIAL" not in inp["type"]):
+                                            if inp["price"]["discountedPrice"] and inp["type"] in _PURCHASE_CTA_TYPES and not inr_price:
                                                 inr_price = parse_price_value(inp["price"].get("discountedValue", 0), divide_by_100=False)
-                                            if inp["price"]["basePrice"] and inp["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not inr_old_price:
+                                            if inp["price"]["basePrice"] and inp["type"] in _PURCHASE_CTA_TYPES and not inr_old_price:
                                                 inr_old_price = parse_price_value(inp["price"].get("basePriceValue", 0), divide_by_100=False)
                                             if "PS_PLUS" in inp["type"] and inp["price"]["discountedPrice"] == "Included":
                                                 ps_plus = True
@@ -2208,12 +2211,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                     if ua_price_product.get("webctas"):
                         for price in ua_price_product["webctas"]:
-                            if price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] or ("UPSELL" in price["type"] and ("EA_ACCESS" in price["type"] or "PS_PLUS" in price["type"]) and "TRIAL" not in price["type"]):
+                            if price["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in price["type"] and ("EA_ACCESS" in price["type"] or "PS_PLUS" in price["type"]) and "TRIAL" not in price["type"]):
                                 if price["type"] == "PREORDER":
                                     product_type = "Предзаказ"
-                                if price["price"]["discountedPrice"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not uah_price:
+                                if price["price"]["discountedPrice"] and price["type"] in _PURCHASE_CTA_TYPES and not uah_price:
                                     uah_price = parse_price_value(price["price"].get("discountedValue", 0))
-                                if price["price"]["basePrice"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not uah_old_price:
+                                if price["price"]["basePrice"] and price["type"] in _PURCHASE_CTA_TYPES and not uah_old_price:
                                     uah_old_price = parse_price_value(price["price"].get("basePriceValue", 0))
                                 if "PS_PLUS" in price["type"] and price["price"]["discountedPrice"] == "Входит в подписку":
                                     ps_plus = True
@@ -2233,9 +2236,9 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     ps_price_ua = parse_price_value(price["price"].get("discountedValue", 0))
                                 if "UPSELL_EA_ACCESS_DISCOUNT" == price["type"]:
                                     ea_price_ua = parse_price_value(price["price"].get("discountedValue", 0))
-                                if price["price"]["discountText"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"]:
+                                if price["price"]["discountText"] and price["type"] in _PURCHASE_CTA_TYPES:
                                     discount = price["price"]["discountText"]
-                                if price["price"]["endTime"] and price["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"]:
+                                if price["price"]["endTime"] and price["type"] in _PURCHASE_CTA_TYPES:
                                     discount_end = datetime.fromtimestamp(int(price["price"]["endTime"])//1000)
 
                     if tr_price_products and isinstance(tr_price_products, list) and len(tr_price_products) > 0:
@@ -2257,10 +2260,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                     if isinstance(tr_price_products, dict) and tr_price_products.get("id") == ID and tr_price_products.get("webctas"):
                         for trl in tr_price_products["webctas"]:
-                            if trl["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] or ("UPSELL" in trl["type"] and ("EA_ACCESS" in trl["type"] or "PS_PLUS" in trl["type"]) and "TRIAL" not in trl["type"]):
-                                if trl["price"]["discountedPrice"] and trl["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not trl_price:
+                            if trl["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in trl["type"] and ("EA_ACCESS" in trl["type"] or "PS_PLUS" in trl["type"]) and "TRIAL" not in trl["type"]):
+                                if trl["price"]["discountedPrice"] and trl["type"] in _PURCHASE_CTA_TYPES and not trl_price:
                                     trl_price = parse_price_value(trl["price"].get("discountedValue", 0))
-                                if trl["price"]["basePrice"] and trl["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not trl_old_price:
+                                if trl["price"]["basePrice"] and trl["type"] in _PURCHASE_CTA_TYPES and not trl_old_price:
                                     trl_old_price = parse_price_value(trl["price"].get("basePriceValue", 0))
                                 if "PS_PLUS" in trl["type"] and trl["price"]["discountedPrice"] == "Included":
                                     ps_plus = True
@@ -2296,10 +2299,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                         if matched_in and matched_in.get("webctas"):
                             for inp in matched_in["webctas"]:
-                                if inp["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] or ("UPSELL" in inp["type"] and ("EA_ACCESS" in inp["type"] or "PS_PLUS" in inp["type"]) and "TRIAL" not in inp["type"]):
-                                    if inp["price"]["discountedPrice"] and inp["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not inr_price:
+                                if inp["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in inp["type"] and ("EA_ACCESS" in inp["type"] or "PS_PLUS" in inp["type"]) and "TRIAL" not in inp["type"]):
+                                    if inp["price"]["discountedPrice"] and inp["type"] in _PURCHASE_CTA_TYPES and not inr_price:
                                         inr_price = parse_price_value(inp["price"].get("discountedValue", 0), divide_by_100=False)
-                                    if inp["price"]["basePrice"] and inp["type"] in ["ADD_TO_CART", "PREORDER", "BUY_NOW"] and not inr_old_price:
+                                    if inp["price"]["basePrice"] and inp["type"] in _PURCHASE_CTA_TYPES and not inr_old_price:
                                         inr_old_price = parse_price_value(inp["price"].get("basePriceValue", 0), divide_by_100=False)
                                     if "PS_PLUS" in inp["type"] and inp["price"]["discountedPrice"] == "Included":
                                         ps_plus = True
@@ -2812,7 +2815,7 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
                             product_type = "Предзаказ"
 
                         # Основная цена
-                        if cta_type in ["ADD_TO_CART", "PREORDER", "BUY_NOW"]:
+                        if cta_type in _PURCHASE_CTA_TYPES:
                             if price_data.get("discountedPrice") and not trl_price:
                                 trl_price = price_data.get("discountedValue", 0) / 100
                             if price_data.get("basePrice") and not trl_old_price:
@@ -3205,7 +3208,7 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
                         if cta_type == "PREORDER":
                             product_type = "Предзаказ"
 
-                        if cta_type in ["ADD_TO_CART", "PREORDER", "BUY_NOW"]:
+                        if cta_type in _PURCHASE_CTA_TYPES:
                             if price_data.get("discountedPrice") and not inr_price:
                                 inr_price = parse_price_value(price_data.get("discountedValue", 0), divide_by_100=False)
                             if price_data.get("basePrice") and not inr_old_price:
