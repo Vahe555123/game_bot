@@ -795,10 +795,20 @@ export function ProductPage() {
   const psPlusSavingsPercent = product ? getProductPsPlusSavingsPercent(product) : null
   const playersLabel = useMemo(() => (product ? resolvePlayersLabel(product) : null), [product])
   const infoItems = useMemo(() => (product ? buildInfoItems(product) : []), [product])
-  const availableCheckoutRegions = useMemo(() => regionalPrices.map((price) => price.region), [regionalPrices])
+  const checkoutPrices = useMemo(
+    () =>
+      regionalPrices.filter(
+        (price) =>
+          price.available &&
+          ((typeof price.priceRub === 'number' && price.priceRub > 0) ||
+            (typeof price.priceLocal === 'number' && price.priceLocal > 0)),
+      ),
+    [regionalPrices],
+  )
+  const availableCheckoutRegions = useMemo(() => checkoutPrices.map((price) => price.region), [checkoutPrices])
   const selectedRegionPrice = useMemo(
-    () => regionalPrices.find((item) => item.region === checkoutRegion) ?? regionalPrices[0] ?? null,
-    [checkoutRegion, regionalPrices],
+    () => checkoutPrices.find((item) => item.region === checkoutRegion) ?? checkoutPrices[0] ?? null,
+    [checkoutRegion, checkoutPrices],
   )
   const canUsePsPlus = Boolean(selectedRegionPrice?.psPlusPriceRub && selectedRegionPrice.psPlusPriceRub > 0)
 
@@ -851,6 +861,9 @@ export function ProductPage() {
 
   async function openCheckout() {
     if (!product) {
+      return
+    }
+    if (!checkoutPrices.length) {
       return
     }
 
@@ -1088,7 +1101,12 @@ export function ProductPage() {
                 {formatDiscountEndDate(product.discountEnd) ? (
                   <p className="mt-5 text-sm text-amber-100/90">Скидка действует до {formatDiscountEndDate(product.discountEnd)}.</p>
                 ) : null}
-                <button type="button" className="btn-primary mt-6 w-full sm:w-auto" onClick={openCheckout}>
+                <button
+                  type="button"
+                  className="btn-primary mt-6 w-full sm:w-auto"
+                  onClick={openCheckout}
+                  disabled={!checkoutPrices.length}
+                >
                   <CreditCard size={16} />
                   {isAuthenticated ? 'Купить' : 'Войти и купить'}
                 </button>
@@ -1160,7 +1178,7 @@ export function ProductPage() {
           setCheckoutError(null)
           setCheckoutMissingFields([])
         }}
-        availablePrices={regionalPrices}
+        availablePrices={checkoutPrices}
         usePsPlus={usePsPlusCheckout}
         onUsePsPlusChange={(value) => {
           setUsePsPlusCheckout(value)

@@ -645,15 +645,21 @@ class ProductCRUD:
             old_price = getattr(regional_product, region_info['old_price_field'], None)
             ps_plus_price = getattr(regional_product, region_info['ps_plus_price_field'], None)
 
-            if price is None or price <= 0:
-                continue
+            has_numeric_price = bool(price and price > 0)
+            if has_numeric_price:
+                rate = CurrencyRate.get_rate_for_price(db, region_info['code'], price)
+                price_rub = round(price * rate, 2)
+                old_price_rub = round(old_price * rate, 2) if old_price and old_price > 0 else None
+                ps_plus_price_rub = round(ps_plus_price * rate, 2) if ps_plus_price and ps_plus_price > 0 else None
+            else:
+                price = None
+                old_price = None
+                ps_plus_price = None
+                price_rub = None
+                old_price_rub = None
+                ps_plus_price_rub = None
 
-            rate = CurrencyRate.get_rate_for_price(db, region_info['code'], price)
-            price_rub = round(price * rate, 2)
-            old_price_rub = round(old_price * rate, 2) if old_price and old_price > 0 else None
-            ps_plus_price_rub = round(ps_plus_price * rate, 2) if ps_plus_price and ps_plus_price > 0 else None
-
-            has_discount = bool(old_price and old_price > price)
+            has_discount = bool(has_numeric_price and old_price and old_price > price)
             discount_percent = int(((old_price - price) / old_price) * 100) if has_discount else None
 
             ps_plus_discount_percent = None
@@ -673,6 +679,9 @@ class ProductCRUD:
                     'flag': region_info['flag'],
                     'name': region_info['name'],
                     'currency_code': region_info['code'],
+                    # Регион считается доступным, если запись есть в БД.
+                    # Цена может отсутствовать временно (ошибка/особый кейс PS Store),
+                    # но это не должно превращаться в "Недоступно".
                     'available': True,
                     'price_local': price,
                     'old_price_local': old_price if old_price and old_price > 0 else None,
@@ -688,7 +697,7 @@ class ProductCRUD:
                 }
             )
 
-            if min_price_rub is None or price_rub < min_price_rub:
+            if price_rub is not None and (min_price_rub is None or price_rub < min_price_rub):
                 min_price_rub = price_rub
                 min_old_price_rub = old_price_rub
 
