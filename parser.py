@@ -5630,4 +5630,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n  Парсинг прерван пользователем")
     finally:
-        print("\n До свидания!!")
+        print("\n До свидания!")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sqlite3
 import time
 import re
 import shutil
@@ -74,6 +75,30 @@ def _sqlite_database_path(database_url: str) -> Path | None:
 def _sqlite_url_for_path(database_url: str, path: Path) -> str:
     url = make_url(database_url)
     return str(url.set(database=path.resolve(strict=False).as_posix()))
+
+
+def _sqlite_quick_check(path: Path) -> bool:
+    """
+    Return True if the SQLite file is usable: missing path is ok when the directory is writable
+    (new database will be created); existing files must pass PRAGMA quick_check.
+    """
+    try:
+        if not path.exists():
+            return _path_is_writable(path)
+        if not path.is_file():
+            return False
+        if path.stat().st_size == 0:
+            return _path_is_writable(path)
+        uri = f"file:{path.resolve(strict=False).as_posix()}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=5)
+        try:
+            row = conn.execute("PRAGMA quick_check").fetchone()
+            return bool(row) and row[0] == "ok"
+        finally:
+            conn.close()
+    except (sqlite3.DatabaseError, OSError, TypeError, ValueError) as exc:
+        logger.warning("SQLite quick_check failed for %s: %s", path, exc)
+        return False
 
 
 def _path_is_writable(path: Path) -> bool:
@@ -284,6 +309,12 @@ def _select_sqlite_database_url(database_url: str, excluded_urls: set[str] | Non
             _copy_sqlite_sidecars(source_path, candidate)
 
         if _path_is_writable(candidate):
+            if not _sqlite_quick_check(candidate):
+                logger.warning(
+                    "SQLite database at %s is not usable (corrupt or incomplete); trying next candidate",
+                    candidate,
+                )
+                continue
             if candidate != source_path:
                 logger.warning(
                     "SQLite database path %s is not writable, using fallback %s",
@@ -294,14 +325,19 @@ def _select_sqlite_database_url(database_url: str, excluded_urls: set[str] | Non
 
     last_candidate = candidates[-1]
     last_candidate_url = _sqlite_url_for_path(database_url, last_candidate)
-    if last_candidate_url not in excluded_urls:
+    if last_candidate_url not in excluded_urls and _sqlite_quick_check(last_candidate):
         logger.warning(
             "No confirmed writable SQLite path found, using best-effort fallback %s",
             last_candidate,
         )
         return last_candidate_url
 
-    return database_url
+    raise RuntimeError(
+        "Не найден рабочий файл SQLite среди кандидатов (возможно, products.db повреждён). "
+        "Восстановите products.db из бэкапа, удалите битые копии в /tmp/game_bot2/, "
+        "либо выдайте права на запись в каталог приложения или SQLITE_DATA_DIR. "
+        f"Кандидаты: {[str(p) for p in candidates]}"
+    )
 
 
 RAW_DATABASE_URL = settings.DATABASE_URL
