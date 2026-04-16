@@ -13,6 +13,9 @@ module.exports = {
         PYTHONIOENCODING: "utf-8",
         NODE_ENV: "production",
         APP_ENV_FILE: "/home/deploy/apps/game_bot2/.env",
+        // deploy.yml может выставить через export перед pm2; иначе .env на сервере (см. .env.example)
+        SQLITE_SKIP_FTS_REBUILD_ON_STARTUP:
+          process.env.SQLITE_SKIP_FTS_REBUILD_ON_STARTUP || "false",
       },
     },
   ],

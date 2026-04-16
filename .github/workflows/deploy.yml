@@ -82,6 +82,13 @@ jobs:
             git fetch origin main
             git checkout main
             git pull --ff-only origin main
+
+            # Опционально: в GitHub → Settings → Secrets and variables → Actions → Variables
+            # задайте SQLITE_SKIP_FTS_REBUILD_ON_STARTUP = true — чтобы первый старт после деплоя
+            # не ждал пересборку FTS (поиск может быть неполным до следующего рестарта без флага).
+            # Оставьте переменную пустой — обычная пересборка индекса (после фикса в connection.py она быстрая).
+            export SQLITE_SKIP_FTS_REBUILD_ON_STARTUP="${{ vars.SQLITE_SKIP_FTS_REBUILD_ON_STARTUP }}"
+
             SKIP_GIT_UPDATE=true SKIP_FRONTEND_BUILD=true bash scripts/deploy_server.sh
 
       - name: Upload frontend dist
