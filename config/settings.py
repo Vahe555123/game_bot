@@ -14,6 +14,11 @@ class Settings:
 
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./products.db")
 
+    # If true, skip syncing the FTS5 table on startup (instant boot; catalog search may be stale until rebuild).
+    SQLITE_SKIP_FTS_REBUILD_ON_STARTUP: bool = os.getenv(
+        "SQLITE_SKIP_FTS_REBUILD_ON_STARTUP", "false"
+    ).lower() in ("1", "true", "yes")
+
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")
     WEBAPP_URL: str = os.getenv("WEBAPP_URL", "")

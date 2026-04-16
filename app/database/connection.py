@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import re
 import shutil
 import tempfile
@@ -134,15 +135,15 @@ def _product_search_text_sql(prefix: str) -> str:
     return "normalize_search(" + " || ' ' || ".join(parts) + ")"
 
 
-def _ensure_product_search_index(connection) -> None:
-    connection.execute(
-        text(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS product_search_fts "
-            "USING fts5(product_id UNINDEXED, region UNINDEXED, search_text, "
-            "tokenize='unicode61 remove_diacritics 2', prefix='2 3 4 5 6 7 8')"
-        )
+def _fts5_virtual_table_ddl() -> str:
+    return (
+        "CREATE VIRTUAL TABLE product_search_fts "
+        "USING fts5(product_id UNINDEXED, region UNINDEXED, search_text, "
+        "tokenize='unicode61 remove_diacritics 2', prefix='2 3 4 5 6 7 8')"
     )
 
+
+def _create_product_search_triggers(connection) -> None:
     search_text_new = _product_search_text_sql("new")
     connection.execute(text("DROP TRIGGER IF EXISTS products_ai"))
     connection.execute(text("DROP TRIGGER IF EXISTS products_ad"))
@@ -159,7 +160,7 @@ def _ensure_product_search_index(connection) -> None:
     )
     connection.execute(
         text(
-            f"""
+            """
             CREATE TRIGGER IF NOT EXISTS products_ad AFTER DELETE ON products BEGIN
                 DELETE FROM product_search_fts WHERE rowid = old.rowid;
             END;
@@ -178,30 +179,65 @@ def _ensure_product_search_index(connection) -> None:
         )
     )
 
+
+def _ensure_product_search_index(connection) -> None:
+    connection.execute(
+        text(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS product_search_fts "
+            "USING fts5(product_id UNINDEXED, region UNINDEXED, search_text, "
+            "tokenize='unicode61 remove_diacritics 2', prefix='2 3 4 5 6 7 8')"
+        )
+    )
+    _create_product_search_triggers(connection)
+
+    if settings.SQLITE_SKIP_FTS_REBUILD_ON_STARTUP:
+        logger.warning(
+            "SQLITE_SKIP_FTS_REBUILD_ON_STARTUP is enabled: skipping FTS index sync on startup "
+            "(search may be incomplete until the next full init without this flag)."
+        )
+        return
+
     current_index_version = connection.execute(text("PRAGMA user_version")).scalar() or 0
     products_count = connection.execute(text("SELECT COUNT(*) FROM products")).scalar() or 0
     search_index_count = connection.execute(text(f"SELECT COUNT(*) FROM {PRODUCT_SEARCH_FTS_TABLE}")).scalar() or 0
-    if current_index_version != PRODUCT_SEARCH_INDEX_VERSION or products_count != search_index_count:
-        logger.info(
-            "Rebuilding product search index: products=%s index=%s",
-            products_count,
-            search_index_count,
+    if current_index_version == PRODUCT_SEARCH_INDEX_VERSION and products_count == search_index_count:
+        return
+
+    logger.info(
+        "Rebuilding product search index: products=%s index=%s (dropping FTS table for a fast rebuild)",
+        products_count,
+        search_index_count,
+    )
+    started = time.monotonic()
+    # DELETE on a multi-million-row FTS table can take hours on SQLite; DROP + recreate is far faster.
+    connection.execute(text("DROP TRIGGER IF EXISTS products_ai"))
+    connection.execute(text("DROP TRIGGER IF EXISTS products_ad"))
+    connection.execute(text("DROP TRIGGER IF EXISTS products_au"))
+    connection.execute(text(f"DROP TABLE IF EXISTS {PRODUCT_SEARCH_FTS_TABLE}"))
+    connection.execute(text(_fts5_virtual_table_ddl()))
+    _create_product_search_triggers(connection)
+    connection.execute(
+        text(
+            f"""
+            INSERT INTO {PRODUCT_SEARCH_FTS_TABLE}(rowid, product_id, region, search_text)
+            SELECT
+                rowid,
+                id,
+                region,
+                {_product_search_text_sql("products")}
+            FROM products
+            """
         )
-        connection.execute(text(f"DELETE FROM {PRODUCT_SEARCH_FTS_TABLE}"))
-        connection.execute(
-            text(
-                f"""
-                INSERT INTO {PRODUCT_SEARCH_FTS_TABLE}(rowid, product_id, region, search_text)
-                SELECT
-                    rowid,
-                    id,
-                    region,
-                    {_product_search_text_sql("products")}
-                FROM products
-                """
-            )
-        )
-        connection.exec_driver_sql(f"PRAGMA user_version = {PRODUCT_SEARCH_INDEX_VERSION}")
+    )
+    connection.exec_driver_sql(f"PRAGMA user_version = {PRODUCT_SEARCH_INDEX_VERSION}")
+    new_count = connection.execute(text(f"SELECT COUNT(*) FROM {PRODUCT_SEARCH_FTS_TABLE}")).scalar() or 0
+    elapsed = time.monotonic() - started
+    logger.info(
+        "Product search index rebuilt in %.1fs (rows=%s, user_version=%s)",
+        elapsed,
+        new_count,
+        PRODUCT_SEARCH_INDEX_VERSION,
+    )
 
 
 def _sqlite_fallback_candidates(database_url: str) -> list[Path]:
