@@ -13,7 +13,7 @@ from pathlib import Path
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DatabaseError, OperationalError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from config.settings import settings
@@ -281,6 +281,7 @@ def _sqlite_fallback_candidates(database_url: str) -> list[Path]:
         candidates.append(Path(resolved))
 
     add_candidate(source_path)
+    add_candidate(source_path.with_name("products.db"))
 
     fallback_root = Path(os.getenv("SQLITE_DATA_DIR", str(Path.home() / "data" / "game_bot2"))).expanduser()
     add_candidate(fallback_root / source_path.name)
@@ -289,7 +290,12 @@ def _sqlite_fallback_candidates(database_url: str) -> list[Path]:
     return candidates
 
 
-def _select_sqlite_database_url(database_url: str, excluded_urls: set[str] | None = None) -> str:
+def _select_sqlite_database_url(
+    database_url: str,
+    excluded_urls: set[str] | None = None,
+    *,
+    copy_source: bool = True,
+) -> str:
     if not _is_sqlite_url(database_url):
         return database_url
 
@@ -299,17 +305,24 @@ def _select_sqlite_database_url(database_url: str, excluded_urls: set[str] | Non
         return database_url
 
     source_path = _sqlite_database_path(database_url)
+    source_can_be_copied = copy_source and source_path is not None and source_path.exists()
 
     for candidate in candidates:
         candidate_url = _sqlite_url_for_path(database_url, candidate)
         if candidate_url in excluded_urls:
             continue
 
-        if source_path is not None and candidate != source_path and source_path.exists() and not candidate.exists():
+        if (
+            source_can_be_copied
+            and candidate != source_path
+            and not candidate.exists()
+        ):
             _copy_sqlite_sidecars(source_path, candidate)
 
         if _path_is_writable(candidate):
             if not _sqlite_quick_check(candidate):
+                if source_path is not None and candidate == source_path:
+                    source_can_be_copied = False
                 logger.warning(
                     "SQLite database at %s is not usable (corrupt or incomplete); trying next candidate",
                     candidate,
@@ -404,6 +417,22 @@ def _sqlite_table_exists(connection, table_name: str) -> bool:
         {"table_name": table_name},
     ).first()
     return result is not None
+
+
+def _quote_sqlite_identifier(value: str) -> str:
+    return f'"{str(value).replace(chr(34), chr(34) + chr(34))}"'
+
+
+def _drop_indexes_for_table(connection, table_name: str) -> None:
+    rows = connection.execute(
+        text(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = :table_name AND sql IS NOT NULL"
+        ),
+        {"table_name": table_name},
+    ).all()
+    for row in rows:
+        connection.execute(text(f"DROP INDEX IF EXISTS {_quote_sqlite_identifier(row[0])}"))
 
 
 def _sqlite_table_columns(connection, table_name: str) -> dict[str, dict]:
@@ -503,6 +532,7 @@ def _migrate_users_table(connection) -> None:
         return
 
     connection.execute(text('ALTER TABLE "users" RENAME TO "users_legacy"'))
+    _drop_indexes_for_table(connection, "users_legacy")
     User.__table__.create(bind=connection, checkfirst=True)
 
     legacy_columns = _sqlite_table_columns(connection, "users_legacy")
@@ -727,20 +757,25 @@ def create_tables():
     Base.metadata.create_all(bind=engine)
 
     if _is_sqlite_url(RAW_DATABASE_URL):
-        with engine.begin() as connection:
-            _migrate_currency_rates_table(connection)
-            _migrate_users_table(connection)
-            _migrate_user_favorite_products_table(connection)
-            _seed_default_localizations(connection)
-            for statement in SQLITE_INDEX_STATEMENTS:
-                connection.execute(text(statement))
-            _ensure_product_search_index(connection)
-            from app.database.product_cache_importer import sync_products_from_cache
+        with engine.connect() as connection:
+            connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+            connection.commit()
+            try:
+                with connection.begin():
+                    _migrate_currency_rates_table(connection)
+                    _migrate_users_table(connection)
+                    _migrate_user_favorite_products_table(connection)
+                    _seed_default_localizations(connection)
+                    for statement in SQLITE_INDEX_STATEMENTS:
+                        connection.execute(text(statement))
+                    from app.database.product_cache_importer import sync_products_from_cache
 
-            product_import_result = sync_products_from_cache(connection)
-            if product_import_result.changed:
-                _ensure_product_search_index(connection)
-            connection.execute(text("PRAGMA optimize"))
+                    sync_products_from_cache(connection)
+                    _ensure_product_search_index(connection)
+                    connection.execute(text("PRAGMA optimize"))
+            finally:
+                connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+                connection.commit()
 
     print("Tables initialized")
 
@@ -749,6 +784,7 @@ def init_database():
     global DATABASE_URL, SessionLocal, engine
 
     readonly_error: OperationalError | None = None
+    malformed_error: DatabaseError | None = None
     try:
         create_tables()
         return
@@ -756,14 +792,34 @@ def init_database():
         if "readonly database" not in str(exc).lower() or not _is_sqlite_url(RAW_DATABASE_URL):
             raise
         readonly_error = exc
+    except DatabaseError as exc:
+        if "database disk image is malformed" not in str(exc).lower() or not _is_sqlite_url(RAW_DATABASE_URL):
+            raise
+        malformed_error = exc
 
-    fallback_url = _select_sqlite_database_url(RAW_DATABASE_URL, excluded_urls={DATABASE_URL})
+    if malformed_error is None:
+        fallback_url = _select_sqlite_database_url(RAW_DATABASE_URL, excluded_urls={DATABASE_URL})
+    else:
+        fallback_url = _select_sqlite_database_url(
+            RAW_DATABASE_URL,
+            excluded_urls={DATABASE_URL},
+            copy_source=False,
+        )
     if fallback_url == DATABASE_URL:
         if readonly_error is not None:
             raise readonly_error
+        if malformed_error is not None:
+            raise malformed_error
         raise RuntimeError("SQLite database is not writable and no fallback path is available")
 
-    logger.warning("Rebuilding SQLite engine with fallback database URL: %s", fallback_url)
+    if malformed_error is not None:
+        logger.warning(
+            "SQLite database %s is malformed; switching to fallback database URL: %s",
+            DATABASE_URL,
+            fallback_url,
+        )
+    else:
+        logger.warning("Rebuilding SQLite engine with fallback database URL: %s", fallback_url)
     engine.dispose()
     DATABASE_URL = fallback_url
     engine = _build_engine(DATABASE_URL)

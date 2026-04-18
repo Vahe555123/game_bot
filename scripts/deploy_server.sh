@@ -36,6 +36,8 @@ else
 fi
 
 echo "==> Restarting application with PM2"
+pm2 stop game_bot || true
+pm2 delete game_bot || true
 pm2 startOrReload ecosystem.config.cjs --only game_bot2 --update-env
 pm2 save
 pm2 show game_bot2

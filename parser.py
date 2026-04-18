@@ -4204,88 +4204,94 @@ async def process_specific_products_to_db(parsed_products: list, promo: list, st
 
 def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[str], Dict]:
     """
-    Определяет, какие продукты из products.pkl еще не спарсены в result.pkl
+    Определяет, какие продукты из products.pkl еще не спарсены в result.pkl.
 
-    Args:
-        products: Список всех product URLs из products.pkl
-        result: Список спарсенных продуктов из result.pkl
-
-    Returns:
-        Tuple[List[str], Dict]: (список недостающих URLs, статистика)
+    Исправления:
+    - в parse()/parse_tr()/parse_in() поля цен называются price_uah, price_try, price_inr
+      (раньше здесь по ошибке читались несуществующие uah_price / trl_price → статистика
+      всегда показывала 0 товаров с ценами).
+    - добавлен учёт локали en-in (Индия).
+    - матчинг по полному ID + fallback на tail; товар считается спарсенным, если
+      хотя бы одна региональная запись с этим ID или tail есть в result.
     """
     print("\n" + "=" * 80)
     print(" АНАЛИЗ НЕДОСТАЮЩИХ ТОВАРОВ")
     print("=" * 80)
 
-    # Извлекаем ID продуктов из result.pkl
-    parsed_ids = set()
-    parsed_by_locale = {}
+    parsed_full_ids: Set[str] = set()
+    parsed_tails: Set[str] = set()
 
     for item in result:
-        product_id = item.get("id", "")
-        if product_id:
-            # Извлекаем ID без локали (последняя часть URL)
-            clean_id = product_id.split("-")[-1] if "-" in product_id else product_id
-            parsed_ids.add(clean_id)
+        product_id = (item.get("id") or "").upper()
+        if not product_id:
+            continue
+        parsed_full_ids.add(product_id)
+        tail = product_id.split("-")[-1] if "-" in product_id else product_id
+        parsed_tails.add(tail)
 
-            # Отслеживаем по локалям
-            if product_id not in parsed_by_locale:
-                parsed_by_locale[product_id] = item
-
-    print(f" Уникальных спарсенных ID: {len(parsed_ids)}")
+    print(f" Уникальных ID в result.pkl: {len(parsed_full_ids)}")
     print(f" Всего записей в result.pkl: {len(result)}")
 
-    # Анализируем products.pkl
-    missing_products = []
+    missing_products: List[str] = []
     total_urls = len(products)
-
-    # Группируем по локалям
-    products_by_locale = {"ru-ua": [], "en-tr": []}
+    products_by_locale: Dict[str, List[str]] = {"ru-ua": [], "en-tr": [], "en-in": []}
 
     for url in products:
         url_parts = url.strip().rstrip('/').split('/')
         if len(url_parts) >= 5:
             locale = url_parts[3]
-            product_id = url_parts[-1]
-            clean_id = product_id.split("-")[-1] if "-" in product_id else product_id
+            product_id = url_parts[-1].upper()
+            tail = product_id.split("-")[-1] if "-" in product_id else product_id
 
             if locale in products_by_locale:
                 products_by_locale[locale].append(url)
 
-            # Проверяем, есть ли этот ID в спарсенных
-            if clean_id not in parsed_ids:
+            # Товар считаем спарсенным если есть совпадение по полному ID или tail
+            if product_id not in parsed_full_ids and tail not in parsed_tails:
                 missing_products.append(url)
 
     print(f"\n Анализ по локалям:")
-    print(f"  ru-ua URLs: {len(products_by_locale['ru-ua'])}")
-    print(f"  en-tr URLs: {len(products_by_locale['en-tr'])}")
+    for loc, urls in products_by_locale.items():
+        print(f"  {loc} URLs: {len(urls)}")
 
-    # Статистика по регионам цен
-    ua_prices = sum(1 for item in result if item.get("uah_price", 0) > 0)
-    tr_prices = sum(1 for item in result if item.get("trl_price", 0) > 0)
+    # Правильные имена полей цен (синхронизированы с parse/parse_tr/parse_in)
+    ua_prices = sum(1 for item in result if (item.get("price_uah") or 0) > 0)
+    tr_prices = sum(1 for item in result if (item.get("price_try") or 0) > 0)
+    in_prices = sum(1 for item in result if (item.get("price_inr") or 0) > 0)
 
-    print(f"\n Статистика цен в result.pkl:")
-    print(f"  UAH цены: {ua_prices} товаров")
-    print(f"  TRY цены: {tr_prices} товаров")
-    print(f"    Без UAH цены: {len(result) - ua_prices} товаров")
-    print(f"    Без TRY цены: {len(result) - tr_prices} товаров")
+    # Записи по регионам
+    ua_records = sum(1 for item in result if (item.get("region") or "").upper() == "UA")
+    tr_records = sum(1 for item in result if (item.get("region") or "").upper() == "TR")
+    in_records = sum(1 for item in result if (item.get("region") or "").upper() == "IN")
+
+    print(f"\n Записей в result.pkl по регионам:")
+    print(f"  UA: {ua_records} (с UAH ценой: {ua_prices})")
+    print(f"  TR: {tr_records} (с TRY ценой: {tr_prices})")
+    print(f"  IN: {in_records} (с INR ценой: {in_prices})")
 
     stats = {
         "total_urls": total_urls,
-        "parsed_count": len(parsed_ids),
+        "parsed_count": len(parsed_full_ids),
         "missing_count": len(missing_products),
         "ua_urls": len(products_by_locale["ru-ua"]),
         "tr_urls": len(products_by_locale["en-tr"]),
+        "in_urls": len(products_by_locale["en-in"]),
+        "ua_records": ua_records,
+        "tr_records": tr_records,
+        "in_records": in_records,
         "ua_prices": ua_prices,
         "tr_prices": tr_prices,
-        "no_ua_prices": len(result) - ua_prices,
-        "no_tr_prices": len(result) - tr_prices
+        "in_prices": in_prices,
+        "no_ua_prices": max(ua_records - ua_prices, 0),
+        "no_tr_prices": max(tr_records - tr_prices, 0),
+        "no_in_prices": max(in_records - in_prices, 0),
     }
 
     print(f"\n ИТОГО:")
-    print(f"   Спарсено уникальных товаров: {len(parsed_ids)}")
+    print(f"   Спарсено уникальных ID: {len(parsed_full_ids)}")
     print(f"   Недостающих URLs: {len(missing_products)}")
-    print(f"   Прогресс: {len(parsed_ids) / total_urls * 100:.1f}%")
+    if total_urls:
+        print(f"   Прогресс: {(total_urls - len(missing_products)) / total_urls * 100:.1f}%")
     print("=" * 80)
 
     return missing_products, stats
@@ -4293,71 +4299,92 @@ def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[
 
 def get_products_without_prices(products: List[str], result: List[Dict]) -> Tuple[List[str], List[str], Dict]:
     """
-    Определяет товары без UAH или TRY цен
+    Определяет товары без UAH/TRY/INR цен.
 
-    Args:
-        products: Список всех product URLs из products.pkl (только ru-ua)
-        result: Список спарсенных продуктов из result.pkl
+    Исправления по сравнению с прошлой версией:
+    - читаем правильные поля: price_uah / price_try / price_inr
+      (раньше читались uah_price / trl_price, которые никогда не писались).
+    - добавлен анализ INR; статистика обогащена по всем трём регионам.
+    - «товар без UAH цены» считается только если у товара есть UA-запись, но в ней нет цены
+      и нет подтверждения PS Plus / бесплатности — по аналогии для TR и IN.
+      Это убирает ложные срабатывания (UA-only товар не считается broken в TR автоматически).
 
     Returns:
-        Tuple[List[str], List[str], Dict]: (URLs без UAH, URLs без TRY, статистика)
+        Tuple[List[str], List[str], Dict]: (URLs без UAH, URLs без TRY, stats)
 
-    Примечание:
-        Для TRY цен возвращаются ru-ua URLs, т.к. parse() сам создаст en-tr версию
+    Для обратной совместимости stats содержит ключ urls_without_inr со списком INR URLs
+    (в той же схеме - ru-ua URL, parse() сам создаст en-in версию).
     """
     print("\n" + "=" * 80)
     print(" АНАЛИЗ ТОВАРОВ БЕЗ ЦЕН")
     print("=" * 80)
 
-    # Создаем словарь ID -> ru-ua URL из products.pkl
-    # В products.pkl хранятся только ru-ua URLs
-    product_urls_by_id = {}
+    # ru-ua URL по tail и по полному ID
+    url_by_full_id: Dict[str, str] = {}
+    url_by_tail: Dict[str, str] = {}
     for url in products:
-        url_parts = url.strip().rstrip('/').split('/')
-        if len(url_parts) >= 5:
-            product_id = url_parts[-1].upper()
-            # Сохраняем только ru-ua URL (он будет использован для обоих регионов)
-            product_urls_by_id[product_id] = url
+        parts = url.strip().rstrip('/').split('/')
+        if len(parts) >= 5:
+            pid = parts[-1].upper()
+            url_by_full_id[pid] = url
+            tail = pid.split("-")[-1] if "-" in pid else pid
+            url_by_tail.setdefault(tail, url)
 
-    # Находим товары без цен
-    items_without_uah = []
-    items_without_try = []
-    urls_without_uah = []
-    urls_without_try = []
+    def _lookup_url(item: Dict) -> Optional[str]:
+        pid = (item.get("id") or "").upper()
+        if not pid:
+            return None
+        if pid in url_by_full_id:
+            return url_by_full_id[pid]
+        tail = pid.split("-")[-1] if "-" in pid else pid
+        return url_by_tail.get(tail)
+
+    urls_without_uah: List[str] = []
+    urls_without_try: List[str] = []
+    urls_without_inr: List[str] = []
+    items_without_uah = 0
+    items_without_try = 0
+    items_without_inr = 0
 
     for item in result:
-        product_id = item.get("id", "")
-        if not product_id:
-            continue
+        region = (item.get("region") or "").upper()
+        has_ps_plus = bool(item.get("ps_plus_collection"))
+        # Проблемный товар: есть запись региона, но нет ни цены, ни подтверждения PS Plus
+        if region == "UA":
+            has_price = (item.get("price_uah") or 0) > 0
+            if not has_price and not has_ps_plus:
+                items_without_uah += 1
+                url = _lookup_url(item)
+                if url:
+                    urls_without_uah.append(url)
+        elif region == "TR":
+            has_price = (item.get("price_try") or 0) > 0
+            if not has_price and not has_ps_plus:
+                items_without_try += 1
+                url = _lookup_url(item)
+                if url:
+                    urls_without_try.append(url)
+        elif region == "IN":
+            has_price = (item.get("price_inr") or 0) > 0
+            if not has_price and not has_ps_plus:
+                items_without_inr += 1
+                url = _lookup_url(item)
+                if url:
+                    urls_without_inr.append(url)
 
-        has_uah = item.get("uah_price", 0) > 0
-        has_try = item.get("trl_price", 0) > 0
-
-        if not has_uah:
-            items_without_uah.append(item)
-            # Ищем ru-ua URL для этого товара
-            if product_id in product_urls_by_id:
-                urls_without_uah.append(product_urls_by_id[product_id])
-
-        if not has_try:
-            items_without_try.append(item)
-            # Для TRY используем тот же ru-ua URL
-            # Функция parse() сама создаст en-tr версию (строки 877-879)
-            if product_id in product_urls_by_id:
-                urls_without_try.append(product_urls_by_id[product_id])
-
-    print(f" Товаров без UAH цены: {len(items_without_uah)}")
-    print(f"   Найдено ru-ua URLs для перепарсинга: {len(urls_without_uah)}")
-
-    print(f"\n Товаров без TRY цены: {len(items_without_try)}")
-    print(f"   Найдено ru-ua URLs для перепарсинга: {len(urls_without_try)}")
-    print(f"     parse() автоматически создаст en-tr версии для получения TRY цен")
+    print(f" Записей без UAH цены: {items_without_uah} (URLs для перепарсинга: {len(urls_without_uah)})")
+    print(f" Записей без TRY цены: {items_without_try} (URLs для перепарсинга: {len(urls_without_try)})")
+    print(f" Записей без INR цены: {items_without_inr} (URLs для перепарсинга: {len(urls_without_inr)})")
+    print(f"   parse() использует ru-ua URL и создаст en-tr / en-in версии автоматически")
 
     stats = {
-        "items_without_uah": len(items_without_uah),
-        "items_without_try": len(items_without_try),
+        "items_without_uah": items_without_uah,
+        "items_without_try": items_without_try,
+        "items_without_inr": items_without_inr,
         "urls_without_uah": len(urls_without_uah),
-        "urls_without_try": len(urls_without_try)
+        "urls_without_try": len(urls_without_try),
+        "urls_without_inr": len(urls_without_inr),
+        "urls_list_without_inr": urls_without_inr,  # доступно для будущих режимов
     }
 
     print("=" * 80)
@@ -4625,9 +4652,28 @@ async def main():
     print("2. Загрузка result.pkl в БД (пропустить парсинг)")
     print("3. Допарсинг недостающих товаров (продолжить парсинг)")
     print("4. Ручной парсинг товара (UA + TR регионы, обновление result.pkl)")
+    print("5. Исправление ошибок продуктов (точечный repair проблемных товаров)")
     print("=" * 80)
 
-    mode = input("\nВведите номер режима (1, 2, 3 или 4): ").strip()
+    mode = input("\nВведите номер режима (1-5): ").strip()
+
+    if mode == "5":
+        # Режим 5 делегируется в модуль repair (см. repair.py)
+        import repair
+        promo_data = None
+        if os.path.exists("promo.pkl"):
+            try:
+                with open("promo.pkl", "rb") as f:
+                    raw = pickle.load(f)
+                if isinstance(raw, dict):
+                    promo_data = raw
+                else:
+                    all_set = set(raw) if raw else set()
+                    promo_data = {"Extra": all_set, "Deluxe": set(), "All": all_set}
+            except Exception as exc:
+                print(f"[!] promo.pkl не удалось прочитать: {exc}")
+        await repair.run_mode5(promo_data)
+        return
 
     if mode == "2":
         # Режим загрузки из result.pkl
@@ -5274,7 +5320,7 @@ async def main():
         return
 
     elif mode != "1":
-        print("\n Неверный выбор! Введите 1, 2, 3 или 4")
+        print("\n Неверный выбор! Введите 1, 2, 3, 4 или 5")
         return
 
     # Режим 1 - полный парсинг или ограниченный (для тестов)

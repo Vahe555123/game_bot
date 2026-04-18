@@ -185,6 +185,30 @@ def sync_products_from_cache(connection) -> ProductCacheImportResult:
         logger.warning("Product cache %s contains no importable products; existing products were kept", result_path)
         return ProductCacheImportResult(changed=False, reason="empty_prepared", source_path=result_path)
 
+    min_replace_ratio = max(0, settings.PRODUCTS_REBUILD_MIN_REPLACE_RATIO)
+    if (
+        settings.PRODUCTS_REBUILD_DELETE_STALE
+        and not settings.PRODUCTS_REBUILD_ALLOW_SHRINK
+        and products_count > 0
+        and len(rows) < products_count * min_replace_ratio
+    ):
+        logger.warning(
+            "Product cache %s looks like a partial/test parse: prepared=%s existing=%s min_ratio=%.2f. "
+            "Startup product rebuild skipped to keep the real products table. "
+            "Set PRODUCTS_REBUILD_ALLOW_SHRINK=true only when you intentionally want to replace it.",
+            result_path,
+            len(rows),
+            products_count,
+            min_replace_ratio,
+        )
+        return ProductCacheImportResult(
+            changed=False,
+            reason="source_smaller_than_existing",
+            source_path=result_path,
+            source_count=len(result),
+            prepared_count=len(rows),
+        )
+
     logger.info(
         "Rebuilding products from %s: source=%s prepared=%s existing=%s",
         result_path,

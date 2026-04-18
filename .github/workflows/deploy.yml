@@ -68,6 +68,8 @@ jobs:
             set -e
             cd /home/deploy/apps/game_bot2
             mkdir -p /home/deploy/backups/game_bot2
+            pm2 stop game_bot || true
+            pm2 delete game_bot || true
             pm2 stop game_bot2 || true
 
             if [ -n "$(git status --porcelain -- products.db)" ]; then

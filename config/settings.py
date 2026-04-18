@@ -33,6 +33,12 @@ class Settings:
         "true",
         "yes",
     )
+    PRODUCTS_REBUILD_ALLOW_SHRINK: bool = os.getenv("PRODUCTS_REBUILD_ALLOW_SHRINK", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    PRODUCTS_REBUILD_MIN_REPLACE_RATIO: float = float(os.getenv("PRODUCTS_REBUILD_MIN_REPLACE_RATIO", "0.5"))
     PRODUCTS_RESULT_CACHE_PATH: str = os.getenv("PRODUCTS_RESULT_CACHE_PATH", "result.pkl")
     PRODUCTS_PROMO_CACHE_PATH: str = os.getenv("PRODUCTS_PROMO_CACHE_PATH", "promo.pkl")
     PRODUCTS_REBUILD_BATCH_SIZE: int = int(os.getenv("PRODUCTS_REBUILD_BATCH_SIZE", 1000))

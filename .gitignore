@@ -10,8 +10,9 @@ __pycache__/
 venv/
 
 # Local databases and parser artifacts
-products.db-shm
-products.db-wal
+*.db-shm
+*.db-wal
+*.db-journal
 *.sqlite3
 *.pkl
 !result.pkl
@@ -32,3 +33,6 @@ frontend/node_modules/
 
 parser_logs/
 parser_checkpoint.json
+db_backups/
+local_logs/
+.tmp_sqlite_tools/
