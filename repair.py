@@ -7,8 +7,8 @@
 
 Принципы:
   * Единственный writer для result.pkl — сам режим 5, через merge_repaired_records().
-  * Source of truth для ремонта — result.pkl. products.pkl и БД используются только
-    как дополнительный источник URL/ID.
+  * Source of truth для ремонта — products.pkl. result.pkl и БД используются как
+    текущее состояние/выход, куда мержатся исправленные записи.
   * «Подтверждённое отсутствие в регионе» сохраняется в region_status_registry.json,
     чтобы не перепроверять такие товары при каждом запуске режима 5.
 """
@@ -172,6 +172,7 @@ def _new_group(key: Tuple[str, str]) -> Dict[str, Any]:
         "records": {r: None for r in SUPPORTED_REGIONS},
         "indices": {r: None for r in SUPPORTED_REGIONS},
         "all_indices": [],
+        "source_urls_by_region": {r: [] for r in SUPPORTED_REGIONS},
         "ids": set(),
         "id_tails": set(),
         "names": set(),
@@ -179,6 +180,101 @@ def _new_group(key: Tuple[str, str]) -> Dict[str, Any]:
         "editions": set(),
         "search_names": set(),
     }
+
+
+def parse_product_url(url: str) -> Optional[Tuple[str, str, str]]:
+    """Return (region, product_id, normalized_url) for a PS Store product URL."""
+    if not url:
+        return None
+    normalized_url = str(url).strip().rstrip("/")
+    parts = normalized_url.split("/")
+    if len(parts) < 5:
+        return None
+    locale = parts[3].lower()
+    region = LOCALE_TO_REGION.get(locale)
+    product_id = parts[-1].strip().upper()
+    if not region or not product_id:
+        return None
+    return region, product_id, normalized_url
+
+
+def build_product_groups_from_urls(product_urls: List[str]) -> List[Dict[str, Any]]:
+    """Build repair groups from products.pkl URLs; result.pkl is not required for this."""
+    groups: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    tail_to_key: Dict[str, Tuple[str, str]] = {}
+
+    for idx, raw_url in enumerate(product_urls):
+        parsed = parse_product_url(raw_url)
+        if not parsed:
+            continue
+        region, product_id, url = parsed
+        tail = get_id_parts(product_id)["tail"]
+        key = ((tail or product_id).lower(), "")
+        target_key = tail_to_key.get(tail) if tail else None
+        if not target_key:
+            target_key = key
+        group = groups.setdefault(target_key, _new_group(target_key))
+
+        group["all_indices"].append(idx)
+        group["ids"].add(product_id)
+        if tail:
+            group["id_tails"].add(tail)
+            tail_to_key.setdefault(tail, target_key)
+        if url not in group["source_urls_by_region"][region]:
+            group["source_urls_by_region"][region].append(url)
+        if group["records"].get(region) is None:
+            group["records"][region] = {
+                "id": product_id,
+                "region": region,
+                "source_url": url,
+            }
+
+    return list(groups.values())
+
+
+def merge_existing_result_into_url_groups(groups: List[Dict[str, Any]], result: List[Dict]) -> None:
+    """Overlay existing result.pkl records onto products.pkl groups without changing the group source."""
+    by_tail: Dict[str, Dict[str, Any]] = {}
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for group in groups:
+        for tail in group["id_tails"]:
+            by_tail.setdefault(tail, group)
+        for product_id in group["ids"]:
+            by_id.setdefault(product_id, group)
+
+    for idx, record in enumerate(result):
+        product_id = (record.get("id") or "").upper()
+        if not product_id:
+            continue
+        tail = get_id_parts(product_id)["tail"]
+        group = by_id.get(product_id) or (by_tail.get(tail) if tail else None)
+        if group is None:
+            continue
+
+        region = (record.get("region") or "").upper()
+        if region not in SUPPORTED_REGIONS:
+            continue
+
+        existing_rec = group["records"].get(region)
+        if existing_rec is None or (not is_region_record_valid(existing_rec) and is_region_record_valid(record)):
+            group["records"][region] = record
+            group["indices"][region] = idx
+
+        group["all_indices"].append(idx)
+        group["ids"].add(product_id)
+        if tail:
+            group["id_tails"].add(tail)
+        if record.get("name"):
+            group["names"].add(record["name"])
+        if record.get("main_name"):
+            group["main_names"].add(record["main_name"])
+        if record.get("edition"):
+            group["editions"].add(record["edition"])
+        if record.get("search_names"):
+            for item in str(record["search_names"]).split(","):
+                item = item.strip()
+                if item:
+                    group["search_names"].add(item)
 
 
 # ---------------------------------------------------------------------------
@@ -406,13 +502,29 @@ async def find_region_candidates(
       outcome == "not_found" -> варианты перебраны, ни один не ответил productRetrieve.
     """
     locale = REGION_LOCALES[target_region]
-    source_ids = _pick_source_ids(group, target_region)
-    if not source_ids:
-        return [], "not_found"
-
     existing_urls: List[str] = []
     seen: Set[str] = set()
     net_failed = False
+
+    for url in group.get("source_urls_by_region", {}).get(target_region, []):
+        if url in seen:
+            continue
+        seen.add(url)
+        status = await _check_url_availability(session, url)
+        if status == "ok":
+            existing_urls.append(url)
+        elif status == "request_failed":
+            net_failed = True
+            break
+
+    if net_failed:
+        return existing_urls, "request_failed"
+    if existing_urls:
+        return existing_urls, "found"
+
+    source_ids = _pick_source_ids(group, target_region)
+    if not source_ids:
+        return [], "not_found"
 
     for src_id in source_ids:
         for url in build_region_url_variants(src_id, locale):
@@ -546,6 +658,8 @@ def merge_repaired_records(
             continue
         existing_rec = group["records"].get(region)
         existing_idx = group["indices"].get(region)
+        if existing_idx is None:
+            existing_rec = None
 
         if existing_rec is None:
             # Попробуем дополнительно через find_in_result, чтобы не создать дубль
@@ -565,7 +679,7 @@ def merge_repaired_records(
             # Обогащаем UA-данными, если они есть в группе (для TR/IN)
             if region in ("TR", "IN"):
                 ua_rec = group["records"].get("UA")
-                if ua_rec is not None:
+                if ua_rec is not None and ua_rec.get("name"):
                     new_rec = _parser.merge_region_data(ua_rec, new_rec, region)
             result.append(new_rec)
             group["records"][region] = new_rec
@@ -616,11 +730,16 @@ def merge_repaired_records(
 def _collect_urls_for_report(group: Dict[str, Any]) -> Dict[str, List[str]]:
     urls: Dict[str, List[str]] = {}
     for region in SUPPORTED_REGIONS:
+        region_urls = list(group.get("source_urls_by_region", {}).get(region, []))
         rec = group["records"].get(region)
+        if rec and rec.get("source_url") and rec["source_url"] not in region_urls:
+            region_urls.append(rec["source_url"])
         if rec and rec.get("id"):
-            urls[region] = [
-                f"https://store.playstation.com/{REGION_LOCALES[region]}/product/{rec['id']}"
-            ]
+            generated_url = f"https://store.playstation.com/{REGION_LOCALES[region]}/product/{rec['id']}"
+            if generated_url not in region_urls:
+                region_urls.append(generated_url)
+        if region_urls:
+            urls[region] = region_urls
     return urls
 
 
@@ -729,7 +848,7 @@ def summarize_groups(
     return stats
 
 
-async def run_mode5(promo: Optional[Dict] = None) -> None:
+async def _run_mode5_result_legacy(promo: Optional[Dict] = None) -> None:
     """Точка входа режима 5: «Исправление ошибок продуктов»."""
     import parser as _parser  # отложенный импорт
 
@@ -867,6 +986,161 @@ async def run_mode5(promo: Optional[Dict] = None) -> None:
             promo = _load_promo()
         start = datetime.now().timestamp()
         # используем существующий процесс
+        await _parser.process_and_save_to_db(result, promo, start, clear_db=False)
+
+
+async def run_mode5(promo: Optional[Dict] = None) -> None:
+    """Entry point for mode 5. Uses products.pkl as the source URL list."""
+    print("\n" + "=" * 80)
+    print(" РЕЖИМ 5: ИСПРАВЛЕНИЕ ОШИБОК ПРОДУКТОВ")
+    print("=" * 80)
+
+    if not os.path.exists("products.pkl"):
+        print(" ОШИБКА: products.pkl не найден. Сначала собери URL товаров в режиме 1.")
+        return
+
+    try:
+        with open("products.pkl", "rb") as f:
+            product_urls = pickle.load(f)
+    except Exception as exc:
+        print(f" ОШИБКА: products.pkl не удалось прочитать: {exc}")
+        return
+
+    if not isinstance(product_urls, list):
+        print(" ОШИБКА: products.pkl имеет неправильный формат. Ожидается список URL.")
+        return
+
+    result: List[Dict] = []
+    if os.path.exists("result.pkl"):
+        try:
+            with open("result.pkl", "rb") as f:
+                result = pickle.load(f)
+            if not isinstance(result, list):
+                print(" [!] result.pkl имеет неправильный формат. Будет создан новый список.")
+                result = []
+            else:
+                print(f" Загружено {len(result)} уже спарсенных записей из result.pkl")
+        except Exception as exc:
+            print(f" [!] result.pkl не удалось прочитать: {exc}. Будет создан новый список.")
+            result = []
+    else:
+        print(" result.pkl не найден - будет создан новый файл по итогам ремонта.")
+
+    print(f" Загружено {len(product_urls)} URL из products.pkl")
+
+    status_registry = load_status_registry()
+
+    groups = build_product_groups_from_urls(product_urls)
+    merge_existing_result_into_url_groups(groups, result)
+    pre_stats = summarize_groups(groups, status_registry)
+
+    print("\nПРЕДАНАЛИЗ:")
+    print(f"  URL в products.pkl:              {len(product_urls)}")
+    print(f"  Записей в result.pkl:            {len(result)}")
+    print(f"  Всего записей в анализе:         {pre_stats['records_total']}")
+    print(f"  Групп товаров:                   {pre_stats['groups_total']}")
+    print(f"  Уже валидных товаров:            {pre_stats['already_valid']}")
+    print(f"  Кандидатов на ремонт:            {pre_stats['problem_candidates']}")
+    print(f"  Регионов без UA:                 {pre_stats['missing_UA']}")
+    print(f"  Регионов без TR:                 {pre_stats['missing_TR']}")
+    print(f"  Регионов без IN:                 {pre_stats['missing_IN']}")
+
+    if pre_stats["problem_candidates"] == 0:
+        print("\n Все товары уже валидны или подтверждённо отсутствуют. Ничего не делаю.")
+        save_status_registry(status_registry)
+        return
+
+    confirm = input(
+        f"\nЗапустить ремонт {pre_stats['problem_candidates']} товаров? (y/n): "
+    ).strip().lower()
+    if confirm not in ("y", "д", "yes", "да", ""):
+        print(" Отмена.")
+        return
+
+    problem_groups = collect_problem_candidates(groups, status_registry)
+
+    report: List[Dict[str, Any]] = []
+    fixed = confirmed_unavailable = still_broken = 0
+    status_counts = {
+        RegionStatus.REQUEST_FAILED: 0,
+        RegionStatus.PARSE_FAILED: 0,
+        RegionStatus.MATCH_NOT_FOUND: 0,
+    }
+
+    connector = aiohttp.TCPConnector(
+        limit=10, limit_per_host=5, keepalive_timeout=30, enable_cleanup_closed=True
+    )
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=120, connect=30), connector=connector
+    ) as session:
+        total = len(problem_groups)
+        for i, group in enumerate(problem_groups, 1):
+            name_preview = next(iter(group["main_names"] or group["names"]), "")
+            if not name_preview:
+                name_preview = next(iter(group["ids"]), "?")
+            print(f"\n[{i}/{total}] Repair: {name_preview!r}")
+            try:
+                item = await repair_group(session, group, status_registry)
+            except Exception as exc:
+                print(f"   [!] исключение в repair_group: {type(exc).__name__}: {exc}")
+                continue
+
+            regions_after = item["region_statuses"]
+            ok_or_unavail = all(
+                s in _VALID_STATUSES or s == RegionStatus.NOT_AVAILABLE_IN_REGION
+                for s in regions_after.values()
+            )
+            if ok_or_unavail:
+                if all(s in _VALID_STATUSES for s in regions_after.values()):
+                    fixed += 1
+                else:
+                    confirmed_unavailable += 1
+            else:
+                still_broken += 1
+
+            for status in regions_after.values():
+                if status in status_counts:
+                    status_counts[status] += 1
+
+            repaired = {r: rec for r, rec in item["repaired_records"].items() if rec}
+            if repaired:
+                added, updated, skipped = merge_repaired_records(result, group, repaired)
+                print(f"   merge: +{added} новых, обновлено {updated}, пропущено {skipped}")
+
+            report.append(_strip_report_item(item))
+
+            if i % 20 == 0 or i == total:
+                with open("result.pkl", "wb") as f:
+                    pickle.dump(result, f)
+                save_status_registry(status_registry)
+                save_problem_report(report)
+
+    with open("result.pkl", "wb") as f:
+        pickle.dump(result, f)
+    save_status_registry(status_registry)
+    save_problem_report(report)
+
+    print("\n" + "=" * 80)
+    print(" ИТОГО РЕЖИМ 5")
+    print("=" * 80)
+    print(f"  Групп к ремонту:                 {total}")
+    print(f"  Полностью починено:              {fixed}")
+    print(f"  Подтверждённо отсутствуют:       {confirmed_unavailable}")
+    print(f"  Всё ещё проблемные:              {still_broken}")
+    print(f"  REQUEST_FAILED регионов:         {status_counts[RegionStatus.REQUEST_FAILED]}")
+    print(f"  PARSE_FAILED регионов:           {status_counts[RegionStatus.PARSE_FAILED]}")
+    print(f"  MATCH_NOT_FOUND регионов:        {status_counts[RegionStatus.MATCH_NOT_FOUND]}")
+    print(f"\n Отчёт сохранён: {PROBLEM_REPORT_FILE}")
+    print(f" Registry статусов: {REGION_STATUS_FILE}")
+    print(f" result.pkl обновлён ({len(result)} записей)")
+
+    load_to_db = input("\nЗагрузить обновлённые данные в БД? (y/n): ").strip().lower()
+    if load_to_db in ("y", "д", "yes", "да"):
+        import parser as _parser
+
+        if promo is None:
+            promo = _load_promo()
+        start = datetime.now().timestamp()
         await _parser.process_and_save_to_db(result, promo, start, clear_db=False)
 
 
