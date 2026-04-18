@@ -29,6 +29,10 @@ import aiohttp
 
 REGION_STATUS_FILE = "region_status_registry.json"
 PROBLEM_REPORT_FILE = "problem_products_report.json"
+try:
+    DB_SYNC_EVERY_GROUPS = int(os.getenv("REPAIR_DB_SYNC_EVERY", "500"))
+except ValueError:
+    DB_SYNC_EVERY_GROUPS = 500
 
 SUPPORTED_REGIONS: Tuple[str, ...] = ("UA", "TR", "IN")
 REGION_LOCALES = {"UA": "ru-ua", "TR": "en-tr", "IN": "en-in"}
@@ -743,6 +747,60 @@ def _collect_urls_for_report(group: Dict[str, Any]) -> Dict[str, List[str]]:
     return urls
 
 
+def _collect_changed_records(
+    result: List[Dict],
+    group: Dict[str, Any],
+    repaired: Dict[str, Optional[Dict]],
+) -> List[Dict]:
+    records: List[Dict] = []
+    seen: Set[Tuple[str, str]] = set()
+    for region in repaired:
+        idx = group["indices"].get(region)
+        if not isinstance(idx, int) or idx < 0 or idx >= len(result):
+            continue
+        record = result[idx]
+        key = ((record.get("id") or ""), (record.get("region") or region).upper())
+        if key in seen:
+            continue
+        seen.add(key)
+        records.append(record)
+    return records
+
+
+def _dedupe_records_for_db(records: List[Dict]) -> List[Dict]:
+    deduped: Dict[Tuple[str, str], Dict] = {}
+    for record in records:
+        product_id = record.get("id")
+        region = (record.get("region") or "").upper()
+        if not product_id or region not in SUPPORTED_REGIONS:
+            continue
+        deduped[(product_id, region)] = record
+    return list(deduped.values())
+
+
+async def _flush_records_to_db(
+    records: List[Dict],
+    promo: Dict,
+    processed: int,
+    total: int,
+) -> bool:
+    batch = _dedupe_records_for_db(records)
+    if not batch:
+        print(f"   [db] {processed}/{total}: нет новых исправленных записей для БД")
+        return True
+
+    try:
+        import parser as _parser
+
+        inserted = await _parser.save_batch_to_db(batch, promo, clear_db=False)
+        print(f"   [db] {processed}/{total}: загружено в БД {inserted} продуктов")
+        return True
+    except Exception as exc:
+        print(f"   [!] Ошибка загрузки в БД на {processed}/{total}: {type(exc).__name__}: {exc}")
+        print("   [!] Ремонт продолжится, но автозагрузка в БД отключена до конца запуска.")
+        return False
+
+
 async def repair_group(
     session: aiohttp.ClientSession,
     group: Dict[str, Any],
@@ -1066,6 +1124,8 @@ async def run_mode5(promo: Optional[Dict] = None) -> None:
         RegionStatus.PARSE_FAILED: 0,
         RegionStatus.MATCH_NOT_FOUND: 0,
     }
+    pending_db_records: List[Dict] = []
+    db_sync_enabled = True
 
     connector = aiohttp.TCPConnector(
         limit=10, limit_per_host=5, keepalive_timeout=30, enable_cleanup_closed=True
@@ -1105,6 +1165,7 @@ async def run_mode5(promo: Optional[Dict] = None) -> None:
             repaired = {r: rec for r, rec in item["repaired_records"].items() if rec}
             if repaired:
                 added, updated, skipped = merge_repaired_records(result, group, repaired)
+                pending_db_records.extend(_collect_changed_records(result, group, repaired))
                 print(f"   merge: +{added} новых, обновлено {updated}, пропущено {skipped}")
 
             report.append(_strip_report_item(item))
@@ -1114,6 +1175,18 @@ async def run_mode5(promo: Optional[Dict] = None) -> None:
                     pickle.dump(result, f)
                 save_status_registry(status_registry)
                 save_problem_report(report)
+            if DB_SYNC_EVERY_GROUPS > 0 and (i % DB_SYNC_EVERY_GROUPS == 0 or i == total):
+                if db_sync_enabled:
+                    if promo is None:
+                        promo = _load_promo()
+                    db_sync_enabled = await _flush_records_to_db(
+                        pending_db_records,
+                        promo,
+                        i,
+                        total,
+                    )
+                    if db_sync_enabled:
+                        pending_db_records.clear()
 
     with open("result.pkl", "wb") as f:
         pickle.dump(result, f)
@@ -1141,7 +1214,10 @@ async def run_mode5(promo: Optional[Dict] = None) -> None:
         if promo is None:
             promo = _load_promo()
         start = datetime.now().timestamp()
-        await _parser.process_and_save_to_db(result, promo, start, clear_db=False)
+        try:
+            await _parser.process_and_save_to_db(result, promo, start, clear_db=False)
+        except Exception as exc:
+            print(f" [!] Не удалось загрузить весь result.pkl в БД: {type(exc).__name__}: {exc}")
 
 
 def _strip_report_item(item: Dict[str, Any]) -> Dict[str, Any]:
