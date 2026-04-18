@@ -24,6 +24,10 @@ load_dotenv()
 SQLITE_DB_PATH = os.getenv("PARSER_SQLITE_DB_PATH", "products.db")
 
 
+def get_active_sqlite_db_path() -> str:
+    return SQLITE_DB_PATH
+
+
 # Configuration
 class ParserConfig:
     """Конфигурация парсера с автоматической перезагрузкой из JSON"""
@@ -3845,7 +3849,15 @@ def normalize_search_text(value: str | None) -> str:
     if not value:
         return ""
 
-    normalized = str(value).replace("в„ў", " ").replace("В®", " ").replace("В©", " ")
+    normalized = (
+        str(value)
+        .replace("™", " ")
+        .replace("®", " ")
+        .replace("©", " ")
+        .replace("в„ў", " ")
+        .replace("В®", " ")
+        .replace("В©", " ")
+    )
     normalized = unicodedata.normalize("NFKD", normalized)
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     normalized = normalized.casefold().replace("С‘", "Рµ")
@@ -3861,6 +3873,10 @@ async def prepare_sqlite_connection(db: aiosqlite.Connection):
         await db.create_function("normalize_search", 1, normalize_search_text, deterministic=True)
     except TypeError:
         await db.create_function("normalize_search", 1, normalize_search_text)
+
+
+async def register_sqlite_functions(db: aiosqlite.Connection):
+    await prepare_sqlite_connection(db)
 
 
 async def get_table_columns(db: aiosqlite.Connection, table_name: str) -> Set[str]:

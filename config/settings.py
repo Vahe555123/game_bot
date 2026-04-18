@@ -18,6 +18,24 @@ class Settings:
     SQLITE_SKIP_FTS_REBUILD_ON_STARTUP: bool = os.getenv(
         "SQLITE_SKIP_FTS_REBUILD_ON_STARTUP", "false"
     ).lower() in ("1", "true", "yes")
+    PRODUCTS_REBUILD_ON_STARTUP: bool = os.getenv("PRODUCTS_REBUILD_ON_STARTUP", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    PRODUCTS_REBUILD_ALWAYS: bool = os.getenv("PRODUCTS_REBUILD_ALWAYS", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    PRODUCTS_REBUILD_DELETE_STALE: bool = os.getenv("PRODUCTS_REBUILD_DELETE_STALE", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    PRODUCTS_RESULT_CACHE_PATH: str = os.getenv("PRODUCTS_RESULT_CACHE_PATH", "result.pkl")
+    PRODUCTS_PROMO_CACHE_PATH: str = os.getenv("PRODUCTS_PROMO_CACHE_PATH", "promo.pkl")
+    PRODUCTS_REBUILD_BATCH_SIZE: int = int(os.getenv("PRODUCTS_REBUILD_BATCH_SIZE", 1000))
 
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")

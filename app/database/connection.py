@@ -735,6 +735,11 @@ def create_tables():
             for statement in SQLITE_INDEX_STATEMENTS:
                 connection.execute(text(statement))
             _ensure_product_search_index(connection)
+            from app.database.product_cache_importer import sync_products_from_cache
+
+            product_import_result = sync_products_from_cache(connection)
+            if product_import_result.changed:
+                _ensure_product_search_index(connection)
             connection.execute(text("PRAGMA optimize"))
 
     print("Tables initialized")

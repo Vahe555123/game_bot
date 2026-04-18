@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Text, Boolean
+from sqlalchemy import Column, DateTime, Integer, String, Float, Text, Boolean
 from sqlalchemy.orm import relationship
 from app.database.connection import Base
 import json
@@ -41,6 +41,8 @@ class Product(Base):
     old_price_try = Column(Float, nullable=True, comment='Старая цена в TRY')
     price_inr = Column(Float, nullable=True, comment='Цена в индийских рупиях')
     old_price_inr = Column(Float, nullable=True, comment='Старая цена в INR')
+    price_rub = Column(Float, nullable=True)
+    price_rub_region = Column(Text, nullable=True)
 
     # PS Plus региональные цены
     ps_plus_price_uah = Column(Float, nullable=True, comment='PS Plus цена в украинских гривнах')
@@ -65,6 +67,10 @@ class Product(Base):
     players_min = Column(Integer, nullable=True, comment='Минимальное количество игроков')
     players_max = Column(Integer, nullable=True, comment='Максимальное количество игроков')
     players_online = Column(Integer, nullable=True, comment='Поддержка онлайн игры (0/1)')
+    name_localized = Column(Text, nullable=True)
+    discount_percent = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)
 
     # Связь с избранными товарами пользователей
     favorited_by = relationship(
