@@ -16,12 +16,36 @@ import sys
 import hashlib
 import traceback
 import unicodedata
+from pathlib import Path
 from typing import List, Dict, Set, Tuple, Optional
+
+import cross_region_resolver
 
 
 load_dotenv()
 
-SQLITE_DB_PATH = os.getenv("PARSER_SQLITE_DB_PATH", "products.db")
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def _resolve_parser_sqlite_db_path() -> str:
+    explicit_path = os.getenv("PARSER_SQLITE_DB_PATH")
+    if explicit_path:
+        path = Path(explicit_path).expanduser()
+        return str(path if path.is_absolute() else PROJECT_ROOT / path)
+
+    database_url = os.getenv("DATABASE_URL", "sqlite:///./products.db")
+    for prefix in ("sqlite:///", "sqlite+pysqlite:///"):
+        if database_url.startswith(prefix):
+            raw_path = database_url[len(prefix):]
+            if raw_path == ":memory:":
+                return raw_path
+            path = Path(raw_path).expanduser()
+            return str(path if path.is_absolute() else PROJECT_ROOT / path)
+
+    return str(PROJECT_ROOT / "products.db")
+
+
+SQLITE_DB_PATH = _resolve_parser_sqlite_db_path()
 
 
 def get_active_sqlite_db_path() -> str:
@@ -101,14 +125,29 @@ CHECKPOINT_FILE = "parser_checkpoint.json"
 
 
 class ParseLogger:
-    """Логирование ошибок парсинга в файл для каждого запуска"""
+    """Логирование ошибок парсинга в файл для каждого запуска.
+
+    Пишет 2 файла:
+      * parse_<ts>.log — текстовый журнал, человекочитаемый;
+      * parse_<ts>.cross_region.json — структурный отчёт по всем попыткам
+        cross-region resolve (успешным и провальным) для последующего анализа.
+    """
 
     def __init__(self):
         os.makedirs(PARSER_LOGS_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         self.log_path = os.path.join(PARSER_LOGS_DIR, f"parse_{timestamp}.log")
+        self.cross_region_path = os.path.join(PARSER_LOGS_DIR, f"parse_{timestamp}.cross_region.json")
         self._file = open(self.log_path, "w", encoding="utf-8")
-        self._counts = {"PRODUCT_ERROR": 0, "PRICE_MISSING": 0, "PARSE_EXCEPTION": 0}
+        self._counts = {
+            "PRODUCT_ERROR": 0,
+            "PRICE_MISSING": 0,
+            "PARSE_EXCEPTION": 0,
+            "CROSS_REGION_RESOLVED": 0,
+            "CROSS_REGION_FAILED": 0,
+            "CROSS_REGION_CLOUDFLARE": 0,
+        }
+        self._cross_region_events: List[Dict] = []
         self._write(f"Лог парсинга запущен: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n{'=' * 100}\n")
 
     def _write(self, line: str):
@@ -133,22 +172,99 @@ class ParseLogger:
         self._write(f"[{self._ts()}] PARSE_EXCEPTION | URL: {url} | Причина: {short}")
         self._write("  " + "  ".join(tb))
 
+    def log_cross_region_resolved(
+        self,
+        source_id: str,
+        target_locale: str,
+        matched_id: str,
+        strategy: str,
+        tried: Optional[List] = None,
+    ):
+        """Записать УСПЕШНОЕ cross-region сопоставление (перебор нашёл правильный id)."""
+        self._counts["CROSS_REGION_RESOLVED"] += 1
+        self._write(
+            f"[{self._ts()}] CROSS_REGION_RESOLVED | source_id={source_id} -> "
+            f"target_locale={target_locale} | matched={matched_id} | strategy={strategy}"
+        )
+        self._cross_region_events.append({
+            "ts": self._ts(),
+            "event": "resolved",
+            "source_id": source_id,
+            "target_locale": target_locale,
+            "matched_id": matched_id,
+            "strategy": strategy,
+            "tried": [list(t) if isinstance(t, tuple) else t for t in (tried or [])],
+        })
+
+    def log_cross_region_failed(
+        self,
+        source_id: str,
+        target_locale: str,
+        tried: Optional[List] = None,
+        reason: str = "no_match",
+    ):
+        """Записать ПРОВАЛ cross-region поиска: ни один кандидат не подошёл."""
+        if reason == "cloudflare":
+            self._counts["CROSS_REGION_CLOUDFLARE"] += 1
+        else:
+            self._counts["CROSS_REGION_FAILED"] += 1
+        tried_str = ", ".join(f"{t[0]}={t[1]}" for t in (tried or []) if isinstance(t, (list, tuple)) and len(t) == 2)
+        self._write(
+            f"[{self._ts()}] CROSS_REGION_FAILED | source_id={source_id} -> "
+            f"target_locale={target_locale} | reason={reason} | tried=[{tried_str}]"
+        )
+        self._cross_region_events.append({
+            "ts": self._ts(),
+            "event": "failed",
+            "reason": reason,
+            "source_id": source_id,
+            "target_locale": target_locale,
+            "tried": [list(t) if isinstance(t, tuple) else t for t in (tried or [])],
+        })
+
+    def _flush_cross_region_json(self):
+        try:
+            payload = {
+                "started": os.path.basename(self.log_path).replace("parse_", "").replace(".log", ""),
+                "counts": dict(self._counts),
+                "events": self._cross_region_events,
+            }
+            tmp = self.cross_region_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json_module.dump(payload, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.cross_region_path)
+        except Exception as exc:
+            try:
+                self._write(f"[{self._ts()}] JSON_FLUSH_ERROR | {type(exc).__name__}: {exc}")
+            except Exception:
+                pass
+
     def log_summary(self, total_products: int = 0, parsed_count: int = 0):
-        total_errors = sum(self._counts.values())
+        total_errors = (
+            self._counts["PRODUCT_ERROR"]
+            + self._counts["PRICE_MISSING"]
+            + self._counts["PARSE_EXCEPTION"]
+        )
         self._write(f"\n{'=' * 100}")
         self._write(f"ИТОГО ЗА СЕССИЮ")
         self._write(f"{'=' * 100}")
         if total_products:
             self._write(f"Всего товаров для парсинга: {total_products}")
             self._write(f"Успешно спарсено записей: {parsed_count}")
-        self._write(f"Всего ошибок: {total_errors}")
+        self._write(f"Всего ошибок парсинга: {total_errors}")
         for error_type, count in self._counts.items():
             self._write(f"  {error_type}: {count}")
         self._write(f"{'=' * 100}")
+        self._flush_cross_region_json()
         self._file.close()
         print(f"\n Лог ошибок сохранен: {self.log_path} (ошибок: {total_errors})")
+        print(f" Cross-region отчёт: {self.cross_region_path} "
+              f"(resolved={self._counts['CROSS_REGION_RESOLVED']}, "
+              f"failed={self._counts['CROSS_REGION_FAILED']}, "
+              f"cloudflare={self._counts['CROSS_REGION_CLOUDFLARE']})")
 
     def close(self):
+        self._flush_cross_region_json()
         if not self._file.closed:
             self._file.close()
 
@@ -1133,11 +1249,42 @@ async def unquote(session: aiohttp.ClientSession, url: str):
         return []
 
 
-async def get_tr_data(session: aiohttp.ClientSession, tr_url: str, params: Dict) -> Optional[Dict]:
+async def get_tr_data(
+    session: aiohttp.ClientSession,
+    tr_url: str,
+    params: Dict,
+    reference: Optional[Dict[str, str]] = None,
+    logger: Optional["ParseLogger"] = None,
+    concept_id: Optional[str] = None,
+) -> Optional[Dict]:
     """
-    Получает TR данные по точному product ID с fallback на перебор последней цифры CUSA
+    Получает данные целевого региона (TR/IN/UA) по точному product ID с
+    несколькими уровнями fallback:
+
+      1. прямой product_id из params,
+      2. ротация последней цифры CUSA (оригинальное поведение),
+      3. расширенный поиск через cross_region_resolver:
+         ротация CUSA и PPSA + сверка name/edition с эталоном reference,
+      4. если всё ещё пусто и знаем concept_id (UA concept case) —
+         фолбэк через conceptRetrieve в target_locale: этот путь находит
+         случаи, где IN-версия имеет совсем другой PPSA/CUSA
+         (например, Valhalla IN = PPSA01490 vs UA/TR = PPSA01532).
+
+    Args:
+      session: aiohttp сессия.
+      tr_url: URL товара в целевом регионе (для выбора locale и headers).
+      params: GraphQL params dict с productId в variables.
+      reference: опциональный эталон {"name":..., "edition":...}
+        (из UA productRetrieve) — если передан, третий шаг умеет проверить,
+        что соседний CUSA/PPSA принадлежит тому же товару, а не случайной игре.
+      logger: ParseLogger для записи cross-region событий.
+      concept_id: опциональный concept.id из UA для финального фолбэка через
+        concept в target_locale.
+
+    Returns:
+      GraphQL-ответ целиком (dict с ключом "data") или None.
     """
-    # Сначала пробуем точный product ID
+    # ---- Шаг 1: прямой product_id ----
     try:
         async with session.get(
             "https://web.np.playstation.com/api/graphql/v1/op",
@@ -1148,38 +1295,33 @@ async def get_tr_data(session: aiohttp.ClientSession, tr_url: str, params: Dict)
             text = await resp.text()
             data = loads(text)
 
-            # Проверяем успешность запроса
             if data.get("data") and data["data"].get("productRetrieve"):
                 return data
     except Exception:
         pass
 
-    # Если не получилось, пробуем варианты CUSA с разными последними цифрами
-    # Извлекаем product_id из params
+    # ---- Шаг 2: ротация CUSA последней цифры (как раньше, без сверки) ----
+    original_product_id = ""
     try:
         params_dict = loads(params.get("variables", "{}")) if isinstance(params.get("variables"), str) else params.get("variables", {})
         original_product_id = params_dict.get("productId", "")
 
         if original_product_id and "CUSA" in original_product_id:
-            # Ищем CUSA в product_id (формат: EP0001-CUSA05848_00-FARCRY5GAME00000)
             match = re.search(r'(CUSA\d{4})(\d)', original_product_id)
 
             if match:
-                cusa_base = match.group(1)  # CUSA05848 -> CUSA0584
-                last_digit = match.group(2)  # 8
+                cusa_base = match.group(1)
+                last_digit = match.group(2)
 
-                # Перебираем цифры от 0 до 9, кроме уже проверенной
                 for digit in range(10):
                     if str(digit) == last_digit:
-                        continue  # Уже проверили
+                        continue
 
-                    # Формируем новый product_id с другой последней цифрой
                     new_product_id = original_product_id.replace(
                         f"{cusa_base}{last_digit}",
                         f"{cusa_base}{digit}"
                     )
 
-                    # Формируем новые params
                     new_params_dict = params_dict.copy()
                     new_params_dict["productId"] = new_product_id
 
@@ -1196,16 +1338,169 @@ async def get_tr_data(session: aiohttp.ClientSession, tr_url: str, params: Dict)
                             text = await resp.text()
                             data = loads(text)
 
-                            # Проверяем успешность запроса
                             if data.get("data") and data["data"].get("productRetrieve"):
+                                # Если есть эталон — проверяем совпадение,
+                                # иначе (reference is None) доверяем старому поведению.
+                                if reference:
+                                    score = cross_region_resolver.match_score(
+                                        data["data"]["productRetrieve"], reference
+                                    )
+                                    if score < 2:
+                                        # Кандидат не совпадает — продолжаем перебор,
+                                        # финальный resolver ниже сделает корректный выбор.
+                                        continue
                                 print(f"  TR CUSA fallback: {original_product_id} -> {new_product_id}")
+                                if logger is not None:
+                                    target_locale = _extract_locale_from_url(tr_url)
+                                    logger.log_cross_region_resolved(
+                                        original_product_id, target_locale, new_product_id,
+                                        "cusa_rotated_legacy",
+                                    )
                                 return data
                     except Exception:
                         continue
     except Exception:
         pass
 
+    # ---- Шаг 3: расширенный поиск (CUSA+PPSA + верификация) ----
+    if original_product_id:
+        target_locale = _extract_locale_from_url(tr_url)
+        if target_locale:
+            try:
+                resolved = await cross_region_resolver.resolve_region_retrieve(
+                    session,
+                    source_id=original_product_id,
+                    target_locale=target_locale,
+                    reference=reference or {"name": "", "edition": ""},
+                    base_params=params,
+                    json_loads=loads,
+                    json_dumps=dumps,
+                    make_headers=json_headers,
+                    logger=logger,
+                )
+            except Exception as exc:
+                if logger is not None:
+                    logger.log_cross_region_failed(
+                        original_product_id, target_locale,
+                        tried=[("resolver", f"exception:{type(exc).__name__}")],
+                        reason="resolver_exception",
+                    )
+                resolved = None
+            if resolved is not None:
+                _matched_id, full_response, _strategy = resolved
+                return full_response
+
+    # ---- Шаг 4: фолбэк через concept_id (region-agnostic) ----
+    # Используется, когда product_id в target_locale имеет совсем другой
+    # номер (например, Valhalla IN=PPSA01490, UA/TR=PPSA01532 — разница не
+    # в одной цифре, так что ротация не спасает). concept_id одинаков для
+    # всех регионов, так что можно просто спросить conceptRetrieve в IN
+    # и получить список всех IN-изданий этой игры.
+    if concept_id:
+        target_locale = _extract_locale_from_url(tr_url)
+        if target_locale:
+            try:
+                concept_resp = await cross_region_resolver.resolve_via_concept(
+                    session,
+                    concept_id=concept_id,
+                    target_locale=target_locale,
+                    concept_params_builder=get_params,
+                    json_loads=loads,
+                    make_headers=json_headers,
+                    logger=logger,
+                )
+            except Exception as exc:
+                if logger is not None:
+                    logger.log_cross_region_failed(
+                        f"concept:{concept_id}", target_locale,
+                        tried=[("concept", f"exception:{type(exc).__name__}")],
+                        reason="concept_exception",
+                    )
+                concept_resp = None
+            if concept_resp is not None:
+                return concept_resp
+
     return None
+
+
+def _extract_locale_from_url(url: str) -> str:
+    """Вытащить locale (ru-ua/en-tr/en-in) из product URL."""
+    try:
+        parts = str(url).strip().split("/")
+        if len(parts) >= 4:
+            return parts[3].lower()
+    except Exception:
+        pass
+    return ""
+
+
+def _store_product_sku_suffix(product_id: str) -> str:
+    """Stable edition suffix after the regional CUSA/PPSA part."""
+    if not product_id or "_" not in product_id:
+        return ""
+    return product_id.split("_", 1)[1].upper()
+
+
+def _find_matching_regional_product(source_id: str, regional_products) -> Optional[Dict]:
+    """Match regional concept products even when CUSA/PPSA differs by region."""
+    if isinstance(regional_products, dict):
+        regional_products = [regional_products]
+    if not isinstance(regional_products, list):
+        return None
+
+    candidates = [item for item in regional_products if isinstance(item, dict) and item.get("id")]
+    if not candidates:
+        return None
+
+    for candidate in candidates:
+        if candidate.get("id") == source_id:
+            return candidate
+
+    source_suffix = _store_product_sku_suffix(source_id)
+    if source_suffix:
+        for candidate in candidates:
+            if _store_product_sku_suffix(candidate.get("id", "")) == source_suffix:
+                return candidate
+
+    source_tail = source_id.split("-")[-1][:-1]
+    for candidate in candidates:
+        if candidate.get("id", "").split("-")[-1][:-1] == source_tail:
+            return candidate
+
+    return None
+
+
+async def _ensure_regional_product_ctas(
+    session: aiohttp.ClientSession,
+    regional_product: Optional[Dict],
+    regional_url: Optional[str],
+) -> Optional[Dict]:
+    """Fetch full productRetrieve when concept.products lacks webctas."""
+    if not regional_product or regional_product.get("webctas") or not regional_url:
+        return regional_product
+
+    product_id = regional_product.get("id")
+    if not product_id:
+        return regional_product
+
+    try:
+        parts = regional_url.rstrip("/").split("/")
+        product_url = "/".join(parts[:4]) + f"/product/{product_id}"
+        params_price, _ = get_params(product_url)
+        async with session.get(
+            "https://web.np.playstation.com/api/graphql/v1/op",
+            params=params_price,
+            headers=json_headers(product_url),
+            timeout=aiohttp.ClientTimeout(30),
+        ) as resp:
+            payload = loads(await resp.text())
+        retrieve = payload.get("data", {}).get("productRetrieve")
+        if isinstance(retrieve, dict):
+            regional_product.update(retrieve)
+    except Exception:
+        return regional_product
+
+    return regional_product
 
 
 async def get_localization_for_region(session: aiohttp.ClientSession, product_id: str, region_code: str) -> Tuple[Optional[str], Optional[str]]:
@@ -1519,12 +1814,23 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
             if not ua.get("data") or not ua["data"].get("productRetrieve"):
                 return []
 
+            # Эталон для сверки cross-region кандидатов: name + edition из UA.
+            # Передаётся в get_tr_data, чтобы соседний CUSA/PPSA не подмешался.
+            ua_reference = cross_region_resolver.extract_reference_from_ua(
+                ua["data"]["productRetrieve"]
+            )
+
+            # concept_id region-agnostic — используется как финальный фолбэк
+            # в get_tr_data, если product_id не найден ни прямо, ни ротацией.
+            ua_concept_for_fallback = ua["data"]["productRetrieve"].get("concept") or {}
+            ua_concept_id = ua_concept_for_fallback.get("id") if isinstance(ua_concept_for_fallback, dict) else None
+
             if ua["data"]["productRetrieve"].get("concept") and ua["data"]["productRetrieve"].get("topCategory") != "ADD_ON":
                 ua_products = ua["data"]["productRetrieve"]["concept"]["products"]
 
                 # Получаем TR данные только если TR в списке регионов
                 if "TR" in regions and tr_url:
-                    tr_price = await get_tr_data(session, tr_url, params)
+                    tr_price = await get_tr_data(session, tr_url, params, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
                     if not tr_price:
                         # Если нет данных для TR, создаем пустую структуру
                         tr_price = {"data": {"productRetrieve": {}}}
@@ -1533,7 +1839,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                 # Получаем IN данные только если IN в списке регионов
                 if "IN" in regions and in_url:
-                    in_price = await get_tr_data(session, in_url, params)
+                    in_price = await get_tr_data(session, in_url, params, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
                     if not in_price:
                         # Если нет данных для IN, создаем пустую структуру
                         in_price = {"data": {"productRetrieve": {}}}
@@ -1544,7 +1850,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                 # Получаем TR данные только если TR в списке регионов
                 if "TR" in regions and tr_url:
-                    tr_price = await get_tr_data(session, tr_url, params_price)
+                    tr_price = await get_tr_data(session, tr_url, params_price, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
                     if not tr_price:
                         # Если нет данных для TR, создаем пустую структуру
                         tr_price = {"data": {"productRetrieve": {}}}
@@ -1553,7 +1859,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                 # Получаем IN данные только если IN в списке регионов
                 if "IN" in regions and in_url:
-                    in_price = await get_tr_data(session, in_url, params_price)
+                    in_price = await get_tr_data(session, in_url, params_price, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
                     if not in_price:
                         # Если нет данных для IN, создаем пустую структуру
                         in_price = {"data": {"productRetrieve": {}}}
@@ -1699,33 +2005,25 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                         # Добавляем названия из TR региона (если парсили TR)
                         if "TR" in regions and tr_price_products:
-                            for trl_product in tr_price_products:
-                                eq_id = trl_product["id"].split("-")[-1][:-1] == ID.split("-")[-1][:-1]
-                                if any([ID == tr["id"] for tr in tr_price_products]):
-                                    eq_id = trl_product["id"] == ID
-                                if eq_id:
-                                    tr_name = trl_product.get("name", "")
-                                    if tr_name:
-                                        all_region_names.add(tr_name)
-                                    tr_invariant = trl_product.get("invariantName", "")
-                                    if tr_invariant and tr_invariant != tr_name:
-                                        all_region_names.add(tr_invariant)
-                                    break
+                            trl_product = _find_matching_regional_product(ID, tr_price_products)
+                            if trl_product:
+                                tr_name = trl_product.get("name", "")
+                                if tr_name:
+                                    all_region_names.add(tr_name)
+                                tr_invariant = trl_product.get("invariantName", "")
+                                if tr_invariant and tr_invariant != tr_name:
+                                    all_region_names.add(tr_invariant)
 
                         # Добавляем названия из IN региона (если парсили IN)
                         if "IN" in regions and in_price_products:
-                            for in_product in in_price_products:
-                                eq_id = in_product["id"].split("-")[-1][:-1] == ID.split("-")[-1][:-1]
-                                if any([ID == inp["id"] for inp in in_price_products]):
-                                    eq_id = in_product["id"] == ID
-                                if eq_id:
-                                    in_name = in_product.get("name", "")
-                                    if in_name:
-                                        all_region_names.add(in_name)
-                                    in_invariant = in_product.get("invariantName", "")
-                                    if in_invariant and in_invariant != in_name:
-                                        all_region_names.add(in_invariant)
-                                    break
+                            in_product = _find_matching_regional_product(ID, in_price_products)
+                            if in_product:
+                                in_name = in_product.get("name", "")
+                                if in_name:
+                                    all_region_names.add(in_name)
+                                in_invariant = in_product.get("invariantName", "")
+                                if in_invariant and in_invariant != in_name:
+                                    all_region_names.add(in_invariant)
 
                         # Обновляем теги всеми названиями из всех регионов
                         tags = list(all_region_names)
@@ -1755,7 +2053,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         ea_price_tr = None
                         ps_price_in = None
                         ea_price_in = None
-                        for price in product["webctas"]:
+                        for price in product.get("webctas", []):
                             if price["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in price["type"] and ("EA_ACCESS" in price["type"] or "PS_PLUS" in price["type"]) and "TRIAL" not in price["type"]):
                                 if price["type"] == "PREORDER":
                                     product_type = "Предзаказ"
@@ -1804,12 +2102,18 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         is_unavailable_in = False
 
                         if tr_price_products:
+                            matched_tr_product = await _ensure_regional_product_ctas(
+                                session,
+                                _find_matching_regional_product(ID, tr_price_products),
+                                tr_url,
+                            )
                             for trl_product in tr_price_products:
-                                eq_id = trl_product["id"].split("-")[-1][:-1] == ID.split("-")[-1][:-1]
-                                if any([ID == tr["id"] for tr in tr_price_products]):
-                                    eq_id = trl_product["id"] == ID
+                                trl_product_id = trl_product.get("id", "")
+                                if not trl_product_id:
+                                    continue
+                                eq_id = matched_tr_product is trl_product
                                 if eq_id:
-                                    for trl in trl_product["webctas"]:
+                                    for trl in trl_product.get("webctas", []):
                                         if trl["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in trl["type"] and ("EA_ACCESS" in trl["type"] or "PS_PLUS" in trl["type"]) and "TRIAL" not in trl["type"]):
                                         # if trl["type"] in ["ADD_TO_CART", "PREORDER"] or "UPSELL" in trl["type"]:
                                             if trl["price"]["discountedPrice"] and trl["type"] in _PURCHASE_CTA_TYPES and not trl_price:
@@ -1850,12 +2154,18 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                         # Обработка цен из индийского региона
                         if in_price_products:
+                            matched_in_product = await _ensure_regional_product_ctas(
+                                session,
+                                _find_matching_regional_product(ID, in_price_products),
+                                in_url,
+                            )
                             for in_product in in_price_products:
-                                eq_id = in_product["id"].split("-")[-1][:-1] == ID.split("-")[-1][:-1]
-                                if any([ID == inp["id"] for inp in in_price_products]):
-                                    eq_id = in_product["id"] == ID
+                                in_product_id = in_product.get("id", "")
+                                if not in_product_id:
+                                    continue
+                                eq_id = matched_in_product is in_product
                                 if eq_id:
-                                    for inp in in_product["webctas"]:
+                                    for inp in in_product.get("webctas", []):
                                         if inp["type"] in _PURCHASE_CTA_TYPES or ("UPSELL" in inp["type"] and ("EA_ACCESS" in inp["type"] or "PS_PLUS" in inp["type"]) and "TRIAL" not in inp["type"]):
                                             if inp["price"]["discountedPrice"] and inp["type"] in _PURCHASE_CTA_TYPES and not inr_price:
                                                 inr_price = parse_price_value(inp["price"].get("discountedValue", 0), divide_by_100=False)
@@ -2276,7 +2586,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                             matched_tr = tr_price_products[0]
                         tr_price_products = matched_tr if matched_tr else {}
                     elif not tr_price_products or (isinstance(tr_price_products, list) and len(tr_price_products) == 0):
-                        tr_price = await get_tr_data(session, tr_url, params_price)
+                        tr_price = await get_tr_data(session, tr_url, params_price, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
                         if tr_price and tr_price.get("data", {}).get("productRetrieve"):
                             tr_price_products = tr_price["data"]["productRetrieve"]
                         else:
@@ -4154,6 +4464,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     print("\n" + "=" * 80)
     print("Сохранение в SQLite базу данных")
     print("=" * 80)
+    print(f"Файл БД: {SQLITE_DB_PATH}")
 
     async with aiosqlite.connect(SQLITE_DB_PATH) as db:
         await prepare_sqlite_connection(db)
@@ -4994,16 +5305,42 @@ async def main():
                 existing_result = pickle.load(file)
             print(f"[OK] Загружено {len(existing_result)} записей из result.pkl")
         else:
-            print("[!] result.pkl не найден (будет создан новый)")
+            print("[!] result.pkl не найден (создаём пустой)")
+            with open("result.pkl", "wb") as file:
+                pickle.dump(existing_result, file)
+            print("[OK] result.pkl создан (0 записей)")
 
         all_parsed_records = []
+        parse_logger = ParseLogger()
 
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
-            # Парсинг UA
+            # Сначала собираем все 3 URL-а, чтобы понять: какие регионы нужно искать
+            # автоматически (Enter = авто через cross_region_resolver в parse()),
+            # а какие пользователь указал вручную (тогда parse_tr / parse_in).
             print("\n" + "=" * 80)
-            print(" ПАРСИНГ UA РЕГИОНА")
+            print(" ВВОД URL ПО РЕГИОНАМ")
+            print("=" * 80)
+            print(" Оставьте поле пустым (Enter) чтобы регион был найден автоматически")
+            print(" через UA URL (cross-region resolver с проверкой по name/edition).")
             print("=" * 80)
             ua_url = input("Введите UA URL (или Enter чтобы пропустить): ").strip()
+            tr_url = input("Введите TR URL (Enter — авто через UA): ").strip()
+            in_url = input("Введите IN URL (Enter — авто через UA): ").strip()
+
+            tr_auto = (tr_url == "") and (ua_url != "")
+            in_auto = (in_url == "") and (ua_url != "")
+
+            # Парсинг UA (+ возможно TR/IN авто)
+            print("\n" + "=" * 80)
+            print(" ПАРСИНГ UA РЕГИОНА")
+            if tr_auto or in_auto:
+                auto_regions = []
+                if tr_auto:
+                    auto_regions.append("TR")
+                if in_auto:
+                    auto_regions.append("IN")
+                print(f" Авто-регионы (ищем через UA): {', '.join(auto_regions)}")
+            print("=" * 80)
 
             if ua_url:
                 if "store.playstation.com" not in ua_url or "/ru-ua/" not in ua_url:
@@ -5012,8 +5349,17 @@ async def main():
                     ua_url = ua_url.rstrip('/')
                     is_concept = "concept" in ua_url
 
+                    # Регионы для parse(): UA всегда, TR/IN только если пользователь
+                    # оставил соответствующее поле пустым.
+                    ua_regions = ["UA"]
+                    if tr_auto:
+                        ua_regions.append("TR")
+                    if in_auto:
+                        ua_regions.append("IN")
+
                     print(f"[OK] UA URL: {ua_url}")
                     print(f"  Тип: {'concept' if is_concept else 'product'}")
+                    print(f"  Регионы: {ua_regions}")
 
                     # Разворачиваем concept если нужно
                     if is_concept:
@@ -5027,11 +5373,11 @@ async def main():
                     else:
                         ua_product_urls = [ua_url]
 
-                    # Парсим UA (только UA регион, не TR и IN)
+                    # Парсим UA (+ TR/IN если заказано) — использует cross_region_resolver
                     if ua_product_urls:
-                        print("\n  Парсинг UA региона (только UA цены)...")
+                        print(f"\n  Парсинг регионов {ua_regions}...")
                         for url in ua_product_urls:
-                            parsed_data = await parse(session, url, regions=["UA"])
+                            parsed_data = await parse(session, url, regions=ua_regions, logger=parse_logger)
                             if parsed_data:
                                 all_parsed_records.extend(parsed_data)
                                 print(f"  [OK] Спарсено: {len(parsed_data)} запись(ей)")
@@ -5042,13 +5388,14 @@ async def main():
             else:
                 print("⊘ UA парсинг пропущен")
 
-            # Парсинг TR
+            # Парсинг TR (только если пользователь указал URL явно)
             print("\n" + "=" * 80)
             print(" ПАРСИНГ TR РЕГИОНА")
             print("=" * 80)
-            tr_url = input("Введите TR URL (или Enter чтобы пропустить): ").strip()
 
-            if tr_url:
+            if tr_auto:
+                print("⊘ TR URL пуст — регион запрошен автоматически через UA (см. выше)")
+            elif tr_url:
                 if "store.playstation.com" not in tr_url or "/en-tr/" not in tr_url:
                     print("[!] Неверный формат TR URL, пропускаем...")
                 else:
@@ -5083,15 +5430,16 @@ async def main():
                             else:
                                 print(f"  ✗ Не удалось спарсить {url}")
             else:
-                print("⊘ TR парсинг пропущен")
+                print("⊘ TR парсинг пропущен (UA URL не указан и TR URL пуст)")
 
-            # Парсинг IN
+            # Парсинг IN (только если пользователь указал URL явно)
             print("\n" + "=" * 80)
             print(" ПАРСИНГ IN РЕГИОНА")
             print("=" * 80)
-            in_url = input("Введите IN URL (или Enter чтобы пропустить): ").strip()
 
-            if in_url:
+            if in_auto:
+                print("⊘ IN URL пуст — регион запрошен автоматически через UA (см. выше)")
+            elif in_url:
                 if "store.playstation.com" not in in_url or "/en-in/" not in in_url:
                     print("[!] Неверный формат IN URL, пропускаем...")
                 else:
@@ -5126,7 +5474,7 @@ async def main():
                             else:
                                 print(f"  ✗ Не удалось спарсить {url}")
             else:
-                print("⊘ IN парсинг пропущен")
+                print("⊘ IN парсинг пропущен (UA URL не указан и IN URL пуст)")
 
             # Итого
             print("\n" + "=" * 80)
@@ -5134,6 +5482,7 @@ async def main():
             print("=" * 80)
             if not all_parsed_records:
                 print("✗ Ничего не спарсено!")
+                parse_logger.log_summary(total_products=0, parsed_count=0)
                 return
 
             # Разделяем записи по регионам
@@ -5282,18 +5631,24 @@ async def main():
             if duplicates_removed > 0:
                 print(f"  • Удалено дубликатов: {duplicates_removed}")
 
+            # Финализируем лог cross-region (один раз перед выбором действия)
+            parse_logger.log_summary(
+                total_products=len(final_records),
+                parsed_count=len(all_parsed_records),
+            )
+
             # Выбор действия
             print("\n" + "=" * 80)
             print(" ЧТО ДЕЛАТЬ ДАЛЬШЕ?")
             print("=" * 80)
             print("1. Только сохранить в result.pkl (уже сохранено)")
-            print("2. Загрузить только спарсенные записи в БД")
+            print("2. Загрузить только спарсенные записи в БД (по умолчанию)")
             print("3. Загрузить весь result.pkl в БД")
             print("=" * 80)
-            action = input("\nВыберите действие (1, 2 или 3): ").strip()
+            action = input("\nВыберите действие (1, 2 или 3, по умолчанию 2): ").strip() or "2"
 
             if action == "1":
-                print("\n[OK] Готово! Изменения сохранены в result.pkl")
+                print("\n[OK] Готово! Изменения сохранены в result.pkl, но products.db не обновлён")
                 return
             elif action == "2":
                 print("\n" + "=" * 80)
@@ -5643,6 +5998,9 @@ async def main():
                 with open("result.pkl", "wb") as file:
                     pickle.dump(result, file)
                 save_checkpoint(started_at, total_products, current, len(result), db_cleared)
+                # Также промежуточно скидываем cross_region JSON — чтобы не потерять
+                # отчёт при жёстком прерывании
+                parse_logger._flush_cross_region_json()
 
                 # Инкрементальное сохранение в БД каждый 1%
                 if current >= next_save_threshold or current >= total_products:

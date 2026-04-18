@@ -10,3 +10,5 @@ sqlalchemy==2.0.45
 pandas==2.3.3
 openpyxl==3.1.5
 aiohttp==3.9.0
+beautifulsoup4==4.12.3
+aiosqlite==0.20.0
