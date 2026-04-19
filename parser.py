@@ -1831,10 +1831,15 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
     while counter < max_parse_retries:
         try:
-            async with session.get("https://web.np.playstation.com/api/graphql/v1/op", params=params, headers=json_headers(url)) as ua_resp:
-                ua = await ua_resp.text()
-            async with session.get("https://web.np.playstation.com/api/graphql/v1/op", params=params_price, headers=json_headers(url)) as ua_resp_price:
-                ua_price = await ua_resp_price.text()
+            async def _fetch_ua_main():
+                async with session.get("https://web.np.playstation.com/api/graphql/v1/op", params=params, headers=json_headers(url)) as resp:
+                    return await resp.text()
+
+            async def _fetch_ua_price():
+                async with session.get("https://web.np.playstation.com/api/graphql/v1/op", params=params_price, headers=json_headers(url)) as resp:
+                    return await resp.text()
+
+            ua, ua_price = await asyncio.gather(_fetch_ua_main(), _fetch_ua_price())
 
 
             ua = loads(ua)
@@ -1856,46 +1861,60 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
             ua_concept_for_fallback = ua["data"]["productRetrieve"].get("concept") or {}
             ua_concept_id = ua_concept_for_fallback.get("id") if isinstance(ua_concept_for_fallback, dict) else None
 
-            if ua["data"]["productRetrieve"].get("concept") and ua["data"]["productRetrieve"].get("topCategory") != "ADD_ON":
-                ua_products = ua["data"]["productRetrieve"]["concept"]["products"]
+            # Подписки (PS Plus / EA Play) имеют concept != None, но concept.products = [].
+            # В этом случае отдельный продукт с webctas лежит в самом productRetrieve —
+            # обрабатываем его через addon-ветку.
+            _concept_obj = ua["data"]["productRetrieve"].get("concept")
+            _concept_products_raw = (_concept_obj or {}).get("products") if isinstance(_concept_obj, dict) else None
+            _has_concept_products = bool(_concept_products_raw)
+            _top_category = ua["data"]["productRetrieve"].get("topCategory")
 
-                # Получаем TR данные только если TR в списке регионов
-                if "TR" in regions and tr_url:
-                    tr_price = await get_tr_data(session, tr_url, params, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
-                    if not tr_price:
-                        # Если нет данных для TR, создаем пустую структуру
-                        tr_price = {"data": {"productRetrieve": {}}}
-                else:
-                    tr_price = {"data": {"productRetrieve": {}}}
+            if _concept_obj and _has_concept_products and _top_category != "ADD_ON":
+                ua_products = _concept_products_raw
 
-                # Получаем IN данные только если IN в списке регионов
-                if "IN" in regions and in_url:
-                    in_price = await get_tr_data(session, in_url, params, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
-                    if not in_price:
-                        # Если нет данных для IN, создаем пустую структуру
-                        in_price = {"data": {"productRetrieve": {}}}
-                else:
-                    in_price = {"data": {"productRetrieve": {}}}
+                # Параллельно запрашиваем TR и IN, чтобы не ждать их последовательно
+                async def _fetch_tr():
+                    if "TR" in regions and tr_url:
+                        res = await get_tr_data(session, tr_url, params, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
+                        return res if res else {"data": {"productRetrieve": {}}}
+                    return {"data": {"productRetrieve": {}}}
+
+                async def _fetch_in():
+                    if "IN" in regions and in_url:
+                        res = await get_tr_data(session, in_url, params, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
+                        return res if res else {"data": {"productRetrieve": {}}}
+                    return {"data": {"productRetrieve": {}}}
+
+                tr_price, in_price = await asyncio.gather(_fetch_tr(), _fetch_in())
             else:
+                # Addon / одиночный продукт / подписка: concept.products отсутствует или пуст.
                 ua_price_product = ua_price.get("data", {}).get("productRetrieve") or {}
+                if logger and _concept_obj and not _has_concept_products:
+                    try:
+                        _pname = ua_price_product.get("name") if isinstance(ua_price_product, dict) else None
+                        _skus = ua_price_product.get("skus") if isinstance(ua_price_product, dict) else []
+                        _sku_name = (_skus[0] or {}).get("name") if _skus else None
+                        logger.log_product_error(
+                            url,
+                            f"SUBSCRIPTION_OR_SINGLE | concept.products пуст, идём в addon-ветку "
+                            f"(sku={_sku_name}, name={_pname})"
+                        )
+                    except Exception:
+                        pass
 
-                # Получаем TR данные только если TR в списке регионов
-                if "TR" in regions and tr_url:
-                    tr_price = await get_tr_data(session, tr_url, params_price, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
-                    if not tr_price:
-                        # Если нет данных для TR, создаем пустую структуру
-                        tr_price = {"data": {"productRetrieve": {}}}
-                else:
-                    tr_price = {"data": {"productRetrieve": {}}}
+                async def _fetch_tr():
+                    if "TR" in regions and tr_url:
+                        res = await get_tr_data(session, tr_url, params_price, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
+                        return res if res else {"data": {"productRetrieve": {}}}
+                    return {"data": {"productRetrieve": {}}}
 
-                # Получаем IN данные только если IN в списке регионов
-                if "IN" in regions and in_url:
-                    in_price = await get_tr_data(session, in_url, params_price, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
-                    if not in_price:
-                        # Если нет данных для IN, создаем пустую структуру
-                        in_price = {"data": {"productRetrieve": {}}}
-                else:
-                    in_price = {"data": {"productRetrieve": {}}}
+                async def _fetch_in():
+                    if "IN" in regions and in_url:
+                        res = await get_tr_data(session, in_url, params_price, reference=ua_reference, logger=logger, concept_id=ua_concept_id)
+                        return res if res else {"data": {"productRetrieve": {}}}
+                    return {"data": {"productRetrieve": {}}}
+
+                tr_price, in_price = await asyncio.gather(_fetch_tr(), _fetch_in())
 
             if not tr_price or not tr_price.get("data", {}).get("productRetrieve"):
                 # Если TR недоступен, продолжаем только с UA данными
@@ -2802,6 +2821,20 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                             for p in _in_webctas
                         )
                         is_unavailable_addon_in = bool(_in_webctas) and all(p.get("type") == "UNAVAILABLE" for p in _in_webctas)
+
+                    # Диагностика: если UA цена не получена — логируем что было в webctas
+                    if logger and uah_price <= 0 and not ps_plus_collection_ua and not is_free_addon_ua and not is_unavailable_addon_ua:
+                        try:
+                            _seen = [
+                                f"{p.get('type')}:{(p.get('price') or {}).get('discountedPrice')!r}"
+                                for p in _ua_addon_webctas
+                            ]
+                            logger.log_product_error(
+                                url,
+                                f"UA_PRICE_EMPTY_ADDON | ID={ID} name={name} webctas=[{', '.join(_seen) or 'EMPTY'}]"
+                            )
+                        except Exception:
+                            pass
 
                     # UA запись - только если UA в списке регионов
                     if "UA" in regions and (uah_price > 0 or ps_plus_collection_ua or is_free_addon_ua):
@@ -5807,8 +5840,8 @@ async def main():
     await add_update_table()
 
     connector = aiohttp.TCPConnector(
-        limit=30,
-        limit_per_host=10,
+        limit=100,
+        limit_per_host=30,
         keepalive_timeout=30,
         enable_cleanup_closed=True,
         force_close=False,
