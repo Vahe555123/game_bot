@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 import os
 import pickle
+import signal
 import sys
 import hashlib
 import traceback
@@ -267,6 +268,36 @@ class ParseLogger:
         self._flush_cross_region_json()
         if not self._file.closed:
             self._file.close()
+
+
+def install_shutdown_signal_handlers():
+    """Перехватываем сигналы остановки (SIGTERM/SIGHUP/SIGQUIT/SIGBREAK) и
+    конвертируем их в KeyboardInterrupt.
+
+    SIGINT (Ctrl+C) Python уже конвертирует в KeyboardInterrupt сам — ничего не
+    трогаем. Остальные сигналы (kill, закрытие терминала через SIGHUP, kill -3)
+    по умолчанию завершают процесс молча, без попадания в existing try/except
+    блок парсинга. Пробрасываем их в тот же существующий путь: main loop
+    ловит KeyboardInterrupt → флашит result.pkl + checkpoint + cross_region JSON.
+    """
+    def _handler(signum, _frame):
+        try:
+            name = signal.Signals(signum).name
+        except Exception:
+            name = str(signum)
+        print(f"\n  Получен сигнал {name}, сохраняем прогресс...")
+        raise KeyboardInterrupt
+
+    for sig_name in ("SIGTERM", "SIGHUP", "SIGQUIT", "SIGBREAK"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            # ValueError — не главный поток; OSError — сигнал не поддерживается
+            # текущей платформой. Пропускаем молча.
+            pass
 
 
 def save_checkpoint(started_at: str, total_products: int, parsed_index: int, results_count: int, db_cleared: bool = False):
@@ -4905,8 +4936,67 @@ def merge_region_data(ua_item: Dict, other_item: Dict, region: str) -> Dict:
     return merged
 
 
+async def _startup_sync_result_to_db():
+    """Авто-синхронизация result.pkl в products.db при старте парсера.
+
+    Смысл: если предыдущая сессия была прервана (Cloudflare, kill, crash),
+    то result.pkl содержит частично спарсенные товары, которые ещё не ушли
+    в БД. Прогоняем их через save_batch_to_db(clear_db=False), чтобы в БД
+    всегда лежало максимум из того, что вообще удалось распарсить.
+
+    Безопасно:
+      * result.pkl пуст / отсутствует → молча пропускаем;
+      * promo.pkl отсутствует → пропускаем (promo нужен для PS Plus флагов);
+      * save_batch_to_db с clear_db=False делает UPSERT через
+        INSERT OR REPLACE, так что повторный вызов не испортит данные.
+    """
+    print("\n" + "=" * 80)
+    print(" АВТО-СИНК result.pkl → products.db")
+    print("=" * 80)
+
+    if not os.path.exists("result.pkl"):
+        print(" result.pkl отсутствует — синк не требуется")
+        return
+
+    try:
+        with open("result.pkl", "rb") as f:
+            startup_result = pickle.load(f)
+    except Exception as exc:
+        print(f" [!] Ошибка чтения result.pkl: {type(exc).__name__}: {exc}")
+        return
+
+    if not startup_result:
+        print(" result.pkl пуст — синк не требуется")
+        return
+
+    startup_promo = None
+    if os.path.exists("promo.pkl"):
+        try:
+            with open("promo.pkl", "rb") as f:
+                raw = pickle.load(f)
+            if isinstance(raw, dict):
+                startup_promo = raw
+            else:
+                all_set = set(raw) if raw else set()
+                startup_promo = {"Extra": all_set, "Deluxe": set(), "All": all_set}
+        except Exception as exc:
+            print(f" [!] promo.pkl не удалось прочитать: {type(exc).__name__}: {exc}")
+
+    if startup_promo is None:
+        print(" [!] promo.pkl отсутствует — пропускаем синк (нужен для PS Plus флагов)")
+        return
+
+    try:
+        saved = await save_batch_to_db(startup_result, startup_promo, clear_db=False)
+        print(f" [OK] Синхронизировано {saved} из {len(startup_result)} записей в products.db")
+    except Exception as exc:
+        print(f" [!] Ошибка синка в БД: {type(exc).__name__}: {exc}")
+
+
 async def main():
     """Главная функция парсера"""
+    install_shutdown_signal_handlers()
+
     print("=" * 80)
     print(" ЗАПУСК ПАРСЕРА PlayStation Store")
     print("=" * 80)
@@ -4918,6 +5008,11 @@ async def main():
     await ensure_database_schema()
     await currency_converter.load_rates()
     print("=" * 80)
+
+    # Авто-синк result.pkl → products.db при старте (UPSERT, без очистки).
+    # Гарантирует, что всё, что уже спарсили в прошлых сессиях, есть в БД —
+    # даже если парсер был прерван до финального save в БД.
+    await _startup_sync_result_to_db()
 
     # Проверка аргументов командной строки для очистки кеша
     if "--clear-cache" in sys.argv or "--clean" in sys.argv:
@@ -5970,7 +6065,10 @@ async def main():
         parse_start = perf_counter()
 
         total_products = len(products)
-        save_interval = max(1, total_products // 100)
+        # Жёсткий порог: пишем result.pkl + checkpoint + батч в БД каждые 100
+        # товаров, независимо от размера входа. Это компромисс между частотой
+        # диска и объёмом потери при неожиданном kill.
+        save_interval = 100
         next_save_threshold = start_index + save_interval
         current = start_index
 
