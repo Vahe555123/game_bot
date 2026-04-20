@@ -5042,10 +5042,10 @@ async def main():
     await currency_converter.load_rates()
     print("=" * 80)
 
-    # Авто-синк result.pkl → products.db при старте (UPSERT, без очистки).
-    # Гарантирует, что всё, что уже спарсили в прошлых сессиях, есть в БД —
-    # даже если парсер был прерван до финального save в БД.
-    await _startup_sync_result_to_db()
+    # Авто-синк result.pkl → products.db при старте отключён по просьбе пользователя.
+    # Включить можно флагом --sync-on-start, либо вручную через Режим 2.
+    if "--sync-on-start" in sys.argv:
+        await _startup_sync_result_to_db()
 
     # Проверка аргументов командной строки для очистки кеша
     if "--clear-cache" in sys.argv or "--clean" in sys.argv:
@@ -5840,11 +5840,12 @@ async def main():
     await add_update_table()
 
     connector = aiohttp.TCPConnector(
-        limit=100,
-        limit_per_host=30,
-        keepalive_timeout=30,
+        limit=60,
+        limit_per_host=15,
+        keepalive_timeout=15,
         enable_cleanup_closed=True,
         force_close=False,
+        ttl_dns_cache=300,
     )
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120, connect=30), connector=connector) as session:
         # Get promo (подписки PS Plus)
@@ -6113,8 +6114,36 @@ async def main():
                 shift = parser_config.BATCH_SIZE_PRODUCTS
 
                 batch_end = min(total_products, i + shift)
+
+                # Per-task timeout: ни одна задача не должна висеть дольше 180с.
+                # Защищает батч от зависшей задачи, которая тянет весь gather.
+                async def _parse_with_cap(idx: int):
+                    try:
+                        return await asyncio.wait_for(
+                            parse(session, products[idx], logger=parse_logger),
+                            timeout=180.0,
+                        )
+                    except asyncio.TimeoutError:
+                        try:
+                            parse_logger.log_product_error(
+                                products[idx], "TASK_TIMEOUT_180s | задача превысила лимит — пропущена"
+                            )
+                        except Exception:
+                            pass
+                        return []
+                    except (asyncio.CancelledError, KeyboardInterrupt):
+                        raise
+                    except Exception as _exc:
+                        try:
+                            parse_logger.log_product_error(
+                                products[idx], f"BATCH_TASK_EXCEPTION | {type(_exc).__name__}: {str(_exc)[:150]}"
+                            )
+                        except Exception:
+                            pass
+                        return []
+
                 _result = sum(await asyncio.gather(
-                    *[parse(session, products[j], logger=parse_logger) for j in range(i, batch_end)]
+                    *[_parse_with_cap(j) for j in range(i, batch_end)]
                 ), [])
                 result.extend(_result)
                 await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
