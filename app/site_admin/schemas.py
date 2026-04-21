@@ -350,6 +350,48 @@ class AdminProductListResponse(BaseModel):
     limit: int
 
 
+class AdminProductManualParseRequest(BaseModel):
+    ua_url: Optional[str] = Field(None, max_length=1000)
+    tr_url: Optional[str] = Field(None, max_length=1000)
+    in_url: Optional[str] = Field(None, max_length=1000)
+    save_to_db: bool = True
+
+    @field_validator("ua_url", "tr_url", "in_url")
+    @classmethod
+    def normalize_urls(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_optional_text(value)
+
+    @model_validator(mode="after")
+    def validate_any_url(self) -> "AdminProductManualParseRequest":
+        if not self.ua_url and not self.tr_url and not self.in_url:
+            raise ValueError("Укажите хотя бы одну ссылку")
+        return self
+
+
+class AdminProductManualParseRecord(BaseModel):
+    id: Optional[str] = None
+    region: Optional[str] = None
+    name: Optional[str] = None
+    main_name: Optional[str] = None
+    edition: Optional[str] = None
+    price_rub: Optional[float] = None
+    price_rub_region: Optional[str] = None
+    localization: Optional[str] = None
+
+
+class AdminProductManualParseResponse(BaseModel):
+    message: str
+    parsed_total: int
+    final_total: int
+    updated_count: int
+    added_count: int
+    duplicates_removed: int
+    result_count: int
+    db_updated: bool
+    errors: list[str] = Field(default_factory=list)
+    records: list[AdminProductManualParseRecord] = Field(default_factory=list)
+
+
 class AdminProductBasePayload(BaseModel):
     category: Optional[str] = None
     type: Optional[str] = None

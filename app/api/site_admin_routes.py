@@ -16,6 +16,8 @@ from app.site_admin.schemas import (
     AdminProductCreateRequest,
     AdminProductDetailsResponse,
     AdminProductListResponse,
+    AdminProductManualParseRequest,
+    AdminProductManualParseResponse,
     AdminProductRecord,
     AdminProductUpdateRequest,
     AdminPurchaseFulfillRequest,
@@ -187,6 +189,19 @@ def create_site_admin_product(
     service = get_site_admin_service()
     try:
         return service.create_product(db, payload)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/products/manual-parse", response_model=AdminProductManualParseResponse, summary="Manual product parse")
+async def manual_parse_site_admin_product(
+    payload: AdminProductManualParseRequest,
+    db: Session = Depends(get_db),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.manual_parse_product(db, payload)
     except AuthServiceError as error:
         _raise_http_auth_error(error)
 

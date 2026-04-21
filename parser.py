@@ -18,7 +18,7 @@ import hashlib
 import traceback
 import unicodedata
 from pathlib import Path
-from typing import List, Dict, Set, Tuple, Optional
+from typing import Any, List, Dict, Set, Tuple, Optional
 
 import cross_region_resolver
 
@@ -4711,6 +4711,256 @@ async def process_specific_products_to_db(parsed_products: list, promo: list, st
     # Передаем только спарсенные товары с clear_db=False
     # update_info будет обновлен через UPSERT в process_and_save_to_db
     await process_and_save_to_db(parsed_products, promo, start_time, clear_db=False)
+
+
+def _normalize_manual_url(value: Optional[str]) -> str:
+    return (value or "").strip().rstrip("/")
+
+
+def _validate_manual_url(url: str, locale: str, label: str) -> None:
+    if not url:
+        return
+    if "store.playstation.com" not in url or f"/{locale}/" not in url:
+        raise ValueError(f"{label} URL должен быть ссылкой PlayStation Store с локалью /{locale}/")
+
+
+async def _load_manual_promo_cache() -> Any:
+    promo_path = PROJECT_ROOT / "promo.pkl"
+    if promo_path.exists():
+        with promo_path.open("rb") as file:
+            promo_data = pickle.load(file)
+        if isinstance(promo_data, dict):
+            return promo_data
+        all_set = set(promo_data) if promo_data else set()
+        return {"Extra": all_set, "Deluxe": set(), "All": all_set}
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
+        promo = await get_all_ps_plus_subscriptions(session)
+    with promo_path.open("wb") as file:
+        pickle.dump(promo, file)
+    return promo
+
+
+def _load_manual_result_cache() -> list[dict]:
+    result_path = PROJECT_ROOT / "result.pkl"
+    if not result_path.exists():
+        with result_path.open("wb") as file:
+            pickle.dump([], file)
+        return []
+
+    with result_path.open("rb") as file:
+        payload = pickle.load(file)
+    return payload if isinstance(payload, list) else []
+
+
+def _save_manual_result_cache(records: list[dict]) -> None:
+    with (PROJECT_ROOT / "result.pkl").open("wb") as file:
+        pickle.dump(records, file)
+
+
+async def _expand_manual_product_urls(session: aiohttp.ClientSession, url: str) -> list[str]:
+    if "concept" not in url:
+        return [url]
+    expanded = await unquote(session, url)
+    return expanded or []
+
+
+async def _parse_manual_product_urls(
+    session: aiohttp.ClientSession,
+    urls: list[str],
+    *,
+    region: str,
+    regions: Optional[list[str]] = None,
+    parse_logger: Optional["ParseLogger"] = None,
+) -> list[dict]:
+    parsed_records: list[dict] = []
+    for url in urls:
+        if region == "UA":
+            parsed_data = await parse(session, url, regions=regions, logger=parse_logger)
+        elif region == "TR":
+            parsed_data = await parse_tr(session, url)
+        elif region == "IN":
+            parsed_data = await parse_in(session, url)
+        else:
+            parsed_data = []
+
+        if parsed_data:
+            parsed_records.extend(parsed_data)
+    return parsed_records
+
+
+def _build_manual_final_records(all_parsed_records: list[dict]) -> list[dict]:
+    ua_records = [record for record in all_parsed_records if record.get("region") == "UA"]
+    tr_records = [record for record in all_parsed_records if record.get("region") == "TR"]
+    in_records = [record for record in all_parsed_records if record.get("region") == "IN"]
+
+    final_records: list[dict] = []
+    final_records.extend(ua_records)
+
+    if tr_records and ua_records:
+        tr_matches = match_products_by_id(ua_records, tr_records, "TR")
+        for ua_item, tr_item in tr_matches:
+            final_records.append(merge_region_data(ua_item, tr_item, "TR"))
+        matched_tr_ids = {tr_item.get("id") for _, tr_item in tr_matches}
+        final_records.extend(item for item in tr_records if item.get("id") not in matched_tr_ids)
+    else:
+        final_records.extend(tr_records)
+
+    if in_records and ua_records:
+        in_matches = match_products_by_id(ua_records, in_records, "IN")
+        for ua_item, in_item in in_matches:
+            final_records.append(merge_region_data(ua_item, in_item, "IN"))
+        matched_in_ids = {in_item.get("id") for _, in_item in in_matches}
+        final_records.extend(item for item in in_records if item.get("id") not in matched_in_ids)
+    else:
+        final_records.extend(in_records)
+
+    return process_ps_plus_only_editions(final_records)
+
+
+def _find_existing_result_index(existing_result: list[dict], record: dict) -> Optional[int]:
+    record_id = (record.get("id") or "").strip()
+    record_region = (record.get("region") or "").strip().upper()
+    if record_id and record_region:
+        for idx, item in enumerate(existing_result):
+            if (item.get("id") or "").strip() == record_id and (item.get("region") or "").strip().upper() == record_region:
+                return idx
+
+    matches = find_in_result(
+        existing_result,
+        record.get("name", ""),
+        record.get("edition"),
+        record.get("description"),
+        record.get("region"),
+    )
+    return matches[0][0] if matches else None
+
+
+def _update_manual_result_cache(existing_result: list[dict], final_records: list[dict]) -> tuple[int, int, int, int]:
+    updated_count = 0
+    added_count = 0
+
+    for record in final_records:
+        existing_index = _find_existing_result_index(existing_result, record)
+        if existing_index is None:
+            existing_result.append(record)
+            added_count += 1
+        else:
+            existing_result[existing_index].update(record)
+            updated_count += 1
+
+    before_dedupe = len(existing_result)
+    uni(existing_result)
+    duplicates_removed = before_dedupe - len(existing_result)
+    _save_manual_result_cache(existing_result)
+    return updated_count, added_count, duplicates_removed, len(existing_result)
+
+
+def _manual_record_summary(record: dict) -> dict[str, Any]:
+    return {
+        "id": record.get("id"),
+        "region": record.get("region"),
+        "name": record.get("name") or record.get("main_name"),
+        "main_name": record.get("main_name"),
+        "edition": record.get("edition"),
+        "price_rub": record.get("price_rub"),
+        "price_rub_region": record.get("price_rub_region"),
+        "localization": record.get("localization"),
+    }
+
+
+async def run_manual_product_parse(
+    *,
+    ua_url: Optional[str] = None,
+    tr_url: Optional[str] = None,
+    in_url: Optional[str] = None,
+    save_to_db: bool = True,
+) -> dict[str, Any]:
+    ua_url = _normalize_manual_url(ua_url)
+    tr_url = _normalize_manual_url(tr_url)
+    in_url = _normalize_manual_url(in_url)
+
+    if not any((ua_url, tr_url, in_url)):
+        raise ValueError("Укажите хотя бы одну ссылку UA, TR или IN")
+
+    _validate_manual_url(ua_url, "ru-ua", "UA")
+    _validate_manual_url(tr_url, "en-tr", "TR")
+    _validate_manual_url(in_url, "en-in", "IN")
+
+    start = perf_counter()
+    promo = await _load_manual_promo_cache()
+    existing_result = _load_manual_result_cache()
+    parse_logger = ParseLogger()
+    all_parsed_records: list[dict] = []
+    errors: list[str] = []
+
+    tr_auto = (not tr_url) and bool(ua_url)
+    in_auto = (not in_url) and bool(ua_url)
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
+        if ua_url:
+            ua_regions = ["UA"]
+            if tr_auto:
+                ua_regions.append("TR")
+            if in_auto:
+                ua_regions.append("IN")
+            ua_product_urls = await _expand_manual_product_urls(session, ua_url)
+            if ua_product_urls:
+                all_parsed_records.extend(
+                    await _parse_manual_product_urls(
+                        session,
+                        ua_product_urls,
+                        region="UA",
+                        regions=ua_regions,
+                        parse_logger=parse_logger,
+                    )
+                )
+            else:
+                errors.append("UA concept не удалось развернуть в product URL")
+
+        if tr_url:
+            tr_product_urls = await _expand_manual_product_urls(session, tr_url)
+            if tr_product_urls:
+                all_parsed_records.extend(await _parse_manual_product_urls(session, tr_product_urls, region="TR"))
+            else:
+                errors.append("TR concept не удалось развернуть в product URL")
+
+        if in_url:
+            in_product_urls = await _expand_manual_product_urls(session, in_url)
+            if in_product_urls:
+                all_parsed_records.extend(await _parse_manual_product_urls(session, in_product_urls, region="IN"))
+            else:
+                errors.append("IN concept не удалось развернуть в product URL")
+
+    if not all_parsed_records:
+        parse_logger.log_summary(total_products=0, parsed_count=0)
+        raise ValueError("Ничего не спарсено. Проверьте ссылки или блокировку PlayStation Store.")
+
+    final_records = _build_manual_final_records(all_parsed_records)
+    updated_count, added_count, duplicates_removed, result_count = _update_manual_result_cache(
+        existing_result,
+        final_records,
+    )
+
+    db_updated = False
+    if save_to_db:
+        await process_specific_products_to_db(final_records, promo, start)
+        db_updated = True
+
+    parse_logger.log_summary(total_products=len(final_records), parsed_count=len(all_parsed_records))
+
+    return {
+        "message": "Ручной парсинг завершен.",
+        "parsed_total": len(all_parsed_records),
+        "final_total": len(final_records),
+        "updated_count": updated_count,
+        "added_count": added_count,
+        "duplicates_removed": duplicates_removed,
+        "result_count": result_count,
+        "db_updated": db_updated,
+        "errors": errors,
+        "records": [_manual_record_summary(record) for record in final_records],
+    }
 
 
 def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[str], Dict]:

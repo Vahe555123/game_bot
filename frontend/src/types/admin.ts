@@ -114,6 +114,37 @@ export type AdminProductListResponse = {
 
 export type AdminProductSortMode = 'popular' | 'alphabet' | 'added_desc' | 'release_desc'
 
+export type AdminProductManualParsePayload = {
+  ua_url?: string | null
+  tr_url?: string | null
+  in_url?: string | null
+  save_to_db?: boolean
+}
+
+export type AdminProductManualParseRecord = {
+  id?: string | null
+  region?: string | null
+  name?: string | null
+  main_name?: string | null
+  edition?: string | null
+  price_rub?: number | null
+  price_rub_region?: string | null
+  localization?: string | null
+}
+
+export type AdminProductManualParseResponse = {
+  message: string
+  parsed_total: number
+  final_total: number
+  updated_count: number
+  added_count: number
+  duplicates_removed: number
+  result_count: number
+  db_updated: boolean
+  errors: string[]
+  records: AdminProductManualParseRecord[]
+}
+
 export type AdminProductPayload = {
   id?: string
   region?: 'UA' | 'TR' | 'IN'

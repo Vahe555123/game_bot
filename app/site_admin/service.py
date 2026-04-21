@@ -1,6 +1,8 @@
 ﻿from __future__ import annotations
 
 import os
+import asyncio
+import logging
 import pickle
 import re
 import threading
@@ -41,6 +43,8 @@ from .schemas import (
     AdminProductDetailsResponse,
     AdminProductFavoriteRecord,
     AdminProductListResponse,
+    AdminProductManualParseRequest,
+    AdminProductManualParseResponse,
     AdminProductRecord,
     AdminProductSummary,
     AdminProductUpdateRequest,
@@ -56,6 +60,8 @@ from .schemas import (
 )
 
 HELP_CONTENT_DOCUMENT_ID = "help_page"
+logger = logging.getLogger(__name__)
+_manual_product_parse_lock = asyncio.Lock()
 
 
 def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
@@ -679,6 +685,44 @@ class SiteAdminService:
         db.commit()
         db.refresh(product)
         return self._build_product_details(db, product)
+
+    async def manual_parse_product(
+        self,
+        db: Session,
+        payload: AdminProductManualParseRequest,
+    ) -> AdminProductManualParseResponse:
+        async with _manual_product_parse_lock:
+            try:
+                from parser import run_manual_product_parse
+
+                result = await run_manual_product_parse(
+                    ua_url=payload.ua_url,
+                    tr_url=payload.tr_url,
+                    in_url=payload.in_url,
+                    save_to_db=payload.save_to_db,
+                )
+            except ValueError as error:
+                raise AuthServiceError(400, str(error)) from error
+            except Exception as error:
+                logger.exception("Manual product parse failed")
+                raise AuthServiceError(500, f"Ручной парсинг не удался: {type(error).__name__}: {error}") from error
+
+            if payload.save_to_db and settings.PRODUCTS_USE_CARDS_TABLE:
+                try:
+                    from app.database.connection import engine
+                    from app.database.product_card_rebuilder import rebuild_product_cards
+
+                    with engine.begin() as connection:
+                        rebuild_product_cards(connection)
+                except Exception as error:
+                    logger.exception("Product cards rebuild failed after manual parse")
+                    raise AuthServiceError(
+                        500,
+                        f"Товар спарсен, но product_cards не пересобрались: {type(error).__name__}: {error}",
+                    ) from error
+
+            db.expire_all()
+            return AdminProductManualParseResponse(**result)
 
     def update_product(
         self,

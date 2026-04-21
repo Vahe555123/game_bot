@@ -7,12 +7,14 @@ import {
   deleteAdminProductGroup,
   fetchAdminProduct,
   fetchAdminProducts,
+  manualParseAdminProduct,
   updateAdminProduct,
 } from '../../services/admin'
 import type {
   AdminProduct,
   AdminProductDetails,
   AdminProductFavorite,
+  AdminProductManualParseResponse,
   AdminProductPayload,
   AdminProductSortMode,
 } from '../../types/admin'
@@ -67,6 +69,20 @@ type ProductFormState = {
   players_min: string
   players_max: string
   players_online: boolean
+}
+
+type ManualParseFormState = {
+  ua_url: string
+  tr_url: string
+  in_url: string
+  save_to_db: boolean
+}
+
+const EMPTY_MANUAL_PARSE_FORM: ManualParseFormState = {
+  ua_url: '',
+  tr_url: '',
+  in_url: '',
+  save_to_db: true,
 }
 
 const EMPTY_FORM: ProductFormState = {
@@ -321,8 +337,12 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   const [activeProduct, setActiveProduct] = useState<AdminProductDetails | null>(null)
   const [editingProduct, setEditingProduct] = useState<AdminProductDetails | null>(null)
   const [productModalMode, setProductModalMode] = useState<'create' | 'view' | null>(null)
+  const [isManualParseOpen, setIsManualParseOpen] = useState(false)
+  const [manualParseForm, setManualParseForm] = useState<ManualParseFormState>(EMPTY_MANUAL_PARSE_FORM)
+  const [manualParseResult, setManualParseResult] = useState<AdminProductManualParseResponse | null>(null)
   const [form, setForm] = useState<ProductFormState>(EMPTY_FORM)
   const [isSaving, setIsSaving] = useState(false)
+  const [isManualParsing, setIsManualParsing] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isDeletingGroup, setIsDeletingGroup] = useState(false)
   const [removingFavoriteId, setRemovingFavoriteId] = useState<number | null>(null)
@@ -397,6 +417,12 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     setNotice(EMPTY_ADMIN_NOTICE)
   }
 
+  function openManualParse() {
+    setIsManualParseOpen(true)
+    setManualParseResult(null)
+    setNotice(EMPTY_ADMIN_NOTICE)
+  }
+
   function startCloneForRegion(region: 'TR' | 'UA' | 'IN') {
     if (!activeProduct) {
       return
@@ -445,6 +471,36 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
       })
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function handleManualParseSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setIsManualParsing(true)
+    setManualParseResult(null)
+    setNotice(EMPTY_ADMIN_NOTICE)
+
+    try {
+      const response = await manualParseAdminProduct({
+        ua_url: manualParseForm.ua_url.trim() || null,
+        tr_url: manualParseForm.tr_url.trim() || null,
+        in_url: manualParseForm.in_url.trim() || null,
+        save_to_db: manualParseForm.save_to_db,
+      })
+      setManualParseResult(response)
+      setNotice({
+        type: 'success',
+        message: `Ручной парсинг готов: ${response.final_total} записей, добавлено ${response.added_count}, обновлено ${response.updated_count}.`,
+      })
+      await onDataChanged()
+      await loadProducts()
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        message: getApiErrorMessage(error, 'Не удалось выполнить ручной парсинг.'),
+      })
+    } finally {
+      setIsManualParsing(false)
     }
   }
 
@@ -559,6 +615,10 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
           <button type="button" className="btn-secondary" onClick={() => loadProducts()}>
             <RefreshCw size={16} />
             Обновить
+          </button>
+          <button type="button" className="btn-secondary" onClick={openManualParse}>
+            <CopyPlus size={16} />
+            Ручной парсинг
           </button>
           <button type="button" className="btn-primary" onClick={startCreate}>
             <Plus size={16} />
@@ -709,6 +769,110 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
             </div>
           </div>
         </div>
+
+        {isManualParseOpen ? (
+          <div className="fixed inset-0 z-[75] flex items-end justify-center bg-slate-950/80 px-3 py-3 backdrop-blur-md md:items-center md:px-4 md:py-6">
+            <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-slate-950 shadow-card">
+              <div className="flex flex-col gap-3 border-b border-white/10 bg-slate-950/95 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-6">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.28em] text-brand-200/80">Режим 4 из парсера</p>
+                  <h3 className="mt-2 text-xl text-white">Ручной парсинг товара по регионам</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-400">
+                    UA ссылка может сама найти TR и IN. Если TR или IN указаны вручную, они парсятся отдельно.
+                  </p>
+                </div>
+                <button type="button" className="btn-secondary px-4 py-2" onClick={() => setIsManualParseOpen(false)} disabled={isManualParsing}>
+                  <X size={16} />
+                  Закрыть
+                </button>
+              </div>
+
+              <div className="overflow-y-auto p-4 sm:p-5 xl:p-6">
+                <form className="space-y-5" onSubmit={handleManualParseSubmit}>
+                  <TextField
+                    label="UA URL"
+                    value={manualParseForm.ua_url}
+                    onChange={(value) => setManualParseForm((current) => ({ ...current, ua_url: value }))}
+                    placeholder="https://store.playstation.com/ru-ua/product/..."
+                    disabled={isManualParsing}
+                  />
+                  <TextField
+                    label="TR URL"
+                    value={manualParseForm.tr_url}
+                    onChange={(value) => setManualParseForm((current) => ({ ...current, tr_url: value }))}
+                    placeholder="Оставьте пустым, чтобы найти через UA"
+                    disabled={isManualParsing}
+                  />
+                  <TextField
+                    label="IN URL"
+                    value={manualParseForm.in_url}
+                    onChange={(value) => setManualParseForm((current) => ({ ...current, in_url: value }))}
+                    placeholder="Оставьте пустым, чтобы найти через UA"
+                    disabled={isManualParsing}
+                  />
+
+                  <label className="flex items-center gap-3 rounded-[22px] border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-slate-200">
+                    <input
+                      type="checkbox"
+                      checked={manualParseForm.save_to_db}
+                      onChange={(event) => setManualParseForm((current) => ({ ...current, save_to_db: event.target.checked }))}
+                      disabled={isManualParsing}
+                    />
+                    Сразу загрузить спарсенные записи в products.db
+                  </label>
+
+                  <div className="flex flex-wrap gap-3">
+                    <button type="submit" className="btn-primary" disabled={isManualParsing}>
+                      {isManualParsing ? 'Парсим...' : 'Запустить парсинг'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => {
+                        setManualParseForm(EMPTY_MANUAL_PARSE_FORM)
+                        setManualParseResult(null)
+                      }}
+                      disabled={isManualParsing}
+                    >
+                      Очистить
+                    </button>
+                  </div>
+                </form>
+
+                {manualParseResult ? (
+                  <div className="mt-6 space-y-4 rounded-[26px] border border-white/10 bg-white/[0.03] p-4">
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <SummaryCard label="Спарсено" value={manualParseResult.parsed_total} />
+                      <SummaryCard label="В result.pkl" value={manualParseResult.result_count} />
+                      <SummaryCard label="Добавлено" value={manualParseResult.added_count} />
+                      <SummaryCard label="Обновлено" value={manualParseResult.updated_count} />
+                    </div>
+
+                    {manualParseResult.errors.length ? (
+                      <div className="rounded-[18px] border border-amber-400/20 bg-amber-500/10 p-3 text-sm text-amber-100">
+                        {manualParseResult.errors.join(' ')}
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-2">
+                      {manualParseResult.records.map((record, index) => (
+                        <div key={`${record.id}-${record.region}-${index}`} className="rounded-[18px] border border-white/8 bg-slate-950/45 p-3">
+                          <p className="text-sm font-semibold text-white">
+                            {record.name || record.main_name || record.id || 'Товар'} {record.region ? `(${record.region})` : ''}
+                          </p>
+                          <p className="mt-1 break-all text-xs text-slate-400">{record.id}</p>
+                          <p className="mt-2 text-xs text-slate-500">
+                            {record.edition || 'Базовое издание'} • {record.localization || 'Язык не указан'} • {record.price_rub ?? '—'} RUB
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {productModalMode ? (
           <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/80 px-3 py-3 backdrop-blur-md md:items-center md:px-4 md:py-6">

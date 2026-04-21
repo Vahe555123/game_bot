@@ -4,6 +4,8 @@ import type {
   AdminHelpContentPayload,
   AdminProductDetails,
   AdminProductListResponse,
+  AdminProductManualParsePayload,
+  AdminProductManualParseResponse,
   AdminProductPayload,
   AdminPurchase,
   AdminPurchaseFulfillPayload,
@@ -105,6 +107,11 @@ export async function fetchAdminProduct(productId: string, region: string) {
 
 export async function createAdminProduct(payload: AdminProductPayload) {
   const response = await apiClient.post<AdminProductDetails>('/site/admin/products', payload)
+  return response.data
+}
+
+export async function manualParseAdminProduct(payload: AdminProductManualParsePayload) {
+  const response = await apiClient.post<AdminProductManualParseResponse>('/site/admin/products/manual-parse', payload)
   return response.data
 }
 
