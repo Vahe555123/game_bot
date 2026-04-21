@@ -28,6 +28,59 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
+# ============================================================================
+#  ПРОКСИ ДЛЯ ПАРСЕРА (Akamai/PS Store блокирует датацентровые IP сервера)
+# ============================================================================
+def _bool_env(key: str, default: bool = False) -> bool:
+    """Парсит булевые env-переменные: true/1/yes/on → True, остальное → False."""
+    v = (os.getenv(key) or "").strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "on", "y", "t")
+
+
+def _setup_parser_proxy() -> Optional[str]:
+    """
+    Настраивает HTTP-прокси для всех aiohttp.ClientSession в парсере.
+
+    Если PARSER_USE_PROXY=true и PARSER_PROXY_URL непустой — выставляет
+    HTTPS_PROXY/HTTP_PROXY env-переменные. Все aiohttp-сессии с trust_env=True
+    автоматически отправят запросы через прокси (без правки каждого вызова).
+
+    Формат PARSER_PROXY_URL:  http://user:pass@host:port
+
+    Возвращает URL прокси (для логирования) или None.
+    """
+    if not _bool_env("PARSER_USE_PROXY", False):
+        return None
+    proxy_url = (os.getenv("PARSER_PROXY_URL") or "").strip()
+    if not proxy_url:
+        print("[PROXY] PARSER_USE_PROXY=true, но PARSER_PROXY_URL пуст — прокси НЕ используется")
+        return None
+    if not proxy_url.startswith(("http://", "https://")):
+        print(f"[PROXY] PARSER_PROXY_URL должен начинаться с http:// (SOCKS5 не поддерживается aiohttp напрямую)")
+        return None
+
+    os.environ["HTTPS_PROXY"] = proxy_url
+    os.environ["HTTP_PROXY"] = proxy_url
+    os.environ["https_proxy"] = proxy_url
+    os.environ["http_proxy"] = proxy_url
+    return proxy_url
+
+
+PARSER_PROXY_URL: Optional[str] = _setup_parser_proxy()
+if PARSER_PROXY_URL:
+    try:
+        import urllib.parse as _up
+        _parsed = _up.urlparse(PARSER_PROXY_URL)
+        _safe_host = f"{_parsed.hostname}:{_parsed.port}" if _parsed.hostname else "<unknown>"
+    except Exception:
+        _safe_host = "<unparsed>"
+    print(f"[PROXY] Парсер использует HTTP-прокси: {_safe_host}")
+else:
+    print("[PROXY] Прокси выключен (PARSER_USE_PROXY != true или PARSER_PROXY_URL пуст)")
+
+
 def _normalize_release_date(value) -> Optional[str]:
     if value in (None, ""):
         return None
@@ -4734,7 +4787,7 @@ async def _load_manual_promo_cache() -> Any:
         all_set = set(promo_data) if promo_data else set()
         return {"Extra": all_set, "Deluxe": set(), "All": all_set}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
+    async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(120)) as session:
         promo = await get_all_ps_plus_subscriptions(session)
     with promo_path.open("wb") as file:
         pickle.dump(promo, file)
@@ -4897,7 +4950,7 @@ async def run_manual_product_parse(
     tr_auto = (not tr_url) and bool(ua_url)
     in_auto = (not in_url) and bool(ua_url)
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
+    async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(120)) as session:
         if ua_url:
             ua_regions = ["UA"]
             if tr_auto:
@@ -4963,6 +5016,97 @@ async def run_manual_product_parse(
     }
 
 
+NO_PRICE_URLS_PATH = "no_price_urls.pkl"
+
+
+def _load_no_price_urls() -> Set[str]:
+    """
+    Загружает множество URL'ов, которые мы уже пытались парсить и которые
+    легитимно не имеют цены (демо, делистнутые, бесплатные без PS Plus).
+    Используется, чтобы не показывать их повторно как 'недостающие'.
+    """
+    try:
+        if os.path.exists(NO_PRICE_URLS_PATH):
+            with open(NO_PRICE_URLS_PATH, "rb") as f:
+                data = pickle.load(f)
+                if isinstance(data, set):
+                    return data
+                if isinstance(data, (list, tuple)):
+                    return set(data)
+    except Exception:
+        pass
+    return set()
+
+
+def _save_no_price_urls(urls: Set[str]) -> None:
+    """Атомарно сохраняет множество URL'ов без цены."""
+    try:
+        tmp = NO_PRICE_URLS_PATH + ".tmp"
+        with open(tmp, "wb") as f:
+            pickle.dump(set(urls), f)
+        os.replace(tmp, NO_PRICE_URLS_PATH)
+    except Exception as e:
+        print(f"  Не удалось сохранить {NO_PRICE_URLS_PATH}: {e}")
+
+
+def _save_pkl_atomic(path: str, data) -> None:
+    """Атомарная запись pkl: пишем в .tmp и через os.replace заменяем основной файл."""
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        pickle.dump(data, f)
+    os.replace(tmp, path)
+
+
+def _merge_chunk_into_existing(existing: List[Dict], new_items: List[Dict], reparse_mode: str) -> int:
+    """
+    Слияние новых записей в existing (на месте).
+    Для режимов 2/3/4 — обновляем цены по совпадению ID, новые ID добавляем.
+    Для режима 1 — просто extend + uni.
+    Возвращает количество добавленных новых записей.
+    """
+    if not new_items:
+        return 0
+
+    if reparse_mode in ("2", "3", "4"):
+        new_data_by_id: Dict[str, Dict] = {}
+        for item in new_items:
+            pid = item.get("id", "")
+            if pid:
+                new_data_by_id[pid] = item
+
+        for i, item in enumerate(existing):
+            pid = item.get("id", "")
+            if pid in new_data_by_id:
+                ni = new_data_by_id[pid]
+                if ni.get("price_uah", 0) > 0:
+                    existing[i]["price_uah"] = ni["price_uah"]
+                    existing[i]["old_price_uah"] = ni.get("old_price_uah", 0)
+                    existing[i]["ps_plus_price_uah"] = ni.get("ps_plus_price_uah")
+                if ni.get("price_try", 0) > 0:
+                    existing[i]["price_try"] = ni["price_try"]
+                    existing[i]["old_price_try"] = ni.get("old_price_try", 0)
+                    existing[i]["ps_plus_price_try"] = ni.get("ps_plus_price_try")
+                if ni.get("price_inr", 0) > 0:
+                    existing[i]["price_inr"] = ni["price_inr"]
+                    existing[i]["old_price_inr"] = ni.get("old_price_inr", 0)
+                    existing[i]["ps_plus_price_inr"] = ni.get("ps_plus_price_inr")
+                if ni.get("price_rub"):
+                    existing[i]["price_rub"] = ni["price_rub"]
+                    existing[i]["price_rub_region"] = ni.get("price_rub_region")
+                if ni.get("ps_plus_price_rub"):
+                    existing[i]["ps_plus_price_rub"] = ni["ps_plus_price_rub"]
+                del new_data_by_id[pid]
+
+        added = list(new_data_by_id.values())
+        existing.extend(added)
+        return len(added)
+    else:
+        before = len(existing)
+        existing.extend(new_items)
+        uni(existing)
+        return max(len(existing) - before, 0)
+
+
 def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[str], Dict]:
     """
     Определяет, какие продукты из products.pkl еще не спарсены в result.pkl.
@@ -4974,6 +5118,8 @@ def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[
     - добавлен учёт локали en-in (Индия).
     - матчинг по полному ID + fallback на tail; товар считается спарсенным, если
       хотя бы одна региональная запись с этим ID или tail есть в result.
+    - URL'ы из no_price_urls.pkl (товары без цены, которые мы уже проверяли)
+      исключаются из 'недостающих', чтобы счётчик не висел навечно на демо/делистнутых.
     """
     print("\n" + "=" * 80)
     print(" АНАЛИЗ НЕДОСТАЮЩИХ ТОВАРОВ")
@@ -4993,7 +5139,12 @@ def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[
     print(f" Уникальных ID в result.pkl: {len(parsed_full_ids)}")
     print(f" Всего записей в result.pkl: {len(result)}")
 
+    no_price_urls = _load_no_price_urls()
+    if no_price_urls:
+        print(f" Исключено URL без цены (из {NO_PRICE_URLS_PATH}): {len(no_price_urls)}")
+
     missing_products: List[str] = []
+    skipped_no_price = 0
     total_urls = len(products)
     products_by_locale: Dict[str, List[str]] = {"ru-ua": [], "en-tr": [], "en-in": []}
 
@@ -5009,6 +5160,9 @@ def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[
 
             # Товар считаем спарсенным если есть совпадение по полному ID или tail
             if product_id not in parsed_full_ids and tail not in parsed_tails:
+                if url in no_price_urls:
+                    skipped_no_price += 1
+                    continue
                 missing_products.append(url)
 
     print(f"\n Анализ по локалям:")
@@ -5051,8 +5205,12 @@ def get_missing_products(products: List[str], result: List[Dict]) -> Tuple[List[
     print(f"\n ИТОГО:")
     print(f"   Спарсено уникальных ID: {len(parsed_full_ids)}")
     print(f"   Недостающих URLs: {len(missing_products)}")
+    if skipped_no_price:
+        print(f"   Исключено как 'без цены' (мёртвые URLs): {skipped_no_price}")
     if total_urls:
-        print(f"   Прогресс: {(total_urls - len(missing_products)) / total_urls * 100:.1f}%")
+        denom = total_urls - skipped_no_price
+        if denom > 0:
+            print(f"   Прогресс: {(denom - len(missing_products)) / denom * 100:.1f}%")
     print("=" * 80)
 
     return missing_products, stats
@@ -5100,12 +5258,17 @@ def get_products_without_prices(products: List[str], result: List[Dict]) -> Tupl
         tail = pid.split("-")[-1] if "-" in pid else pid
         return url_by_tail.get(tail)
 
+    no_price_urls = _load_no_price_urls()
+    if no_price_urls:
+        print(f" Исключено URL без цены (из {NO_PRICE_URLS_PATH}): {len(no_price_urls)}")
+
     urls_without_uah: List[str] = []
     urls_without_try: List[str] = []
     urls_without_inr: List[str] = []
     items_without_uah = 0
     items_without_try = 0
     items_without_inr = 0
+    skipped_no_price = 0
 
     for item in result:
         region = (item.get("region") or "").upper()
@@ -5116,26 +5279,34 @@ def get_products_without_prices(products: List[str], result: List[Dict]) -> Tupl
             if not has_price and not has_ps_plus:
                 items_without_uah += 1
                 url = _lookup_url(item)
-                if url:
+                if url and url not in no_price_urls:
                     urls_without_uah.append(url)
+                elif url:
+                    skipped_no_price += 1
         elif region == "TR":
             has_price = (item.get("price_try") or 0) > 0
             if not has_price and not has_ps_plus:
                 items_without_try += 1
                 url = _lookup_url(item)
-                if url:
+                if url and url not in no_price_urls:
                     urls_without_try.append(url)
+                elif url:
+                    skipped_no_price += 1
         elif region == "IN":
             has_price = (item.get("price_inr") or 0) > 0
             if not has_price and not has_ps_plus:
                 items_without_inr += 1
                 url = _lookup_url(item)
-                if url:
+                if url and url not in no_price_urls:
                     urls_without_inr.append(url)
+                elif url:
+                    skipped_no_price += 1
 
     print(f" Записей без UAH цены: {items_without_uah} (URLs для перепарсинга: {len(urls_without_uah)})")
     print(f" Записей без TRY цены: {items_without_try} (URLs для перепарсинга: {len(urls_without_try)})")
     print(f" Записей без INR цены: {items_without_inr} (URLs для перепарсинга: {len(urls_without_inr)})")
+    if skipped_no_price:
+        print(f"   Исключено как 'мёртвые URL без цены': {skipped_no_price}")
     print(f"   parse() использует ru-ua URL и создаст en-tr / en-in версии автоматически")
 
     stats = {
@@ -5648,14 +5819,14 @@ async def main():
                 print(f" Загружено {len(all_set)} промо из promo.pkl (старый формат, конвертировано)")
         else:
             print("  promo.pkl не найден, создаем новый...")
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
+            async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(120)) as session:
                 promo = await get_all_ps_plus_subscriptions(session)
                 with open("promo.pkl", "wb") as file:
                     pickle.dump(promo, file)
                 print(f"[OK] Промо сохранено в promo.pkl")
 
         # Парсим товары
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
+        async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(120)) as session:
             print("\n" + "=" * 80)
             print(f" ПАРСИНГ {parse_label.upper()}")
             print("=" * 80)
@@ -5666,6 +5837,13 @@ async def main():
             parse_logger = ParseLogger()
             empty_returns = 0
             task_errors = 0
+
+            # Инкрементальное сохранение в result.pkl
+            CHECKPOINT_EVERY = 100  # каждые 100 успешно обработанных товаров
+            unmerged_buffer: List[Dict] = []
+            processed_since_checkpoint = 0
+            no_price_urls = _load_no_price_urls()
+            no_price_added_since_checkpoint = 0
 
             for i in range(0, len(products_to_parse), shift):
                 # Перезагружаем конфигурацию на каждой итерации
@@ -5693,7 +5871,7 @@ async def main():
                             )
                         except Exception:
                             pass
-                        return []
+                        return None  # None = ошибка/таймаут, НЕ добавляем в no_price
                     except (asyncio.CancelledError, KeyboardInterrupt):
                         raise
                     except Exception as _exc:
@@ -5705,12 +5883,30 @@ async def main():
                             )
                         except Exception:
                             pass
-                        return []
+                        return None
 
-                _result = sum(await asyncio.gather(
-                    *[_parse_with_cap(j) for j in range(i, batch_end)]
-                ), [])
-                new_result.extend(_result)
+                batch_indices = list(range(i, batch_end))
+                batch_results = await asyncio.gather(
+                    *[_parse_with_cap(j) for j in batch_indices]
+                )
+
+                batch_items: List[Dict] = []
+                for j, items in zip(batch_indices, batch_results):
+                    url = products_to_parse[j]
+                    if items is None:
+                        # ошибка/таймаут — не помечаем как no_price, попробуем в след. раз
+                        continue
+                    if not items:
+                        # parse() вернул пустой список — у товара нет цены ни в одном регионе
+                        if url not in no_price_urls:
+                            no_price_urls.add(url)
+                            no_price_added_since_checkpoint += 1
+                        continue
+                    batch_items.extend(items)
+
+                new_result.extend(batch_items)
+                unmerged_buffer.extend(batch_items)
+                processed_since_checkpoint += (batch_end - i)
                 await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
 
                 uni(new_result)
@@ -5732,6 +5928,25 @@ async def main():
                     except Exception:
                         pass
 
+                # Чекпоинт: каждые CHECKPOINT_EVERY обработанных товаров —
+                # сливаем накопленный буфер в existing_result и атомарно пишем result.pkl
+                if processed_since_checkpoint >= CHECKPOINT_EVERY:
+                    try:
+                        added = _merge_chunk_into_existing(existing_result, unmerged_buffer, reparse_mode)
+                        _save_pkl_atomic("result.pkl", existing_result)
+                        if no_price_added_since_checkpoint:
+                            _save_no_price_urls(no_price_urls)
+                        print(
+                            f"\n  [CHECKPOINT] result.pkl сохранён: всего {len(existing_result)} "
+                            f"(+{added} новых, буфер слит: {len(unmerged_buffer)} записей, "
+                            f"мёртвых URL+{no_price_added_since_checkpoint})"
+                        )
+                        unmerged_buffer = []
+                        processed_since_checkpoint = 0
+                        no_price_added_since_checkpoint = 0
+                    except Exception as e:
+                        print(f"\n  [CHECKPOINT FAILED] {type(e).__name__}: {e}")
+
             print()
 
         end = perf_counter()
@@ -5744,85 +5959,37 @@ async def main():
         print(f" Новых товаров спарсено: {len(new_result)}")
         print(f" Пустых возвратов parse(): {empty_returns} из {len(products_to_parse)}")
         print(f" Исключений в задачах: {task_errors}")
+        print(f" URL без цены (помечены как 'мёртвые'): {len(no_price_urls)}")
 
-        # Объединяем результаты
+        # Финальный мердж: сливаем остаток буфера и (для режима 1) дедуплицируем всё.
         print("\n" + "=" * 80)
-        print(" ОБЪЕДИНЕНИЕ РЕЗУЛЬТАТОВ")
+        print(" ОБЪЕДИНЕНИЕ РЕЗУЛЬТАТОВ (финальный мердж)")
         print("=" * 80)
 
-        print(f" Старых записей: {len(existing_result)}")
-        print(f" Новых записей: {len(new_result)}")
+        print(f" Записей в existing_result: {len(existing_result)}")
+        print(f" Несохранённых в буфере: {len(unmerged_buffer)}")
 
-        # Если допарсиваем товары без цен (режимы 2, 3, 4), нужно обновить существующие записи
-        if reparse_mode in ["2", "3", "4"]:
-            print("\n Обновление существующих записей с новыми ценами...")
+        if unmerged_buffer:
+            added = _merge_chunk_into_existing(existing_result, unmerged_buffer, reparse_mode)
+            print(f"    Слито из буфера: +{added} новых записей")
+            unmerged_buffer = []
 
-            # Создаем словарь ID -> новые данные
-            new_data_by_id = {}
-            for item in new_result:
-                product_id = item.get("id", "")
-                if product_id:
-                    new_data_by_id[product_id] = item
-
-            # Обновляем существующие записи
-            updated_count = 0
-            for i, item in enumerate(existing_result):
-                product_id = item.get("id", "")
-                if product_id in new_data_by_id:
-                    new_item = new_data_by_id[product_id]
-
-                    # Обновляем цены если они появились (новые названия полей)
-                    if new_item.get("price_uah", 0) > 0:
-                        existing_result[i]["price_uah"] = new_item["price_uah"]
-                        existing_result[i]["old_price_uah"] = new_item.get("old_price_uah", 0)
-                        existing_result[i]["ps_plus_price_uah"] = new_item.get("ps_plus_price_uah")
-                        updated_count += 1
-
-                    if new_item.get("price_try", 0) > 0:
-                        existing_result[i]["price_try"] = new_item["price_try"]
-                        existing_result[i]["old_price_try"] = new_item.get("old_price_try", 0)
-                        existing_result[i]["ps_plus_price_try"] = new_item.get("ps_plus_price_try")
-                        updated_count += 1
-
-                    if new_item.get("price_inr", 0) > 0:
-                        existing_result[i]["price_inr"] = new_item["price_inr"]
-                        existing_result[i]["old_price_inr"] = new_item.get("old_price_inr", 0)
-                        existing_result[i]["ps_plus_price_inr"] = new_item.get("ps_plus_price_inr")
-                        updated_count += 1
-
-                    # Обновляем минимальные цены в рублях
-                    if new_item.get("price_rub"):
-                        existing_result[i]["price_rub"] = new_item["price_rub"]
-                        existing_result[i]["price_rub_region"] = new_item.get("price_rub_region")
-
-                    if new_item.get("ps_plus_price_rub"):
-                        existing_result[i]["ps_plus_price_rub"] = new_item["ps_plus_price_rub"]
-
-                    # Удаляем из new_data_by_id, чтобы не добавить дубликат
-                    del new_data_by_id[product_id]
-
-            # Добавляем новые товары (которых не было в existing_result)
-            new_items = [new_data_by_id[pid] for pid in new_data_by_id]
-            combined_result = existing_result + new_items
-
-            print(f"    Обновлено записей: {updated_count}")
-            print(f"    Добавлено новых: {len(new_items)}")
-        else:
-            # Для режима 1 просто объединяем
-            combined_result = existing_result + new_result
-            initial_count = len(combined_result)
-            uni(combined_result)
-            duplicates_removed = initial_count - len(combined_result)
-
+        if reparse_mode == "1":
+            # Для режима 1 — дополнительно дедуплицируем итог
+            initial_count = len(existing_result)
+            uni(existing_result)
+            duplicates_removed = initial_count - len(existing_result)
             if duplicates_removed > 0:
                 print(f"  Удалено дубликатов: {duplicates_removed}")
 
+        combined_result = existing_result
         print(f" Итого записей: {len(combined_result)}")
 
-        # Сохраняем обновленный result.pkl
-        with open("result.pkl", "wb") as file:
-            pickle.dump(combined_result, file)
+        # Финальное сохранение result.pkl + no_price_urls.pkl
+        _save_pkl_atomic("result.pkl", combined_result)
+        _save_no_price_urls(no_price_urls)
         print(f" Обновленный result.pkl сохранен ({len(combined_result)} записей)")
+        print(f" {NO_PRICE_URLS_PATH} сохранен ({len(no_price_urls)} URL без цены)")
 
         # Переходим к обработке данных и загрузке в БД
         print("\n" + "=" * 80)
@@ -5866,7 +6033,7 @@ async def main():
                 print(f"\n[OK] Загружено {len(all_set)} промо из promo.pkl (старый формат, конвертировано)")
         else:
             print("\n[!] promo.pkl не найден, создаем новый...")
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as temp_session:
+            async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(120)) as temp_session:
                 promo = await get_all_ps_plus_subscriptions(temp_session)
                 with open("promo.pkl", "wb") as file:
                     pickle.dump(promo, file)
@@ -5886,7 +6053,7 @@ async def main():
         all_parsed_records = []
         parse_logger = ParseLogger()
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(120)) as session:
+        async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(120)) as session:
             # Сначала собираем все 3 URL-а, чтобы понять: какие регионы нужно искать
             # автоматически (Enter = авто через cross_region_resolver в parse()),
             # а какие пользователь указал вручную (тогда parse_tr / parse_in).
@@ -6292,7 +6459,7 @@ async def main():
         force_close=False,
         ttl_dns_cache=300,
     )
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120, connect=30), connector=connector) as session:
+    async with aiohttp.ClientSession(trust_env=True, timeout=aiohttp.ClientTimeout(total=120, connect=30), connector=connector) as session:
         # Get promo (подписки PS Plus)
         if os.path.exists("promo.pkl"):
             print("\n" + "=" * 80)
