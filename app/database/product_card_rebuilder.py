@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from config.settings import settings
 
@@ -122,6 +122,68 @@ def rebuild_product_cards(connection) -> CardRebuildResult:
     )
 
 
+def rebuild_product_cards_for_ids(connection, product_ids: Iterable[str]) -> CardRebuildResult:
+    """
+    Пересобрать только карточки, затронутые конкретными products.id.
+
+    Нужен для ручного парсинга из админки: после добавления 1-10 товаров нельзя
+    пересобирать всю витрину на десятках тысяч строк и подвешивать сайт.
+    """
+    if not settings.PRODUCTS_USE_CARDS_TABLE:
+        return CardRebuildResult(changed=False, reason="feature_disabled")
+
+    ids = sorted({str(product_id).strip() for product_id in product_ids if product_id})
+    if not ids:
+        return CardRebuildResult(changed=False, reason="empty_ids")
+
+    started = time.monotonic()
+
+    # Если таблица ещё не создана, лучше мягко отдать fallback на старый путь каталога,
+    # чем ронять ручной парсинг.
+    cards_table_exists = connection.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'product_cards'")
+    ).scalar()
+    if not cards_table_exists:
+        logger.warning("rebuild_product_cards_for_ids: product_cards table is missing; skipping")
+        return CardRebuildResult(changed=False, reason="missing_product_cards")
+
+    rows = _load_products_for_ids(connection, ids)
+    groups = _group_by_card_id(rows)
+
+    delete_stmt = text("DELETE FROM product_cards WHERE card_id IN :ids").bindparams(
+        bindparam("ids", expanding=True)
+    )
+    connection.execute(delete_stmt, {"ids": ids})
+
+    if groups:
+        from app.database.product_cache_importer import CurrencyConverter
+
+        converter = CurrencyConverter(connection)
+        cards = [_build_card_row(group, converter) for group in groups.values()]
+        favorites_by_card_id = _load_favorites_counts(connection, set(groups.keys()))
+        for card in cards:
+            card["favorites_count"] = favorites_by_card_id.get(card["card_id"], 0)
+        _insert_cards(connection, cards)
+    else:
+        cards = []
+
+    elapsed = time.monotonic() - started
+    logger.info(
+        "product_cards partially rebuilt: requested=%s source_rows=%s cards=%s elapsed=%.2fs",
+        len(ids),
+        len(rows),
+        len(cards),
+        elapsed,
+    )
+    return CardRebuildResult(
+        changed=True,
+        reason="partial_rebuilt",
+        source_count=len(rows),
+        cards_count=len(cards),
+        elapsed_s=elapsed,
+    )
+
+
 # ── Группировка и сборка карточек ─────────────────────────────────────────────
 
 
@@ -142,6 +204,15 @@ _SOURCE_COLUMNS = (
 def _load_products(connection) -> list[dict[str, Any]]:
     columns_sql = ", ".join(f'"{col}"' for col in _SOURCE_COLUMNS)
     rows = connection.execute(text(f"SELECT {columns_sql} FROM products")).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _load_products_for_ids(connection, product_ids: list[str]) -> list[dict[str, Any]]:
+    columns_sql = ", ".join(f'"{col}"' for col in _SOURCE_COLUMNS)
+    stmt = text(f"SELECT {columns_sql} FROM products WHERE id IN :ids").bindparams(
+        bindparam("ids", expanding=True)
+    )
+    rows = connection.execute(stmt, {"ids": product_ids}).mappings().all()
     return [dict(row) for row in rows]
 
 

@@ -722,13 +722,6 @@ class SiteAdminService:
                     )
                     parsed_result = AdminProductManualParseResponse(**result)
 
-                    if payload.save_to_db and settings.PRODUCTS_USE_CARDS_TABLE:
-                        from app.database.connection import engine
-                        from app.database.product_card_rebuilder import rebuild_product_cards
-
-                        with engine.begin() as connection:
-                            rebuild_product_cards(connection)
-
                     async with _manual_product_parse_tasks_lock:
                         task = _manual_product_parse_tasks.get(task_id)
                         if task is not None:

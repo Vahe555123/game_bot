@@ -48,7 +48,7 @@ class Settings:
         "yes",
     )
     PRODUCTS_CARDS_REBUILD_ON_STARTUP: bool = os.getenv(
-        "PRODUCTS_CARDS_REBUILD_ON_STARTUP", "true"
+        "PRODUCTS_CARDS_REBUILD_ON_STARTUP", "false"
     ).lower() in ("1", "true", "yes")
 
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")

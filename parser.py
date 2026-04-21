@@ -14,6 +14,7 @@ import os
 import pickle
 import signal
 import sys
+import tempfile
 import hashlib
 import traceback
 import unicodedata
@@ -26,6 +27,38 @@ import cross_region_resolver
 load_dotenv()
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+_manual_result_cache_path: Optional[Path] = None
+
+
+def _get_manual_result_cache_path() -> Path:
+    """Путь к кэшу ручного парсинга (result.pkl). На VPS файл в корне может быть неwritable — тогда /tmp."""
+    global _manual_result_cache_path
+    if _manual_result_cache_path is not None:
+        return _manual_result_cache_path
+
+    override = (os.getenv("MANUAL_RESULT_CACHE_PATH") or "").strip()
+    if override:
+        path = Path(override).expanduser().resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _manual_result_cache_path = path
+        return path
+
+    primary = PROJECT_ROOT / "result.pkl"
+    try:
+        if not primary.exists():
+            with primary.open("wb") as file:
+                pickle.dump([], file)
+        else:
+            with primary.open("r+b") as file:
+                file.seek(0, 2)
+        _manual_result_cache_path = primary
+        return primary
+    except PermissionError:
+        fallback = Path(tempfile.gettempdir()) / "game_bot2_manual_result.pkl"
+        print(f"[!] Нет прав на запись в {primary}, кэш ручного парсинга: {fallback}")
+        _manual_result_cache_path = fallback
+        return fallback
 
 
 # ============================================================================
@@ -2195,12 +2228,17 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         if "Подписка" in name:
                             product_type = "Подписка"
                         else:
-                            if product["skus"][0]["name"].lower() != "демоверсия" or product["skus"][0]["name"].lower() != "Полная ознакомительная версия игры":
-                                product_type = product["skus"][0]["name"]
-                            else:
-                                if len(product["skus"]) > 1:
-                                    product_type = product["skus"][1]["name"]
-                            if product["skus"][0]["name"].lower() == "демоверсия" or product["skus"][0]["name"].lower() == "полная ознакомительная версия игры" or not product_type:
+                            sku_names = [str((sku or {}).get("name") or "").strip() for sku in product.get("skus") or []]
+                            primary_sku_name = sku_names[0] if sku_names else ""
+                            primary_sku_lower = primary_sku_name.lower()
+                            demo_sku_names = {"демоверсия", "полная ознакомительная версия игры"}
+
+                            if primary_sku_name and primary_sku_lower not in demo_sku_names:
+                                product_type = primary_sku_name
+                            elif len(sku_names) > 1 and sku_names[1]:
+                                product_type = sku_names[1]
+
+                            if primary_sku_lower in demo_sku_names or not product_type:
                                 product_type = "Игра"
 
                         # Нормализуем тип продукта
@@ -3164,6 +3202,49 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
             logger.log_product_error(url, f"Все {counter} попыток исчерпаны, товар пропущен")
         return []
 
+def _payload_has_value(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _merge_api_product_fields(product: dict, full_product: dict | None) -> None:
+    if not full_product:
+        return
+
+    for key in (
+        "webctas",
+        "media",
+        "localizedGenres",
+        "skus",
+        "edition",
+        "invariantName",
+        "concept",
+        "releaseDate",
+        "releaseDateDisplayValue",
+        "contentRating",
+        "starRating",
+        "stars",
+    ):
+        value = full_product.get(key)
+        if not _payload_has_value(value):
+            continue
+        if key == "webctas" or not _payload_has_value(product.get(key)):
+            product[key] = value
+
+
+def _extract_product_image(product: dict) -> str:
+    media_items = product.get("media") or []
+    preferred_roles = ("MASTER", "EDITION_KEY_ART", "GAMEHUB_COVER_ART", "BACKGROUND")
+
+    for role in preferred_roles:
+        for item in media_items:
+            if str(item.get("role") or "").upper() == role and item.get("url"):
+                return item["url"]
+
+    for item in media_items:
+        if item.get("url"):
+            return item["url"]
+    return ""
+
 
 async def parse_tr(session: aiohttp.ClientSession, url: str):
     """
@@ -3311,10 +3392,12 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
                         print(f"     Пропуск продукта без ID или имени")
                         continue
 
-                    # Если продукт из concept, у него может не быть webctas с ценами
-                    # Делаем дополнительный запрос для получения полной информации
-                    if not product.get("webctas"):
-                        print(f"   Получаю цены для: {name}")
+                    # Если продукт из concept, у него часто нет webctas/media.
+                    # Делаем дополнительный запрос и сливаем полную карточку,
+                    # иначе TR/IN-only ручной парсинг остаётся без картинки.
+                    full_product_payload = None
+                    if not product.get("webctas") or not product.get("media"):
+                        print(f"   Получаю полные данные для: {name}")
                         tr_parts = url.split("/")
                         product_url = "/".join(tr_parts[:4]) + f"/product/{product_id}"
                         product_params_price, _ = get_params(product_url)
@@ -3328,12 +3411,12 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
                                 product_text = await product_resp.text()
 
                             product_data = loads(product_text)
-                            product_retrieve = product_data.get("data", {}).get("productRetrieve", {})
+                            full_product_payload = product_data.get("data", {}).get("productRetrieve", {})
 
-                            if product_retrieve and product_retrieve.get("webctas"):
-                                # Обновляем product данными с ценами
-                                product["webctas"] = product_retrieve["webctas"]
-                                print(f"       Цены получены ({len(product_retrieve['webctas'])} CTA)")
+                            if full_product_payload:
+                                _merge_api_product_fields(product, full_product_payload)
+                            if full_product_payload and full_product_payload.get("webctas"):
+                                print(f"       Цены получены ({len(full_product_payload['webctas'])} CTA)")
                             else:
                                 print(f"        Цены не найдены")
                         except Exception as e:
@@ -3364,21 +3447,16 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
                     if "Subscription" in name:
                         product_type = "Подписка"
                     elif product.get("skus") and len(product["skus"]) > 0:
-                        sku_name = product["skus"][0].get("name", "")
+                        sku_name = str(product["skus"][0].get("name") or "").strip()
                         if sku_name.lower() not in ["demo", "демоверсия", "полная ознакомительная версия игры"]:
                             product_type = sku_name
                         elif len(product["skus"]) > 1:
-                            product_type = product["skus"][1].get("name", "Игра")
+                            product_type = product["skus"][1].get("name") or "Игра"
 
                     product_type = EditionTypeNormalizer.normalize_type(product_type)
 
                     # Image из API
-                    image = ""
-                    if product.get("media"):
-                        for img in product["media"]:
-                            if img.get("role") == "MASTER":
-                                image = img.get("url", "")
-                                break
+                    image = _extract_product_image(product)
 
                     # Tags - собираем все уникальные названия для двуязычного поиска
                     tags = [main_name, name]
@@ -3543,7 +3621,7 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
                             "discount": discount_percent,
                             "discount_percent": discount_percent,
                             "discount_end": discount_end.strftime("%Y-%m-%d %H:%M:%S") if discount_end else None,
-                            "release_date": _extract_release_date_from_payload(product) or _extract_release_date_from_payload(product_retrieve),
+                            "release_date": _extract_release_date_from_payload(product) or _extract_release_date_from_payload(full_product_payload),
                             "tags": ",".join(set(cleaned_tags)),
                             "edition": edition_name,
                             "description": None,  # Берется из UA
@@ -3714,9 +3792,11 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
                     if not product_id or not name:
                         continue
 
-                    # Если нет webctas, запрашиваем полную информацию
-                    if not product.get("webctas"):
-                        print(f"   Получаю цены для: {name}")
+                    # Если продукт пришёл из concept, у него может не быть webctas/media.
+                    # Сливаем полную карточку, чтобы IN-only парсинг сохранял картинку.
+                    full_product_payload = None
+                    if not product.get("webctas") or not product.get("media"):
+                        print(f"   Получаю полные данные для: {name}")
                         in_parts = url.split("/")
                         product_url = "/".join(in_parts[:4]) + f"/product/{product_id}"
                         product_params_price, _ = get_params(product_url)
@@ -3730,12 +3810,16 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
                                 product_text = await product_resp.text()
 
                             product_data = loads(product_text)
-                            product_retrieve = product_data.get("data", {}).get("productRetrieve", {})
+                            full_product_payload = product_data.get("data", {}).get("productRetrieve", {})
 
-                            if product_retrieve and product_retrieve.get("webctas"):
-                                product["webctas"] = product_retrieve["webctas"]
-                        except Exception:
-                            pass
+                            if full_product_payload:
+                                _merge_api_product_fields(product, full_product_payload)
+                            if full_product_payload and full_product_payload.get("webctas"):
+                                print(f"       Цены получены ({len(full_product_payload['webctas'])} CTA)")
+                            else:
+                                print(f"        Цены не найдены")
+                        except Exception as e:
+                            print(f"        Ошибка получения цен: {type(e).__name__}")
 
                         await asyncio.sleep(0.5)
 
@@ -3761,21 +3845,16 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
                     if "Subscription" in name:
                         product_type = "Подписка"
                     elif product.get("skus") and len(product["skus"]) > 0:
-                        sku_name = product["skus"][0].get("name", "")
+                        sku_name = str(product["skus"][0].get("name") or "").strip()
                         if sku_name.lower() not in ["demo", "демоверсия"]:
                             product_type = sku_name
                         elif len(product["skus"]) > 1:
-                            product_type = product["skus"][1].get("name", "Игра")
+                            product_type = product["skus"][1].get("name") or "Игра"
 
                     product_type = EditionTypeNormalizer.normalize_type(product_type)
 
                     # Image
-                    image = ""
-                    if product.get("media"):
-                        for img in product["media"]:
-                            if img.get("role") == "MASTER":
-                                image = img.get("url", "")
-                                break
+                    image = _extract_product_image(product)
 
                     # Tags - собираем все уникальные названия для двуязычного поиска
                     tags = [main_name, name]
@@ -3925,7 +4004,7 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
                             "discount": discount_percent,
                             "discount_percent": discount_percent,
                             "discount_end": discount_end.strftime("%Y-%m-%d %H:%M:%S") if discount_end else None,
-                            "release_date": _extract_release_date_from_payload(product) or _extract_release_date_from_payload(product_retrieve),
+                            "release_date": _extract_release_date_from_payload(product) or _extract_release_date_from_payload(full_product_payload),
                             "tags": ",".join(set(cleaned_tags)),
                             "edition": edition_name,
                             "description": None,
@@ -4694,6 +4773,48 @@ async def save_batch_to_db(result: list, promo, clear_db: bool = False):
     return len(products_to_insert)
 
 
+def _parser_sqlalchemy_url() -> str:
+    if SQLITE_DB_PATH == ":memory:":
+        return "sqlite:///:memory:"
+    return f"sqlite:///{Path(SQLITE_DB_PATH).resolve().as_posix()}"
+
+
+def _refresh_product_cards_sync(product_ids: list[str], *, full_rebuild: bool) -> None:
+    try:
+        from sqlalchemy import create_engine
+
+        from app.database.product_card_rebuilder import (
+            rebuild_product_cards,
+            rebuild_product_cards_for_ids,
+        )
+        from config.settings import settings
+
+        if not settings.PRODUCTS_USE_CARDS_TABLE:
+            return
+
+        engine = create_engine(
+            _parser_sqlalchemy_url(),
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
+        try:
+            with engine.begin() as connection:
+                if full_rebuild:
+                    rebuild_product_cards(connection)
+                else:
+                    rebuild_product_cards_for_ids(connection, product_ids)
+        finally:
+            engine.dispose()
+    except Exception as exc:
+        print(f"[!] Не удалось обновить product_cards: {type(exc).__name__}: {exc}")
+
+
+async def refresh_product_cards_after_save(product_ids: list[str], *, full_rebuild: bool = False) -> None:
+    unique_ids = sorted({str(product_id).strip() for product_id in product_ids if product_id})
+    if not unique_ids and not full_rebuild:
+        return
+    await asyncio.to_thread(_refresh_product_cards_sync, unique_ids, full_rebuild=full_rebuild)
+
+
 async def process_and_save_to_db(result: list, promo: list, start_time: float, clear_db: bool = True):
     """
     Обработка спарсенных данных и сохранение в SQLite БД
@@ -4731,6 +4852,10 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
         await db.executemany(INSERT_PRODUCTS_SQL, products_to_insert)
         await db.commit()
         print(f"[OK] Успешно вставлено {len(products_to_insert)} продуктов")
+
+    product_ids = [row[0] for row in products_to_insert if row and row[0]]
+    product_cards_full_rebuild = clear_db or len(set(product_ids)) > 1000
+    await refresh_product_cards_after_save(product_ids, full_rebuild=product_cards_full_rebuild)
 
     # Статистика
     end = perf_counter()
@@ -4795,7 +4920,7 @@ async def _load_manual_promo_cache() -> Any:
 
 
 def _load_manual_result_cache() -> list[dict]:
-    result_path = PROJECT_ROOT / "result.pkl"
+    result_path = _get_manual_result_cache_path()
     if not result_path.exists():
         with result_path.open("wb") as file:
             pickle.dump([], file)
@@ -4807,8 +4932,14 @@ def _load_manual_result_cache() -> list[dict]:
 
 
 def _save_manual_result_cache(records: list[dict]) -> None:
-    with (PROJECT_ROOT / "result.pkl").open("wb") as file:
-        pickle.dump(records, file)
+    result_path = _get_manual_result_cache_path()
+    try:
+        with result_path.open("wb") as file:
+            pickle.dump(records, file)
+    except PermissionError as exc:
+        raise PermissionError(
+            f"Нет прав на запись {result_path}. Проверьте владельца result.pkl и пользователя, под которым запущен сайт."
+        ) from exc
 
 
 async def _expand_manual_product_urls(session: aiohttp.ClientSession, url: str) -> list[str]:
@@ -4939,6 +5070,9 @@ async def run_manual_product_parse(
     _validate_manual_url(ua_url, "ru-ua", "UA")
     _validate_manual_url(tr_url, "en-tr", "TR")
     _validate_manual_url(in_url, "en-in", "IN")
+
+    await ensure_database_schema()
+    await currency_converter.load_rates()
 
     start = perf_counter()
     promo = await _load_manual_promo_cache()
