@@ -144,6 +144,7 @@ def list_site_admin_products(
     region: str | None = Query(None),
     category: str | None = Query(None),
     sort: str | None = Query("popular"),
+    missing_region: str | None = Query(None),
     db: Session = Depends(get_db),
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
 ):
@@ -157,6 +158,7 @@ def list_site_admin_products(
             region=region,
             category=category,
             sort=sort,
+            missing_region=missing_region,
         )
     except AuthServiceError as error:
         _raise_http_auth_error(error)
@@ -231,6 +233,30 @@ def delete_site_admin_product_group(
     except AuthServiceError as error:
         _raise_http_auth_error(error)
     return AdminActionResponse(message=f"Удалено строк товара: {deleted_count}.")
+
+
+@router.get("/unparsed-urls", summary="URLs из products.pkl, отсутствующие в БД")
+def get_site_admin_unparsed_urls(
+    page: int = Query(1, ge=1),
+    limit: int = Query(100, ge=1, le=500),
+    mode: str = Query("missing_any"),
+    locale: str | None = Query(None),
+    search: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.list_unparsed_urls(
+            db,
+            page=page,
+            limit=limit,
+            mode=mode,
+            locale=locale,
+            search=search,
+        )
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
 
 
 @router.delete("/products/{product_id}/favorites/{favorite_id}", response_model=AdminActionResponse, summary="Delete product favorite")

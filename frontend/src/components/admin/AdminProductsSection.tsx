@@ -314,6 +314,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   const [search, setSearch] = useState('')
   const [regionFilter, setRegionFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
+  const [missingRegionFilter, setMissingRegionFilter] = useState('')
   const [sort, setSort] = useState<AdminProductSortMode>('popular')
   const [isLoading, setIsLoading] = useState(true)
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
@@ -335,6 +336,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
         region: regionFilter || undefined,
         category: categoryFilter.trim() || undefined,
         sort,
+        missing_region: missingRegionFilter || undefined,
       })
       setProducts(response.products)
       setTotal(response.total)
@@ -350,7 +352,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
 
   useEffect(() => {
     loadProducts()
-  }, [page, limit, search, regionFilter, categoryFilter, sort])
+  }, [page, limit, search, regionFilter, categoryFilter, sort, missingRegionFilter])
 
   function applyProductToList(product: AdminProductDetails) {
     setProducts((current) => {
@@ -560,7 +562,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
 
       <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.88fr)_minmax(0,1.12fr)] 2xl:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
         <div className="min-w-0 space-y-5">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px_180px]">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px_180px_200px]">
             <input
               value={search}
               onChange={(event) => {
@@ -605,6 +607,22 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
             >
               <option value="popular">По избранному</option>
               <option value="alphabet">По алфавиту</option>
+            </select>
+
+            <select
+              value={missingRegionFilter}
+              onChange={(event) => {
+                setPage(1)
+                setMissingRegionFilter(event.target.value)
+              }}
+              className="auth-input"
+              title="Показать товары, у которых отсутствует регион(ы)"
+            >
+              <option value="">Цены: все</option>
+              <option value="any">Неполные (&lt; 3 регионов)</option>
+              <option value="UA">Нет UA</option>
+              <option value="TR">Нет TR</option>
+              <option value="IN">Нет IN</option>
             </select>
           </div>
 

@@ -1,6 +1,9 @@
 ﻿from __future__ import annotations
 
+import os
+import pickle
 import re
+import threading
 from contextlib import contextmanager
 from typing import Any, Optional
 
@@ -555,6 +558,7 @@ class SiteAdminService:
         region: Optional[str] = None,
         category: Optional[str] = None,
         sort: Optional[str] = None,
+        missing_region: Optional[str] = None,
     ) -> AdminProductListResponse:
         favorites_subquery = (
             db.query(
@@ -584,6 +588,28 @@ class SiteAdminService:
             query = query.filter(Product.region == region.strip().upper())
         if category:
             query = query.filter(Product.category == category.strip())
+
+        # Фильтр по отсутствующим регионам. Значения:
+        #   "any" / "incomplete"  — у товара < 3 региональных строк;
+        #   "TR" / "UA" / "IN"    — конкретный регион отсутствует у товара.
+        normalized_missing = (missing_region or "").strip().upper()
+        if normalized_missing:
+            regions_subquery = (
+                db.query(
+                    Product.id.label("product_id"),
+                    func.count(func.distinct(Product.region)).label("regions_count"),
+                    func.group_concat(Product.region).label("regions_list"),
+                )
+                .group_by(Product.id)
+                .subquery()
+            )
+            query = query.outerjoin(regions_subquery, regions_subquery.c.product_id == Product.id)
+            if normalized_missing in ("ANY", "INCOMPLETE"):
+                query = query.filter(regions_subquery.c.regions_count < 3)
+            elif normalized_missing in ("TR", "UA", "IN"):
+                query = query.filter(
+                    ~regions_subquery.c.regions_list.like(f"%{normalized_missing}%")
+                )
 
         total = query.count()
         normalized_sort = (sort or "popular").strip().lower()
@@ -686,6 +712,88 @@ class SiteAdminService:
 
         db.delete(favorite)
         db.commit()
+
+    def list_unparsed_urls(
+        self,
+        db: Session,
+        *,
+        page: int = 1,
+        limit: int = 100,
+        mode: str = "missing_any",
+        locale: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> dict:
+        """Сравнивает products.pkl с products-таблицей и возвращает URL,
+        по которым нет записей в БД (mode='missing_any' — не хватает региона URL'а,
+        mode='missing_all' — в БД нет ни одного региона для этого id,
+        mode='all' — все URL)."""
+        urls = _load_products_pkl_urls()
+        db_regions_by_id = _load_db_regions_by_id(db)
+
+        normalized_mode = (mode or "missing_any").strip().lower()
+        normalized_locale = (locale or "").strip().lower() or None
+        search_term = (search or "").strip().lower() or None
+
+        items: list[dict] = []
+        missing_by_locale: dict[str, int] = {}
+
+        for raw_url in urls:
+            url = raw_url.strip()
+            if not url:
+                continue
+            parts = url.rstrip("/").split("/")
+            if len(parts) < 5:
+                continue
+            url_locale = parts[3]
+            product_id = parts[-1].upper()
+            expected_region = _LOCALE_TO_REGION.get(url_locale)
+            db_regions = db_regions_by_id.get(product_id, set())
+
+            # Фильтры выборки
+            if normalized_locale and url_locale != normalized_locale:
+                continue
+            if search_term and search_term not in url.lower():
+                continue
+
+            if normalized_mode == "missing_all":
+                include = len(db_regions) == 0
+            elif normalized_mode == "all":
+                include = True
+            else:  # missing_any
+                if expected_region:
+                    include = expected_region not in db_regions
+                else:
+                    include = len(db_regions) == 0
+
+            if not include:
+                continue
+
+            missing_by_locale[url_locale] = missing_by_locale.get(url_locale, 0) + 1
+            items.append(
+                {
+                    "url": url,
+                    "locale": url_locale,
+                    "product_id": product_id,
+                    "exists_in_regions": sorted(db_regions),
+                    "missing_regions": sorted(
+                        r for r in ("UA", "TR", "IN") if r not in db_regions
+                    ),
+                }
+            )
+
+        total = len(items)
+        offset = max(page - 1, 0) * limit
+        page_items = items[offset : offset + limit]
+
+        return {
+            "total_urls_in_pkl": len(urls),
+            "parsed_ids": len(db_regions_by_id),
+            "unparsed_total": total,
+            "missing_by_locale": missing_by_locale,
+            "items": page_items,
+            "page": page,
+            "limit": limit,
+        }
 
     def list_purchases(
         self,
@@ -1007,4 +1115,85 @@ def get_site_admin_service() -> SiteAdminService:
     if _site_admin_service is None:
         _site_admin_service = SiteAdminService()
     return _site_admin_service
+
+
+# ==========================================================
+# products.pkl <-> БД diff (для админского "Не спарсенные URL")
+# ==========================================================
+
+_LOCALE_TO_REGION = {
+    "ru-ua": "UA",
+    "en-tr": "TR",
+    "en-in": "IN",
+}
+
+_PRODUCTS_PKL_CACHE: dict[str, Any] = {"mtime": None, "urls": None}
+_DB_REGIONS_CACHE: dict[str, Any] = {"signature": None, "regions_by_id": None}
+_UNPARSED_LOCK = threading.Lock()
+
+
+def _products_pkl_path() -> str:
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    return os.path.join(project_root, "products.pkl")
+
+
+def _load_products_pkl_urls() -> list[str]:
+    path = _products_pkl_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return []
+
+    with _UNPARSED_LOCK:
+        if _PRODUCTS_PKL_CACHE["mtime"] == mtime and _PRODUCTS_PKL_CACHE["urls"] is not None:
+            return _PRODUCTS_PKL_CACHE["urls"]
+
+        try:
+            with open(path, "rb") as handle:
+                data = pickle.load(handle)
+        except Exception:
+            return []
+
+        urls: list[str] = []
+        if isinstance(data, list):
+            urls = [str(x) for x in data if x]
+        elif isinstance(data, dict):
+            for value in data.values():
+                if isinstance(value, str):
+                    urls.append(value)
+
+        _PRODUCTS_PKL_CACHE["mtime"] = mtime
+        _PRODUCTS_PKL_CACHE["urls"] = urls
+        return urls
+
+
+def _load_db_regions_by_id(db: Session) -> dict[str, set[str]]:
+    """Возвращает {product_id: {"UA","TR","IN"} подмножество} по текущему состоянию БД.
+    Кэшируется по суммарному числу строк — если счёт не менялся, возвращается кэш."""
+    total_rows = db.query(func.count(Product.id)).scalar() or 0
+    signature = total_rows
+
+    with _UNPARSED_LOCK:
+        if (
+            _DB_REGIONS_CACHE["signature"] == signature
+            and _DB_REGIONS_CACHE["regions_by_id"] is not None
+        ):
+            return _DB_REGIONS_CACHE["regions_by_id"]
+
+        rows = db.query(Product.id, Product.region).all()
+        regions_by_id: dict[str, set[str]] = {}
+        for product_id, region in rows:
+            if not product_id:
+                continue
+            pid = str(product_id).upper()
+            reg = (region or "").upper()
+            bucket = regions_by_id.setdefault(pid, set())
+            if reg:
+                bucket.add(reg)
+
+        _DB_REGIONS_CACHE["signature"] = signature
+        _DB_REGIONS_CACHE["regions_by_id"] = regions_by_id
+        return regions_by_id
 

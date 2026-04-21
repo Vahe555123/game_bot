@@ -63,8 +63,36 @@ export async function fetchAdminProducts(params: {
   region?: string
   category?: string
   sort?: string
+  missing_region?: string
 }) {
   const response = await apiClient.get<AdminProductListResponse>('/site/admin/products', { params })
+  return response.data
+}
+
+export type AdminUnparsedUrlsResponse = {
+  total_urls_in_pkl: number
+  parsed_ids: number
+  unparsed_total: number
+  missing_by_locale: Record<string, number>
+  items: {
+    url: string
+    locale: string
+    product_id: string
+    exists_in_regions: string[]
+    missing_regions: string[]
+  }[]
+  page: number
+  limit: number
+}
+
+export async function fetchAdminUnparsedUrls(params: {
+  page?: number
+  limit?: number
+  mode?: 'missing_all' | 'missing_any' | 'all'
+  locale?: string
+  search?: string
+}) {
+  const response = await apiClient.get<AdminUnparsedUrlsResponse>('/site/admin/unparsed-urls', { params })
   return response.data
 }
 

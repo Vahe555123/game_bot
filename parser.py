@@ -1833,17 +1833,63 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
         try:
             async def _fetch_ua_main():
                 async with session.get("https://web.np.playstation.com/api/graphql/v1/op", params=params, headers=json_headers(url)) as resp:
-                    return await resp.text()
+                    body = await resp.text()
+                    meta = {
+                        "status": resp.status,
+                        "length": len(body),
+                        "cf_ray": resp.headers.get("cf-ray"),
+                        "cf_mitigated": resp.headers.get("cf-mitigated"),
+                        "server": resp.headers.get("server"),
+                        "content_type": resp.headers.get("content-type"),
+                    }
+                    return body, meta
 
             async def _fetch_ua_price():
                 async with session.get("https://web.np.playstation.com/api/graphql/v1/op", params=params_price, headers=json_headers(url)) as resp:
-                    return await resp.text()
+                    body = await resp.text()
+                    meta = {
+                        "status": resp.status,
+                        "length": len(body),
+                        "cf_ray": resp.headers.get("cf-ray"),
+                        "cf_mitigated": resp.headers.get("cf-mitigated"),
+                        "server": resp.headers.get("server"),
+                        "content_type": resp.headers.get("content-type"),
+                    }
+                    return body, meta
 
-            ua, ua_price = await asyncio.gather(_fetch_ua_main(), _fetch_ua_price())
+            (ua, ua_meta), (ua_price, ua_price_meta) = await asyncio.gather(_fetch_ua_main(), _fetch_ua_price())
 
+            # Диагностика пустого/не-JSON тела — даёт понять, это CF-блок, throttling или что-то ещё.
+            def _diag(tag: str, meta: dict, body: str) -> str:
+                snippet = (body[:120].replace("\n", " ") if body else "<empty>")
+                return (
+                    f"{tag} | status={meta.get('status')} | len={meta.get('length')} | "
+                    f"ct={meta.get('content_type')} | server={meta.get('server')} | "
+                    f"cf_ray={meta.get('cf_ray')} | cf_mitigated={meta.get('cf_mitigated')} | "
+                    f"body_head={snippet!r}"
+                )
 
-            ua = loads(ua)
-            ua_price = loads(ua_price)
+            if not ua or not ua.strip():
+                if logger:
+                    logger.log_product_error(url, _diag("EMPTY_BODY_UA_MAIN", ua_meta, ua))
+                raise RuntimeError(_diag("EMPTY_BODY_UA_MAIN", ua_meta, ua))
+            if not ua_price or not ua_price.strip():
+                if logger:
+                    logger.log_product_error(url, _diag("EMPTY_BODY_UA_PRICE", ua_price_meta, ua_price))
+                raise RuntimeError(_diag("EMPTY_BODY_UA_PRICE", ua_price_meta, ua_price))
+
+            try:
+                ua = loads(ua)
+            except Exception as _je:
+                if logger:
+                    logger.log_product_error(url, _diag(f"BAD_JSON_UA_MAIN ({type(_je).__name__})", ua_meta, ua if isinstance(ua, str) else ""))
+                raise
+            try:
+                ua_price = loads(ua_price)
+            except Exception as _je:
+                if logger:
+                    logger.log_product_error(url, _diag(f"BAD_JSON_UA_PRICE ({type(_je).__name__})", ua_price_meta, ua_price if isinstance(ua_price, str) else ""))
+                raise
             ua_products = []
             ua_price_product = []
 
