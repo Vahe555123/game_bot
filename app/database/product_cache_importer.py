@@ -14,7 +14,7 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
-IMPORTER_VERSION = "1"
+IMPORTER_VERSION = "2"
 IMPORT_STATE_TABLE = "product_cache_import_state"
 TEMP_KEYS_TABLE = "_product_cache_import_keys"
 
@@ -41,6 +41,7 @@ PRODUCT_COLUMNS: tuple[tuple[str, str], ...] = (
     ("ea_access", "TEXT"),
     ("discount", "REAL"),
     ("discount_end", "TEXT"),
+    ("release_date", "TEXT"),
     ("tags", "TEXT"),
     ("edition", "TEXT"),
     ("description", "TEXT"),
@@ -454,6 +455,7 @@ def _prepare_product_rows(
             "ea_access": _to_optional_text(product.get("ea_access", 0)),
             "discount": _to_float(product.get("discount_percent")),
             "discount_end": _to_optional_text(product.get("discount_end")),
+            "release_date": _to_optional_text(product.get("release_date")),
             "tags": _to_storage_value(product.get("tags")),
             "edition": _to_optional_text(product.get("edition")),
             "description": _to_optional_text(product.get("description")),

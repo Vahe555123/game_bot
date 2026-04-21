@@ -39,6 +39,8 @@ class ProductCard(Base):
     compound = Column(Text, nullable=True)
     tags = Column(Text, nullable=True)
     rating = Column(Float, nullable=True)
+    release_date = Column(Text, nullable=True, index=True)
+    added_at = Column(Text, nullable=True, index=True)
     players_min = Column(Integer, nullable=True)
     players_max = Column(Integer, nullable=True)
     players_online = Column(Integer, nullable=True)

@@ -615,6 +615,8 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
               className="auth-input"
             >
               <option value="popular">По избранному</option>
+              <option value="added_desc">Новые в базе</option>
+              <option value="release_desc">Дата выхода: новые</option>
               <option value="alphabet">По алфавиту</option>
             </select>
 

@@ -7,7 +7,7 @@ import threading
 from contextlib import contextmanager
 from typing import Any, Optional
 
-from sqlalchemy import distinct, func, or_
+from sqlalchemy import case, distinct, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -615,6 +615,24 @@ class SiteAdminService:
         normalized_sort = (sort or "popular").strip().lower()
         if normalized_sort == "alphabet":
             query = query.order_by(Product.main_name.asc(), Product.name.asc(), Product.region.asc())
+        elif normalized_sort in {"added", "added_desc", "created", "created_desc", "new", "newest", "db_added"}:
+            null_added_last = case((Product.created_at.is_(None), 1), else_=0)
+            query = query.order_by(
+                null_added_last.asc(),
+                Product.created_at.desc(),
+                Product.main_name.asc(),
+                Product.name.asc(),
+                Product.region.asc(),
+            )
+        elif normalized_sort in {"release", "release_desc", "release_date", "released", "new_releases"}:
+            null_release_last = case((Product.release_date.is_(None), 1), else_=0)
+            query = query.order_by(
+                null_release_last.asc(),
+                Product.release_date.desc(),
+                Product.main_name.asc(),
+                Product.name.asc(),
+                Product.region.asc(),
+            )
         else:
             query = query.order_by(
                 func.coalesce(favorites_subquery.c.favorites_count, 0).desc(),

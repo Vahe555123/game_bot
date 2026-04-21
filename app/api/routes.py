@@ -361,7 +361,7 @@ def get_products(
         None,
         description="Язык игры: full_ru | partial_ru | no_ru",
     ),
-    sort: Optional[str] = Query("popular", description="Сортировка (popular, alphabet, price_asc, price_desc)"),
+    sort: Optional[str] = Query("popular", description="Сортировка (popular, added_desc, release_desc, alphabet, price_asc, price_desc)"),
     telegram_id: Optional[int] = Query(None, description="ID пользователя для настроек отображения"),
     grouped: bool = Query(True, description="Группировать товары с ценами из всех регионов"),
     db: Session = Depends(get_db)

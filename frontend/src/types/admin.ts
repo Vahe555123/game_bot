@@ -112,7 +112,7 @@ export type AdminProductListResponse = {
   limit: number
 }
 
-export type AdminProductSortMode = 'popular' | 'alphabet'
+export type AdminProductSortMode = 'popular' | 'alphabet' | 'added_desc' | 'release_desc'
 
 export type AdminProductPayload = {
   id?: string

@@ -398,6 +398,8 @@ SQLITE_INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)",
     "CREATE INDEX IF NOT EXISTS idx_products_region_category ON products(region, category)",
     "CREATE INDEX IF NOT EXISTS idx_products_main_name ON products(main_name)",
+    "CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_products_release_date ON products(release_date)",
     "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_main_name ON products(normalize_search(main_name))",
     "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_name ON products(normalize_search(name))",
     "CREATE INDEX IF NOT EXISTS idx_products_search_normalized_description ON products(normalize_search(description))",
@@ -410,6 +412,8 @@ SQLITE_INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_user_favorite_products_product_id ON user_favorite_products(product_id)",
     # product_cards — денормализованный каталог (одна строка на логический товар)
     "CREATE INDEX IF NOT EXISTS idx_product_cards_sort_name ON product_cards(sort_name)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_added_at ON product_cards(added_at)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_release_date ON product_cards(release_date)",
     "CREATE INDEX IF NOT EXISTS idx_product_cards_min_price_rub ON product_cards(min_price_rub)",
     "CREATE INDEX IF NOT EXISTS idx_product_cards_category ON product_cards(category)",
     "CREATE INDEX IF NOT EXISTS idx_product_cards_has_discount ON product_cards(has_discount)",
@@ -452,6 +456,18 @@ def _drop_indexes_for_table(connection, table_name: str) -> None:
 def _sqlite_table_columns(connection, table_name: str) -> dict[str, dict]:
     rows = connection.execute(text(f'PRAGMA table_info("{table_name}")')).mappings().all()
     return {row["name"]: dict(row) for row in rows}
+
+
+def _ensure_sqlite_table_columns(connection, table_name: str, columns: dict[str, str]) -> None:
+    if not _sqlite_table_exists(connection, table_name):
+        return
+
+    existing_columns = _sqlite_table_columns(connection, table_name)
+    for column_name, column_type in columns.items():
+        if column_name not in existing_columns:
+            quoted_table = _quote_sqlite_identifier(table_name)
+            quoted_column = _quote_sqlite_identifier(column_name)
+            connection.execute(text(f"ALTER TABLE {quoted_table} ADD COLUMN {quoted_column} {column_type}"))
 
 
 def _sqlite_foreign_key_groups(connection, table_name: str) -> list[list[dict]]:
@@ -781,6 +797,15 @@ def create_tables():
                     _migrate_currency_rates_table(connection)
                     _migrate_users_table(connection)
                     _migrate_user_favorite_products_table(connection)
+                    _ensure_sqlite_table_columns(connection, "products", {"release_date": "TEXT"})
+                    _ensure_sqlite_table_columns(
+                        connection,
+                        "product_cards",
+                        {
+                            "release_date": "TEXT",
+                            "added_at": "TEXT",
+                        },
+                    )
                     _seed_default_localizations(connection)
                     for statement in SQLITE_INDEX_STATEMENTS:
                         connection.execute(text(statement))

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 CARDS_REBUILD_STATE_KEY = "product_cards_signature"
 CARDS_REBUILD_VERSION_KEY = "product_cards_version"
-CARDS_REBUILD_VERSION = "1"
+CARDS_REBUILD_VERSION = "2"
 
 # Приоритет локализации: меньше число — лучше
 _LOCALIZATION_RANK = {
@@ -134,6 +134,7 @@ _SOURCE_COLUMNS = (
     "ps_plus_price_uah", "ps_plus_price_try", "ps_plus_price_inr",
     "ps_plus", "ea_access", "ps_plus_collection",
     "plus_types", "discount", "discount_end", "discount_percent",
+    "release_date", "created_at",
     "players_min", "players_max", "players_online",
 )
 
@@ -181,6 +182,8 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
     sort_name = (main_name or representative.get("name") or representative.get("id") or "").lower()
 
     best_loc = _best_localization([item.get("localization") for item in by_region.values()])
+    release_date = _best_date_value([item.get("release_date") for item in by_region.values()])
+    added_at = _best_date_value([item.get("created_at") for item in by_region.values()])
 
     regions_mask = 0
     for region_code, mask_bit in _REGION_MASK.items():
@@ -242,6 +245,8 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
         "compound": representative.get("compound"),
         "tags": representative.get("tags"),
         "rating": _to_optional_float(representative.get("rating")),
+        "release_date": release_date,
+        "added_at": added_at,
         "players_min": _to_optional_int(representative.get("players_min")),
         "players_max": _to_optional_int(representative.get("players_max")),
         "players_online": _to_optional_int(representative.get("players_online")),
@@ -323,6 +328,11 @@ def _best_localization(codes: list[Any]) -> str | None:
     return ranked[0][1]
 
 
+def _best_date_value(values: Iterable[Any]) -> str | None:
+    normalized = [str(value).strip() for value in values if value]
+    return max(normalized) if normalized else None
+
+
 def _region_rub(converter, local_value: Any, currency: str, fallback: Any = None) -> float | None:
     """Конвертировать локальную цену в рубли через CurrencyConverter.
 
@@ -397,7 +407,7 @@ def _load_favorites_counts(connection, card_ids: set[str]) -> dict[str, int]:
 _INSERT_COLUMNS = (
     "card_id", "name", "main_name", "search_names", "sort_name", "image", "category",
     "type", "platforms", "publisher", "edition", "description", "info", "compound", "tags",
-    "rating", "players_min", "players_max", "players_online",
+    "rating", "release_date", "added_at", "players_min", "players_max", "players_online",
     "best_localization", "ps_plus_collection", "ea_access",
     "min_price_rub", "min_price_region", "min_old_price_rub",
     "max_discount_percent", "has_discount", "has_ps_plus", "has_ea_access", "regions_mask",

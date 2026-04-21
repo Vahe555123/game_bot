@@ -241,7 +241,7 @@ class ProductFilter(BaseModel):
         None,
         description="Язык игры: full_ru (полный русский), partial_ru (субтитры/интерфейс), no_ru (без русского)",
     )
-    sort: Optional[str] = Field(None, description="Сортировка (popular, alphabet, price_asc, price_desc)")
+    sort: Optional[str] = Field(None, description="Сортировка (popular, added_desc, release_desc, alphabet, price_asc, price_desc)")
 
 class PaginationParams(BaseModel):
     page: int = Field(1, ge=1, description="Номер страницы")

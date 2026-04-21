@@ -28,6 +28,86 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
+def _normalize_release_date(value) -> Optional[str]:
+    if value in (None, ""):
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    match = re.search(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", text)
+    if match:
+        year, month, day = (int(part) for part in match.groups())
+        try:
+            return datetime(year, month, day).strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+
+    match = re.search(r"(\d{1,2})[./](\d{1,2})[./](\d{4})", text)
+    if match:
+        first, second, year = (int(part) for part in match.groups())
+        day, month = first, second
+        if first <= 12 < second:
+            month, day = first, second
+        try:
+            return datetime(year, month, day).strftime("%Y-%m-%d")
+        except ValueError:
+            return None
+
+    try:
+        from dateutil import parser as date_parser
+
+        return date_parser.parse(text, dayfirst=True, fuzzy=True).strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _walk_release_date_values(payload):
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            key_text = str(key).lower()
+            if "release" in key_text and "date" in key_text:
+                yield value
+            yield from _walk_release_date_values(value)
+    elif isinstance(payload, list):
+        for item in payload:
+            yield from _walk_release_date_values(item)
+
+
+def _extract_release_date_from_payload(payload, dl=None) -> Optional[str]:
+    if dl is not None:
+        for data_qa in (
+            "gameInfo#releaseInformation#releaseDate-value",
+            "gameInfo#releaseInformation#release-date-value",
+            "gameInfo#releaseInformation#releaseDate#value",
+        ):
+            release_dd = dl.find("dd", {"data-qa": data_qa})
+            if release_dd:
+                parsed = _normalize_release_date(release_dd.get_text(" ", strip=True))
+                if parsed:
+                    return parsed
+
+        release_dd = dl.find(
+            "dd",
+            attrs={
+                "data-qa": lambda value: bool(
+                    value and "releaseInformation" in value and "release" in value.lower() and "date" in value.lower()
+                )
+            },
+        )
+        if release_dd:
+            parsed = _normalize_release_date(release_dd.get_text(" ", strip=True))
+            if parsed:
+                return parsed
+
+    for value in _walk_release_date_values(payload):
+        parsed = _normalize_release_date(value)
+        if parsed:
+            return parsed
+    return None
+
+
 def _resolve_parser_sqlite_db_path() -> str:
     explicit_path = os.getenv("PARSER_SQLITE_DB_PATH")
     if explicit_path:
@@ -1687,6 +1767,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
         description = None
         ext_info = None
         json = None
+        release_date = None
 
         while (not pdp and not psw and not game_info and not dl) and counter < 3:
             try:
@@ -1733,6 +1814,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                 json = soup.find("script", {"id": "__NEXT_DATA__", "type": "application/json"}).text
 
                 json = loads(json)
+                release_date = _extract_release_date_from_payload(json, dl)
 
                 if dl.find("dd", {"data-qa": "gameInfo#releaseInformation#platform-value"}):
                     platforms = dl.find("dd", {"data-qa": "gameInfo#releaseInformation#platform-value"}).text.split(', ')
@@ -1824,7 +1906,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                 counter += 1
                 await asyncio.sleep(5)
 
-        return product, platforms, publisher, voice_languages, subtitles, description, ext_info, json, players_min, players_max, players_online
+        return product, platforms, publisher, voice_languages, subtitles, description, ext_info, json, players_min, players_max, players_online, release_date
 
     counter = 0
     max_parse_retries = 4
@@ -2026,7 +2108,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         ID = product["id"]
                         name = product["name"]
 
-                        platforms, publisher, voice_languages, subtitles, description, ext_info, json, players_min, players_max, players_online = ext[ID]
+                        platforms, publisher, voice_languages, subtitles, description, ext_info, json, players_min, players_max, players_online, release_date = ext[ID]
 
                         # Получаем локализации для TR и IN регионов только если они запрошены
                         voice_languages_tr, subtitles_tr = None, None
@@ -2381,6 +2463,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                 "tags": ",".join(set(tags)),
                                 "edition": edition,
                                 "description": description,
+                                "release_date": release_date,
                                 "players_min": players_min,
                                 "players_max": players_max,
                                 "players_online": 1 if players_online else 0,
@@ -2529,7 +2612,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
 
                     tags = [main_name]
                     ID = ua_price_product["id"]
-                    product, platforms, publisher, voice_languages, subtitles, description, ext_info, json, players_min, players_max, players_online = await get_ext_data(ID)
+                    product, platforms, publisher, voice_languages, subtitles, description, ext_info, json, players_min, players_max, players_online, release_date = await get_ext_data(ID)
 
                     stars = 0.0
                     try:
@@ -2830,6 +2913,7 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                         "tags": ",".join(set(tags)),
                         "edition": edition,
                         "description": description,
+                        "release_date": release_date,
                         "players_min": players_min,
                         "players_max": players_max,
                         "players_online": 1 if players_online else 0,
@@ -3406,6 +3490,7 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
                             "discount": discount_percent,
                             "discount_percent": discount_percent,
                             "discount_end": discount_end.strftime("%Y-%m-%d %H:%M:%S") if discount_end else None,
+                            "release_date": _extract_release_date_from_payload(product) or _extract_release_date_from_payload(product_retrieve),
                             "tags": ",".join(set(cleaned_tags)),
                             "edition": edition_name,
                             "description": None,  # Берется из UA
@@ -3787,6 +3872,7 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
                             "discount": discount_percent,
                             "discount_percent": discount_percent,
                             "discount_end": discount_end.strftime("%Y-%m-%d %H:%M:%S") if discount_end else None,
+                            "release_date": _extract_release_date_from_payload(product) or _extract_release_date_from_payload(product_retrieve),
                             "tags": ",".join(set(cleaned_tags)),
                             "edition": edition_name,
                             "description": None,
@@ -4212,6 +4298,7 @@ PRODUCT_TABLE_COLUMNS = (
     ("ea_access", "TEXT"),
     ("discount", "REAL"),
     ("discount_end", "TEXT"),
+    ("release_date", "TEXT"),
     ("tags", "TEXT"),
     ("edition", "TEXT"),
     ("description", "TEXT"),
@@ -4243,6 +4330,8 @@ PRODUCT_INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)",
     "CREATE INDEX IF NOT EXISTS idx_products_region_category ON products(region, category)",
     "CREATE INDEX IF NOT EXISTS idx_products_main_name ON products(main_name)",
+    "CREATE INDEX IF NOT EXISTS idx_products_created_at ON products(created_at)",
+    "CREATE INDEX IF NOT EXISTS idx_products_release_date ON products(release_date)",
     "CREATE INDEX IF NOT EXISTS idx_products_ps_plus_collection ON products(ps_plus_collection)",
     "CREATE INDEX IF NOT EXISTS idx_products_ea_access ON products(ea_access)",
 )
@@ -4406,14 +4495,14 @@ INSERT_PRODUCTS_SQL = """
         id, category, region, type, name, main_name, image, compound,
         platforms, publisher, localization, rating, info, price, old_price,
         ps_price, plus_types, ea_price, ps_plus, ea_access, discount,
-        discount_end, tags, edition, description, price_uah, old_price_uah,
+        discount_end, release_date, tags, edition, description, price_uah, old_price_uah,
         price_try, old_price_try, price_inr, old_price_inr, price_rub,
         price_rub_region, ps_plus_price_uah, ps_plus_price_try, ps_plus_price_inr,
         players_min, players_max, players_online, name_localized, search_names,
         discount_percent, ps_plus_collection, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, ?, ?)
+              ?, ?, ?, ?, ?)
 """
 
 
@@ -4505,6 +4594,7 @@ def _prepare_products_for_db(result: list, promo) -> list:
             product.get("ea_access", 0),
             product.get("discount_percent", 0),
             product.get("discount_end"),
+            product.get("release_date"),
             product.get("tags"),
             product.get("edition"),
             product.get("description"),
@@ -5009,6 +5099,7 @@ def merge_region_data(ua_item: Dict, other_item: Dict, region: str) -> Dict:
     merged["ps_plus_price_rub"] = other_item.get("ps_plus_price_rub")
 
     # Сохраняем timestamps
+    merged["release_date"] = other_item.get("release_date") or merged.get("release_date")
     merged["created_at"] = other_item.get("created_at", merged.get("created_at"))
     merged["updated_at"] = other_item.get("updated_at", merged.get("updated_at"))
 

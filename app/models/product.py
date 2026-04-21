@@ -58,6 +58,7 @@ class Product(Base):
     # Информация о скидке
     discount = Column(Float, nullable=True, comment='Размер скидки в процентах')
     discount_end = Column(Text, nullable=True, comment='Дата окончания скидки')
+    release_date = Column(Text, nullable=True, index=True)
 
     # Теги и описание
     tags = Column(Text, nullable=True, comment='Теги товара')

@@ -106,6 +106,12 @@ class ProductCRUD:
         if normalized in {'price_desc', 'expensive', 'desc'}:
             return 'price_desc'
 
+        if normalized in {'added', 'added_desc', 'created', 'created_desc', 'new', 'newest', 'db_added'}:
+            return 'added_desc'
+
+        if normalized in {'release', 'release_desc', 'release_date', 'released', 'new_releases'}:
+            return 'release_desc'
+
         return 'popular'
 
     @staticmethod
@@ -1797,6 +1803,8 @@ class ProductCRUD:
 
         sort_mode = ProductCRUD._normalize_sort_mode(getattr(filters, 'sort', None))
         null_prices_last = case((price_column.is_(None), 1), else_=0)
+        null_added_last = case((ProductCard.added_at.is_(None), 1), else_=0)
+        null_release_last = case((ProductCard.release_date.is_(None), 1), else_=0)
         if sort_mode == 'price_desc':
             query = query.order_by(
                 null_prices_last.asc(),
@@ -1813,6 +1821,20 @@ class ProductCRUD:
             )
         elif sort_mode == 'alphabet':
             query = query.order_by(
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            )
+        elif sort_mode == 'added_desc':
+            query = query.order_by(
+                null_added_last.asc(),
+                ProductCard.added_at.desc(),
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            )
+        elif sort_mode == 'release_desc':
+            query = query.order_by(
+                null_release_last.asc(),
+                ProductCard.release_date.desc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
             )
@@ -2132,10 +2154,14 @@ class ProductCRUD:
             func.lower(func.coalesce(Product.main_name, Product.name, Product.id))
         ).label('sort_name')
         favorites_count_column = func.coalesce(favorites_subquery.c.favorites_count, 0).label('favorites_count')
+        added_at_column = func.max(Product.created_at).label('added_at')
+        release_date_column = func.max(Product.release_date).label('release_date')
         price_filter_currency = (getattr(filters, 'price_currency', None) or 'RUB').upper()
         row_price_column = ProductCRUD._build_row_price_expression(db, price_filter_currency)
         min_price_filter_column = func.min(row_price_column).label('min_price_filter')
         null_prices_last_column = case((min_price_filter_column.is_(None), 1), else_=0)
+        null_added_last_column = case((added_at_column.is_(None), 1), else_=0)
+        null_release_last_column = case((release_date_column.is_(None), 1), else_=0)
 
         grouped_query = (
             query.outerjoin(favorites_subquery, favorites_subquery.c.product_id == Product.id)
@@ -2143,6 +2169,8 @@ class ProductCRUD:
                 product_id_column,
                 sort_name_column,
                 favorites_count_column,
+                added_at_column,
+                release_date_column,
                 min_price_filter_column,
                 min_localization_rank_column,
             )
@@ -2176,6 +2204,20 @@ class ProductCRUD:
             )
         elif sort_mode == 'alphabet':
             grouped_query = grouped_query.order_by(sort_name_column.asc(), product_id_column.asc())
+        elif sort_mode == 'added_desc':
+            grouped_query = grouped_query.order_by(
+                null_added_last_column.asc(),
+                added_at_column.desc(),
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            )
+        elif sort_mode == 'release_desc':
+            grouped_query = grouped_query.order_by(
+                null_release_last_column.asc(),
+                release_date_column.desc(),
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            )
         else:
             grouped_query = grouped_query.order_by(
                 favorites_count_column.desc(),
