@@ -18,7 +18,7 @@ class Settings:
     SQLITE_SKIP_FTS_REBUILD_ON_STARTUP: bool = os.getenv(
         "SQLITE_SKIP_FTS_REBUILD_ON_STARTUP", "false"
     ).lower() in ("1", "true", "yes")
-    PRODUCTS_REBUILD_ON_STARTUP: bool = os.getenv("PRODUCTS_REBUILD_ON_STARTUP", "true").lower() in (
+    PRODUCTS_REBUILD_ON_STARTUP: bool = os.getenv("PRODUCTS_REBUILD_ON_STARTUP", "false").lower() in (
         "1",
         "true",
         "yes",

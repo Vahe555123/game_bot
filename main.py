@@ -107,7 +107,26 @@ async def health_check():
 
 
 if __name__ == "__main__":
+    import argparse
+    import os
+    import sys
+
     import uvicorn
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument(
+        "--rebuild-products",
+        action="store_true",
+        help="Import result.pkl into products.db during startup.",
+    )
+    startup_args, remaining_args = parser.parse_known_args()
+    sys.argv = [sys.argv[0], *remaining_args]
+
+    if startup_args.rebuild_products:
+        os.environ["PRODUCTS_REBUILD_ON_STARTUP"] = "true"
+        os.environ.setdefault("PRODUCTS_CARDS_REBUILD_ON_STARTUP", "true")
+        settings.PRODUCTS_REBUILD_ON_STARTUP = True
+        settings.PRODUCTS_CARDS_REBUILD_ON_STARTUP = True
 
     uvicorn.run(
         "main:app",

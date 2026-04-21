@@ -124,6 +124,21 @@ body::after {
     @apply w-full rounded-[22px] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 focus:bg-white/[0.08];
   }
 
+  select.auth-input {
+    color: #f8fafc;
+    background-color: rgba(15, 23, 42, 0.72);
+  }
+
+  select.auth-input option {
+    color: #f8fafc;
+    background-color: #0f172a;
+  }
+
+  select.auth-input option:checked {
+    color: #ffffff;
+    background-color: #0284c7;
+  }
+
   .auth-alert {
     @apply rounded-[22px] border px-4 py-3 text-sm;
   }

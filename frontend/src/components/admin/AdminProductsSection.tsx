@@ -1,4 +1,4 @@
-import { CopyPlus, Heart, Pencil, Plus, RefreshCw, Trash2, UserRound } from 'lucide-react'
+import { CopyPlus, Heart, Pencil, Plus, RefreshCw, Trash2, UserRound, X } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import {
   createAdminProduct,
@@ -320,6 +320,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
   const [activeProduct, setActiveProduct] = useState<AdminProductDetails | null>(null)
   const [editingProduct, setEditingProduct] = useState<AdminProductDetails | null>(null)
+  const [productModalMode, setProductModalMode] = useState<'create' | 'view' | null>(null)
   const [form, setForm] = useState<ProductFormState>(EMPTY_FORM)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
@@ -379,6 +380,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     setNotice(EMPTY_ADMIN_NOTICE)
     try {
       await loadProductDetails(product.id, product.region)
+      setProductModalMode('view')
     } catch (error) {
       setNotice({
         type: 'error',
@@ -388,7 +390,9 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   }
 
   function startCreate() {
+    setActiveProduct(null)
     setEditingProduct(null)
+    setProductModalMode('create')
     setForm(EMPTY_FORM)
     setNotice(EMPTY_ADMIN_NOTICE)
   }
@@ -402,6 +406,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
       ...fromProduct(activeProduct),
       region,
     })
+    setProductModalMode('create')
     setNotice({
       type: 'info',
       message: `Создаётся новая строка для региона ${region} на основе текущего товара.`,
@@ -420,6 +425,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
         setEditingProduct(updatedProduct)
         setForm(fromProduct(updatedProduct))
         applyProductToList(updatedProduct)
+        setProductModalMode('view')
         setNotice({ type: 'success', message: 'Товар обновлён.' })
       } else {
         const createdProduct = await createAdminProduct(toPayload(form))
@@ -427,6 +433,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
         setEditingProduct(createdProduct)
         setForm(fromProduct(createdProduct))
         applyProductToList(createdProduct)
+        setProductModalMode('view')
         setNotice({ type: 'success', message: 'Новая строка товара создана.' })
       }
       await onDataChanged()
@@ -458,6 +465,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
       setProducts((current) => current.filter((item) => productKey(item) !== productKey(activeProduct)))
       setActiveProduct(null)
       setEditingProduct(null)
+      setProductModalMode(null)
       setForm(EMPTY_FORM)
       setNotice({ type: 'success', message: 'Строка товара удалена.' })
       await onDataChanged()
@@ -489,6 +497,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
       setProducts((current) => current.filter((item) => item.id !== activeProduct.id))
       setActiveProduct(null)
       setEditingProduct(null)
+      setProductModalMode(null)
       setForm(EMPTY_FORM)
       setNotice({ type: 'success', message: response.message })
       await onDataChanged()
@@ -560,9 +569,9 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     >
       <AdminNotice state={notice} />
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(320px,0.88fr)_minmax(0,1.12fr)] 2xl:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
+      <div className="space-y-5">
         <div className="min-w-0 space-y-5">
-          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_140px_180px_180px_200px]">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[minmax(240px,1.2fr)_160px_200px_200px_240px]">
             <input
               value={search}
               onChange={(event) => {
@@ -699,8 +708,35 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="panel-soft min-w-0 rounded-[30px] p-4 sm:p-5 xl:p-6">
+        {productModalMode ? (
+          <div className="fixed inset-0 z-[70] flex items-end justify-center bg-slate-950/80 px-3 py-3 backdrop-blur-md md:items-center md:px-4 md:py-6">
+            <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[28px] border border-white/10 bg-slate-950 shadow-card">
+              <div className="flex flex-col gap-3 border-b border-white/10 bg-slate-950/95 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-6">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.28em] text-brand-200/80">
+                    {productModalMode === 'create' ? 'Новый товар' : 'Карточка товара'}
+                  </p>
+                  <h3 className="mt-2 text-xl text-white">
+                    {productModalMode === 'create'
+                      ? 'Создание новой строки каталога'
+                      : activeProduct?.display_name || 'Товар'}
+                  </h3>
+                </div>
+                <button type="button" className="btn-secondary px-4 py-2" onClick={() => setProductModalMode(null)}>
+                  <X size={16} />
+                  Закрыть
+                </button>
+              </div>
+
+              {notice.message && notice.type !== 'idle' ? (
+                <div className="px-4 pt-4 md:px-6">
+                  <AdminNotice state={notice} />
+                </div>
+              ) : null}
+
+              <div className="overflow-y-auto p-4 sm:p-5 xl:p-6">
+                <div className="space-y-6">
+                  <div className={`${productModalMode === 'create' ? 'hidden' : ''} panel-soft min-w-0 rounded-[30px] p-4 sm:p-5 xl:p-6`}>
             {activeProduct ? (
               <div className="space-y-5">
                 <div className="flex flex-col gap-4 border-b border-white/8 pb-5 md:flex-row md:items-start">
@@ -853,7 +889,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
                   Пустая форма
                 </button>
 
-                {activeProduct ? (
+                {productModalMode === 'view' && activeProduct ? (
                   <button
                     type="button"
                     className="btn-secondary border-rose-400/20 px-4 py-2 text-xs text-rose-100 hover:bg-rose-500/10"
@@ -953,7 +989,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
                   Очистить
                 </button>
 
-                {activeProduct ? (
+                {productModalMode === 'view' && activeProduct ? (
                   <button
                     type="button"
                     className="btn-secondary border-rose-400/20 text-rose-100 hover:bg-rose-500/10"
@@ -966,8 +1002,12 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
                 ) : null}
               </div>
             </form>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
+          ) : null}
       </div>
     </AdminSectionCard>
   )

@@ -149,6 +149,10 @@ class CurrencyConverter:
 
 def sync_products_from_cache(connection) -> ProductCacheImportResult:
     if not settings.PRODUCTS_REBUILD_ON_STARTUP:
+        logger.info(
+            "Product cache rebuild is disabled; start with --rebuild-products or "
+            "PRODUCTS_REBUILD_ON_STARTUP=true to import result.pkl"
+        )
         return ProductCacheImportResult(changed=False, reason="disabled")
 
     result_path = _resolve_project_path(settings.PRODUCTS_RESULT_CACHE_PATH)
