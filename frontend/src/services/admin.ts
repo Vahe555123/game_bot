@@ -111,7 +111,11 @@ export async function createAdminProduct(payload: AdminProductPayload) {
 }
 
 export async function manualParseAdminProduct(payload: AdminProductManualParsePayload) {
-  const response = await apiClient.post<AdminProductManualParseResponse>('/site/admin/products/manual-parse', payload)
+  const response = await apiClient.post<AdminProductManualParseResponse>(
+    '/site/admin/products/manual-parse',
+    payload,
+    { timeout: 0 },
+  )
   return response.data
 }
 
