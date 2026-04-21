@@ -44,6 +44,6 @@ const baseURL = resolveApiBaseUrl()
 
 export const apiClient = axios.create({
   baseURL,
-  timeout: 30000,
+  timeout: 0,
   withCredentials: true,
 })
