@@ -4,10 +4,40 @@ import unicodedata
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, or_, case, func, literal, text, Table, Column, Integer, MetaData, Text, inspect
 from typing import Optional, List, Dict, Any
-from app.models import User, Product, UserFavoriteProduct, Localization
+from app.models import User, Product, ProductCard, UserFavoriteProduct, Localization
 from app.models.currency_rate import CurrencyRate
 from app.api.schemas import UserCreate, UserUpdate, ProductFilter, PaginationParams, CurrencyRateCreate, CurrencyRateUpdate
 from config.settings import settings
+
+
+def _parse_json_list(value):
+    """Безопасно распарсить JSON-список; на вход может прийти str/None/list."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            import json as _json
+            parsed = _json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except (ValueError, TypeError):
+            return []
+    return []
+
+
+def _parse_tags_list(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(tag).strip() for tag in value if str(tag).strip()]
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            parsed = _parse_json_list(stripped)
+            return [str(tag).strip() for tag in parsed if str(tag).strip()]
+        return [tag.strip() for tag in stripped.split(',') if tag.strip()]
+    return []
 
 
 PRODUCT_SEARCH_INDEX_TABLE = Table(
@@ -1538,10 +1568,393 @@ class ProductCRUD:
         user: Optional[User] = None
     ) -> tuple[List[Dict], int]:
         """
-        Получить список товаров с ценами в рублях
+        Точка входа в каталог. Маршрутизирует запрос к быстрой реализации на
+        product_cards (по умолчанию) либо к старой реализации через GROUP BY
+        на таблице products — зависит от PRODUCTS_USE_CARDS_TABLE.
+        """
+        if settings.PRODUCTS_USE_CARDS_TABLE:
+            try:
+                return ProductCRUD._get_products_grouped_from_cards(
+                    db, filters, pagination, user,
+                )
+            except Exception as exc:
+                # Если по какой-то причине product_cards недоступен (например, был
+                # удалён), мягко откатываемся на старую логику вместо 500-ки.
+                import logging as _logging
+                _logging.getLogger(__name__).exception(
+                    "product_cards catalog path failed, falling back to GROUP BY: %s", exc,
+                )
+        return ProductCRUD._get_products_grouped_legacy(db, filters, pagination, user)
 
-        В новой структуре БД каждый товар создается отдельно для каждого региона.
-        Фильтруем товары по региону и показываем только цену соответствующего региона.
+    # ── Быстрый каталог через product_cards ───────────────────────────────────
+
+    _CARD_REGION_INFO = {
+        'UA': {'flag': '\U0001F1FA\U0001F1E6', 'name': 'Украина', 'currency_code': 'UAH', 'symbol': '\u20B4'},
+        'TR': {'flag': '\U0001F1F9\U0001F1F7', 'name': 'Турция', 'currency_code': 'TRY', 'symbol': '\u20BA'},
+        'IN': {'flag': '\U0001F1EE\U0001F1F3', 'name': 'Индия', 'currency_code': 'INR', 'symbol': '\u20B9'},
+    }
+
+    @staticmethod
+    def _get_products_grouped_from_cards(
+        db: Session,
+        filters: ProductFilter,
+        pagination: PaginationParams,
+        user: Optional[User] = None,
+    ) -> tuple[List[Dict], int]:
+        """
+        Быстрая выдача каталога через денормализованную таблицу product_cards.
+
+        Без GROUP BY/HAVING — одна карточка = одна строка. Все фильтры сводятся
+        к WHERE по индексированным колонкам. Существующие ключи ответа
+        сохраняются (id, regional_prices, min_price_rub и т.д.), так что
+        фронтенд менять не надо.
+        """
+        filter_region = (getattr(filters, 'region', None) or None)
+        if filter_region:
+            filter_region = str(filter_region).strip().upper() or None
+            if filter_region not in ('UA', 'TR', 'IN'):
+                # Поддержка en-ua/uah и т.п.
+                normalized = ProductCRUD.normalize_product_region(filter_region)
+                if normalized:
+                    filter_region = normalized
+
+        query = db.query(ProductCard)
+
+        if filter_region == 'UA':
+            query = query.filter(ProductCard.ua_product_id.isnot(None))
+        elif filter_region == 'TR':
+            query = query.filter(ProductCard.tr_product_id.isnot(None))
+        elif filter_region == 'IN':
+            query = query.filter(ProductCard.in_product_id.isnot(None))
+        elif user is not None:
+            enabled = user.get_enabled_regions() if hasattr(user, 'get_enabled_regions') else ['UA', 'TR', 'IN']
+            mask = 0
+            if 'UA' in enabled:
+                mask |= 1
+            if 'TR' in enabled:
+                mask |= 2
+            if 'IN' in enabled:
+                mask |= 4
+            if mask and mask != 7:
+                # хотя бы один разрешённый регион должен быть в карточке
+                query = query.filter(ProductCard.regions_mask.op('&')(mask) > 0)
+
+        if filters.category:
+            query = query.filter(ProductCard.category.ilike(f"%{filters.category}%"))
+
+        product_kind = (getattr(filters, 'product_kind', None) or '').strip().lower()
+        if product_kind == 'games':
+            query = query.filter(
+                or_(
+                    ProductCard.type.ilike('%Игра%'),
+                    ProductCard.type.ilike('%Game%'),
+                    ProductCard.type.ilike('%Bundle%'),
+                    ProductCard.type.ilike('%Набор%'),
+                    ProductCard.type.ilike('%Предзаказ%'),
+                )
+            )
+        elif product_kind == 'dlc':
+            query = query.filter(
+                or_(
+                    ProductCard.type.ilike('%Дополнение%'),
+                    ProductCard.type.ilike('%DLC%'),
+                    ProductCard.category.ilike('%Дополнение%'),
+                )
+            )
+
+        if filters.platform:
+            platform_filter = filters.platform.upper()
+            if platform_filter == 'PS4_ALL':
+                query = query.filter(ProductCard.platforms.ilike('%PS4%'))
+            elif platform_filter == 'PS5_ALL':
+                query = query.filter(ProductCard.platforms.ilike('%PS5%'))
+            elif platform_filter in ('PS4_ONLY', 'PS4'):
+                query = query.filter(
+                    and_(
+                        ProductCard.platforms.ilike('%PS4%'),
+                        ~ProductCard.platforms.ilike('%PS5%'),
+                    )
+                )
+            elif platform_filter in ('PS5_ONLY', 'PS5'):
+                query = query.filter(
+                    and_(
+                        ProductCard.platforms.ilike('%PS5%'),
+                        ~ProductCard.platforms.ilike('%PS4%'),
+                    )
+                )
+            elif platform_filter == 'BOTH':
+                query = query.filter(
+                    and_(
+                        ProductCard.platforms.ilike('%PS4%'),
+                        ProductCard.platforms.ilike('%PS5%'),
+                    )
+                )
+            elif platform_filter in ('PSVR2', 'PLAYSTATION_VR2'):
+                query = query.filter(ProductCard.info.ilike('%VR2%'))
+            elif platform_filter in ('PSVR1', 'PSVR', 'PLAYSTATION_VR1'):
+                query = query.filter(
+                    and_(
+                        or_(
+                            ProductCard.info.ilike('%PS VR%'),
+                            ProductCard.info.ilike('%PSVR%'),
+                            ProductCard.info.ilike('%PlayStation%VR%'),
+                            ProductCard.info.ilike('%PS Camera%'),
+                        ),
+                        ~ProductCard.info.ilike('%VR2%'),
+                    )
+                )
+
+        if filters.players:
+            players_filter = filters.players.lower()
+            if players_filter == 'singleplayer':
+                query = query.filter(
+                    and_(
+                        or_(
+                            ProductCard.info.ilike('%1 \\u0438\\u0433\\u0440\\u043e\\u043a%'),
+                            ProductCard.info.ilike('%1 игрок%'),
+                        ),
+                        ~ProductCard.info.ilike('%\\u0418\\u0433\\u0440\\u043e\\u043a\\u0438:%'),
+                        ~ProductCard.info.ilike('%Игроки:%'),
+                    )
+                )
+            elif players_filter == 'coop':
+                query = query.filter(
+                    or_(
+                        ProductCard.info.ilike('%\\u0418\\u0433\\u0440\\u043e\\u043a\\u0438: 1 - 2%'),
+                        ProductCard.info.ilike('%\\u0418\\u0433\\u0440\\u043e\\u043a\\u0438: 2 - 4%'),
+                        ProductCard.info.ilike('%\\u0418\\u0433\\u0440\\u043e\\u043a\\u0438: 1 - 4%'),
+                        ProductCard.info.ilike('%\\u0418\\u0433\\u0440\\u043e\\u043a\\u0438: 2 - 8%'),
+                        ProductCard.info.ilike('%Игроки: 1 - 2%'),
+                        ProductCard.info.ilike('%Игроки: 2 - 4%'),
+                        ProductCard.info.ilike('%Игроки: 1 - 4%'),
+                    )
+                )
+
+        if filters.search:
+            search_term = ProductCRUD._normalize_search_text(filters.search)
+            if search_term:
+                search_pattern = f"%{search_term}%"
+                query = query.filter(
+                    or_(
+                        func.normalize_search(ProductCard.card_id).like(search_pattern),
+                        func.normalize_search(ProductCard.main_name).like(search_pattern),
+                        func.normalize_search(ProductCard.name).like(search_pattern),
+                        func.normalize_search(ProductCard.search_names).like(search_pattern),
+                        func.normalize_search(ProductCard.edition).like(search_pattern),
+                    )
+                )
+
+        if filters.has_discount is not None and filters.has_discount:
+            if filter_region == 'UA':
+                query = query.filter(ProductCard.ua_has_discount == 1)
+            elif filter_region == 'TR':
+                query = query.filter(ProductCard.tr_has_discount == 1)
+            elif filter_region == 'IN':
+                query = query.filter(ProductCard.in_has_discount == 1)
+            else:
+                query = query.filter(ProductCard.has_discount == 1)
+
+        if filters.has_ps_plus is not None and filters.has_ps_plus:
+            query = query.filter(ProductCard.has_ps_plus == 1)
+
+        if filters.has_ea_access is not None and filters.has_ea_access:
+            query = query.filter(ProductCard.has_ea_access == 1)
+
+        game_language = (getattr(filters, 'game_language', None) or '').strip().lower()
+        if game_language == 'full_ru':
+            query = query.filter(ProductCard.best_localization == 'full')
+        elif game_language == 'partial_ru':
+            query = query.filter(
+                or_(
+                    ProductCard.best_localization == 'subtitles',
+                    ProductCard.best_localization == 'interface',
+                )
+            )
+        elif game_language == 'no_ru':
+            query = query.filter(
+                or_(
+                    ProductCard.best_localization == 'none',
+                    ProductCard.best_localization.is_(None),
+                    ProductCard.best_localization == '',
+                )
+            )
+
+        price_currency = (getattr(filters, 'price_currency', None) or 'RUB').upper()
+        price_column = ProductCard.min_price_rub
+        if price_currency == 'UAH':
+            price_column = ProductCard.ua_price_uah
+        elif price_currency in ('TRY', 'TRL'):
+            price_column = ProductCard.tr_price_try
+        elif price_currency == 'INR':
+            price_column = ProductCard.in_price_inr
+
+        if filters.min_price is not None:
+            query = query.filter(price_column >= filters.min_price)
+        if filters.max_price is not None:
+            query = query.filter(price_column <= filters.max_price)
+
+        total = query.with_entities(func.count(ProductCard.card_id)).scalar() or 0
+
+        sort_mode = ProductCRUD._normalize_sort_mode(getattr(filters, 'sort', None))
+        null_prices_last = case((price_column.is_(None), 1), else_=0)
+        if sort_mode == 'price_desc':
+            query = query.order_by(
+                null_prices_last.asc(),
+                price_column.desc(),
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            )
+        elif sort_mode == 'price_asc':
+            query = query.order_by(
+                null_prices_last.asc(),
+                price_column.asc(),
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            )
+        elif sort_mode == 'alphabet':
+            query = query.order_by(
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            )
+        else:  # popular
+            query = query.order_by(
+                func.coalesce(ProductCard.favorites_count, 0).desc(),
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            )
+
+        offset = max(pagination.page - 1, 0) * pagination.limit
+        page_cards = query.offset(offset).limit(pagination.limit).all()
+
+        if not page_cards:
+            return [], int(total)
+
+        localization_cache: Dict[str, Optional[str]] = {}
+        result = [
+            ProductCRUD._card_to_catalog_dict(card, db, localization_cache)
+            for card in page_cards
+        ]
+        return result, int(total)
+
+    @staticmethod
+    def _card_to_catalog_dict(
+        card: ProductCard,
+        db: Session,
+        localization_cache: Dict[str, Optional[str]],
+    ) -> Dict[str, Any]:
+        """Сформировать ответ карточки совместимо с prepare_product_with_multi_region_prices."""
+        regional_prices: List[Dict[str, Any]] = []
+        # Порядок показа регионов — как в старой реализации: TR, IN, UA.
+        region_sequence = (
+            ('TR', card.tr_product_id, card.tr_localization, card.tr_price_try, card.tr_old_price_try,
+             card.tr_ps_plus_price_try, card.tr_price_rub, card.tr_old_price_rub, card.tr_ps_plus_price_rub,
+             card.tr_discount_percent, card.tr_has_discount),
+            ('IN', card.in_product_id, card.in_localization, card.in_price_inr, card.in_old_price_inr,
+             card.in_ps_plus_price_inr, card.in_price_rub, card.in_old_price_rub, card.in_ps_plus_price_rub,
+             card.in_discount_percent, card.in_has_discount),
+            ('UA', card.ua_product_id, card.ua_localization, card.ua_price_uah, card.ua_old_price_uah,
+             card.ua_ps_plus_price_uah, card.ua_price_rub, card.ua_old_price_rub, card.ua_ps_plus_price_rub,
+             card.ua_discount_percent, card.ua_has_discount),
+        )
+
+        for (region_code, product_id, localization_code, price_local, old_price_local,
+             ps_plus_price_local, price_rub, old_price_rub, ps_plus_price_rub,
+             discount_percent, has_discount_flag) in region_sequence:
+            if not product_id or not price_local or price_local <= 0:
+                continue
+
+            region_info = ProductCRUD._CARD_REGION_INFO[region_code]
+            ps_plus_discount_percent = None
+            if ps_plus_price_rub and old_price_rub and ps_plus_price_rub < old_price_rub and old_price_rub > 0:
+                ps_plus_discount_percent = int(((old_price_rub - ps_plus_price_rub) / old_price_rub) * 100)
+
+            localization_name = ProductCRUD._get_localization_name_cached(
+                db, localization_code, localization_cache,
+            )
+
+            regional_prices.append({
+                'region': region_code,
+                'flag': region_info['flag'],
+                'name': region_info['name'],
+                'currency_code': region_info['currency_code'],
+                'price_local': price_local,
+                'old_price_local': old_price_local if old_price_local and old_price_local > 0 else None,
+                'ps_plus_price_local': ps_plus_price_local if ps_plus_price_local and ps_plus_price_local > 0 else None,
+                'price_rub': price_rub,
+                'old_price_rub': old_price_rub,
+                'ps_plus_price_rub': ps_plus_price_rub,
+                'has_discount': bool(has_discount_flag),
+                'discount_percent': discount_percent,
+                'ps_plus_discount_percent': ps_plus_discount_percent,
+                'localization_code': localization_code,
+                'localization_name': localization_name,
+                'product_id': product_id,
+            })
+
+        best_localization_name = ProductCRUD._get_localization_name_cached(
+            db, card.best_localization, localization_cache,
+        )
+        has_ps_plus_collection = bool(card.ps_plus_collection) and card.ps_plus_collection not in ('', '0')
+
+        return {
+            'id': card.card_id,
+            'name': card.name,
+            'main_name': card.main_name or card.name or 'Без названия',
+            'category': card.category,
+            'type': card.type,
+            'region': card.min_price_region,
+            'image': card.image,
+            'publisher': card.publisher,
+            'description': card.description,
+            'rating': card.rating,
+            'edition': card.edition,
+            'platforms': card.platforms,
+            'localization': card.best_localization,
+            'localization_name': best_localization_name,
+            'has_discount': bool(card.has_discount),
+            'discount': None,
+            'discount_end': None,
+            'discount_percent': card.max_discount_percent,
+            'ps_plus': 1 if has_ps_plus_collection else 0,
+            'has_ps_plus': has_ps_plus_collection,
+            'ps_price': None,
+            'has_ea_access': bool(card.has_ea_access),
+            'ea_access': card.ea_access,
+            'ps_plus_collection': card.ps_plus_collection,
+            'has_ps_plus_extra_deluxe': card.ps_plus_collection == 'Extra/Deluxe',
+            'favorites_count': int(card.favorites_count or 0),
+            'compound': _parse_json_list(card.compound),
+            'info': _parse_json_list(card.info),
+            'tags': _parse_tags_list(card.tags),
+            'players_min': card.players_min,
+            'players_max': card.players_max,
+            'players_online': bool(card.players_online),
+            'regional_prices': regional_prices,
+            'min_price_rub': card.min_price_rub,
+            'price_try': card.tr_price_try,
+            'old_price_try': card.tr_old_price_try,
+            'price_inr': card.in_price_inr,
+            'old_price_inr': card.in_old_price_inr,
+            'price_uah': card.ua_price_uah,
+            'old_price_uah': card.ua_old_price_uah,
+            'rub_price': card.min_price_rub,
+            'rub_price_old': card.min_old_price_rub,
+        }
+
+    # ── Конец быстрого каталога ────────────────────────────────────────────────
+
+    @staticmethod
+    def _get_products_grouped_legacy(
+        db: Session,
+        filters: ProductFilter,
+        pagination: PaginationParams,
+        user: Optional[User] = None
+    ) -> tuple[List[Dict], int]:
+        """
+        Старая реализация каталога через GROUP BY по products.id.
+
+        Оставлена как безопасный fallback — можно выключить новый путь через
+        PRODUCTS_USE_CARDS_TABLE=false, и поведение останется прежним.
         """
         query = db.query(Product)
 

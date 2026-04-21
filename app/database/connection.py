@@ -408,6 +408,20 @@ SQLITE_INDEX_STATEMENTS = (
     "CREATE INDEX IF NOT EXISTS idx_products_ps_plus_collection ON products(ps_plus_collection)",
     "CREATE INDEX IF NOT EXISTS idx_products_ea_access ON products(ea_access)",
     "CREATE INDEX IF NOT EXISTS idx_user_favorite_products_product_id ON user_favorite_products(product_id)",
+    # product_cards — денормализованный каталог (одна строка на логический товар)
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_sort_name ON product_cards(sort_name)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_min_price_rub ON product_cards(min_price_rub)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_category ON product_cards(category)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_has_discount ON product_cards(has_discount)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_has_ps_plus ON product_cards(has_ps_plus)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_has_ea_access ON product_cards(has_ea_access)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_best_localization ON product_cards(best_localization)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_favorites_count ON product_cards(favorites_count)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_ua_product_id ON product_cards(ua_product_id)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_tr_product_id ON product_cards(tr_product_id)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_in_product_id ON product_cards(in_product_id)",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_search_normalized_main_name ON product_cards(normalize_search(main_name))",
+    "CREATE INDEX IF NOT EXISTS idx_product_cards_search_normalized_name ON product_cards(normalize_search(name))",
 )
 
 
@@ -733,6 +747,7 @@ def create_tables():
         Localization,
         PSNAccount,
         Product,
+        ProductCard,
         SiteAuthCode,
         SiteAuthSession,
         SiteContent,
@@ -746,6 +761,7 @@ def create_tables():
         Localization,
         PSNAccount,
         Product,
+        ProductCard,
         SiteAuthCode,
         SiteAuthSession,
         SiteContent,
@@ -772,6 +788,18 @@ def create_tables():
 
                     sync_products_from_cache(connection)
                     _ensure_product_search_index(connection)
+
+                    if settings.PRODUCTS_CARDS_REBUILD_ON_STARTUP:
+                        from app.database.product_card_rebuilder import rebuild_product_cards
+
+                        try:
+                            rebuild_product_cards(connection)
+                        except Exception as exc:
+                            logger.exception(
+                                "product_cards rebuild failed (catalog will fall back to GROUP BY path): %s",
+                                exc,
+                            )
+
                     connection.execute(text("PRAGMA optimize"))
             finally:
                 connection.exec_driver_sql("PRAGMA foreign_keys=ON")

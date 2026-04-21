@@ -42,6 +42,14 @@ class Settings:
     PRODUCTS_RESULT_CACHE_PATH: str = os.getenv("PRODUCTS_RESULT_CACHE_PATH", "result.pkl")
     PRODUCTS_PROMO_CACHE_PATH: str = os.getenv("PRODUCTS_PROMO_CACHE_PATH", "promo.pkl")
     PRODUCTS_REBUILD_BATCH_SIZE: int = int(os.getenv("PRODUCTS_REBUILD_BATCH_SIZE", 1000))
+    PRODUCTS_USE_CARDS_TABLE: bool = os.getenv("PRODUCTS_USE_CARDS_TABLE", "true").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    PRODUCTS_CARDS_REBUILD_ON_STARTUP: bool = os.getenv(
+        "PRODUCTS_CARDS_REBUILD_ON_STARTUP", "true"
+    ).lower() in ("1", "true", "yes")
 
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_WEBHOOK_URL: str = os.getenv("TELEGRAM_WEBHOOK_URL", "")

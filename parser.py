@@ -5276,29 +5276,87 @@ async def main():
             shift = parser_config.BATCH_SIZE_PRODUCTS
             new_result = []
             parse_start = perf_counter()
+            parse_logger = ParseLogger()
+            empty_returns = 0
+            task_errors = 0
 
             for i in range(0, len(products_to_parse), shift):
                 # Перезагружаем конфигурацию на каждой итерации
                 parser_config.load_config()
                 shift = parser_config.BATCH_SIZE_PRODUCTS
 
-                _result = sum(await asyncio.gather(*[parse(session, products_to_parse[j]) for j in range(i, min(len(products_to_parse), i+shift))]), [])
+                batch_end = min(len(products_to_parse), i + shift)
+
+                async def _parse_with_cap(idx: int):
+                    nonlocal empty_returns, task_errors
+                    try:
+                        items = await asyncio.wait_for(
+                            parse(session, products_to_parse[idx], logger=parse_logger),
+                            timeout=180.0,
+                        )
+                        if not items:
+                            empty_returns += 1
+                        return items
+                    except asyncio.TimeoutError:
+                        task_errors += 1
+                        try:
+                            parse_logger.log_product_error(
+                                products_to_parse[idx],
+                                "TASK_TIMEOUT_180s | задача превысила лимит — пропущена",
+                            )
+                        except Exception:
+                            pass
+                        return []
+                    except (asyncio.CancelledError, KeyboardInterrupt):
+                        raise
+                    except Exception as _exc:
+                        task_errors += 1
+                        try:
+                            parse_logger.log_product_error(
+                                products_to_parse[idx],
+                                f"BATCH_TASK_EXCEPTION | {type(_exc).__name__}: {str(_exc)[:150]}",
+                            )
+                        except Exception:
+                            pass
+                        return []
+
+                _result = sum(await asyncio.gather(
+                    *[_parse_with_cap(j) for j in range(i, batch_end)]
+                ), [])
                 new_result.extend(_result)
                 await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
 
-                # Удаляем дубликаты после каждого батча
                 uni(new_result)
 
-                current = min(len(products_to_parse), i+shift)
+                current = batch_end
                 elapsed = perf_counter() - parse_start
-                print_progress_bar(current, len(products_to_parse), elapsed, prefix=" Допарсинг", suffix=f"| Спарсено: {len(new_result)}")
+                print_progress_bar(
+                    current,
+                    len(products_to_parse),
+                    elapsed,
+                    prefix=" Допарсинг",
+                    suffix=f"| Спарсено: {len(new_result)} (пусто={empty_returns}, ошибок={task_errors})",
+                )
+
+                # Каждые 10 батчей — флашим логи на диск, чтобы можно было смотреть в live.
+                if (i // shift) % 10 == 0:
+                    try:
+                        parse_logger._flush_cross_region_json()
+                    except Exception:
+                        pass
 
             print()
 
         end = perf_counter()
         parse_time = end - parse_start
+        try:
+            parse_logger._flush_cross_region_json()
+        except Exception:
+            pass
         print(f"\n Допарсинг завершен за {parse_time:.2f} сек ({parse_time/60:.1f} мин)")
         print(f" Новых товаров спарсено: {len(new_result)}")
+        print(f" Пустых возвратов parse(): {empty_returns} из {len(products_to_parse)}")
+        print(f" Исключений в задачах: {task_errors}")
 
         # Объединяем результаты
         print("\n" + "=" * 80)
@@ -6105,6 +6163,9 @@ async def main():
         save_interval = 100
         next_save_threshold = start_index + save_interval
         current = start_index
+        # Индекс последней записи, уже улетевшей в БД. Используется, чтобы
+        # не перезаписывать БД полным 35k-батчем на каждом save — шлём дельту.
+        last_saved_result_len = len(result)
 
         _interrupted = False
 
@@ -6148,30 +6209,35 @@ async def main():
                 result.extend(_result)
                 await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
 
-                uni(result)
-
                 current = batch_end
                 elapsed = perf_counter() - parse_start
                 print_progress_bar(current, total_products, elapsed, prefix=" Парсинг", suffix=f"| Спарсено: {len(result)}")
 
-                # Сохраняем result.pkl и checkpoint после каждого батча
-                with open("result.pkl", "wb") as file:
-                    pickle.dump(result, file)
-                save_checkpoint(started_at, total_products, current, len(result), db_cleared)
-                # Также промежуточно скидываем cross_region JSON — чтобы не потерять
-                # отчёт при жёстком прерывании
-                parse_logger._flush_cross_region_json()
-
-                # Инкрементальное сохранение в БД каждый 1%
+                # Тяжёлое IO (uni/pickle/flush) и БД-батч совмещены и выполняются
+                # только на save_threshold — это раньше крутилось КАЖДЫЙ батч
+                # на растущем списке 35k+ записей и съедало секунды на каждой итерации.
                 if current >= next_save_threshold or current >= total_products:
+                    uni(result)
+                    with open("result.pkl", "wb") as file:
+                        pickle.dump(result, file)
+                    save_checkpoint(started_at, total_products, current, len(result), db_cleared)
+                    parse_logger._flush_cross_region_json()
+
                     pct = round(current / total_products * 100)
-                    print(f"\n  [{pct}%] Сохранение {len(result)} записей в БД...")
-                    saved = await save_batch_to_db(result, promo, clear_db=(not db_cleared))
+                    # Дельта: шлём только записи, добавленные с прошлого save,
+                    # вместо повторного UPSERT'а всего 35k-списка.
+                    delta = result[last_saved_result_len:] if db_cleared else result
+                    print(f"\n  [{pct}%] Сохранение {len(delta)} новых записей в БД (всего: {len(result)})...")
+                    saved = await save_batch_to_db(delta, promo, clear_db=(not db_cleared))
                     if not db_cleared:
                         db_cleared = True
                         save_checkpoint(started_at, total_products, current, len(result), db_cleared)
+                    last_saved_result_len = len(result)
                     print(f"  [{pct}%] Сохранено {saved} продуктов в БД")
                     next_save_threshold = current + save_interval
+                else:
+                    # Лёгкий checkpoint каждый батч — это дешёвый JSON, ~1KB
+                    save_checkpoint(started_at, total_products, current, len(result), db_cleared)
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             _interrupted = True
