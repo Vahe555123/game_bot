@@ -7,6 +7,7 @@ import {
   deleteAdminProductGroup,
   fetchAdminProduct,
   fetchAdminProducts,
+  fetchManualParseAdminProductStatus,
   manualParseAdminProduct,
   updateAdminProduct,
 } from '../../services/admin'
@@ -481,12 +482,34 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
     setNotice(EMPTY_ADMIN_NOTICE)
 
     try {
-      const response = await manualParseAdminProduct({
+      const start = await manualParseAdminProduct({
         ua_url: manualParseForm.ua_url.trim() || null,
         tr_url: manualParseForm.tr_url.trim() || null,
         in_url: manualParseForm.in_url.trim() || null,
         save_to_db: manualParseForm.save_to_db,
       })
+      const maxPollAttempts = 180
+      let response: AdminProductManualParseResponse | null = null
+
+      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+        const status = await fetchManualParseAdminProductStatus(start.task_id)
+
+        if (status.status === 'completed' && status.result) {
+          response = status.result
+          break
+        }
+
+        if (status.status === 'failed') {
+          throw new Error(status.message || 'Ручной парсинг завершился с ошибкой.')
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 2000))
+      }
+
+      if (!response) {
+        throw new Error('Превышено время ожидания завершения ручного парсинга.')
+      }
+
       setManualParseResult(response)
       setNotice({
         type: 'success',

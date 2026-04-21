@@ -5,7 +5,8 @@ import type {
   AdminProductDetails,
   AdminProductListResponse,
   AdminProductManualParsePayload,
-  AdminProductManualParseResponse,
+  AdminProductManualParseStartResponse,
+  AdminProductManualParseStatusResponse,
   AdminProductPayload,
   AdminPurchase,
   AdminPurchaseFulfillPayload,
@@ -111,10 +112,17 @@ export async function createAdminProduct(payload: AdminProductPayload) {
 }
 
 export async function manualParseAdminProduct(payload: AdminProductManualParsePayload) {
-  const response = await apiClient.post<AdminProductManualParseResponse>(
+  const response = await apiClient.post<AdminProductManualParseStartResponse>(
     '/site/admin/products/manual-parse',
     payload,
     { timeout: 0 },
+  )
+  return response.data
+}
+
+export async function fetchManualParseAdminProductStatus(taskId: string) {
+  const response = await apiClient.get<AdminProductManualParseStatusResponse>(
+    `/site/admin/products/manual-parse/${taskId}`,
   )
   return response.data
 }

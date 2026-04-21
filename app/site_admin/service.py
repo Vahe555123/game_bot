@@ -6,6 +6,7 @@ import logging
 import pickle
 import re
 import threading
+from uuid import uuid4
 from contextlib import contextmanager
 from typing import Any, Optional
 
@@ -44,6 +45,8 @@ from .schemas import (
     AdminProductFavoriteRecord,
     AdminProductListResponse,
     AdminProductManualParseRequest,
+    AdminProductManualParseStartResponse,
+    AdminProductManualParseStatusResponse,
     AdminProductManualParseResponse,
     AdminProductRecord,
     AdminProductSummary,
@@ -62,6 +65,8 @@ from .schemas import (
 HELP_CONTENT_DOCUMENT_ID = "help_page"
 logger = logging.getLogger(__name__)
 _manual_product_parse_lock = asyncio.Lock()
+_manual_product_parse_tasks: dict[str, dict[str, Any]] = {}
+_manual_product_parse_tasks_lock = asyncio.Lock()
 
 
 def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
@@ -688,41 +693,82 @@ class SiteAdminService:
 
     async def manual_parse_product(
         self,
-        db: Session,
         payload: AdminProductManualParseRequest,
-    ) -> AdminProductManualParseResponse:
-        async with _manual_product_parse_lock:
-            try:
-                from parser import run_manual_product_parse
+    ) -> AdminProductManualParseStartResponse:
+        task_id = uuid4().hex
+        async with _manual_product_parse_tasks_lock:
+            _manual_product_parse_tasks[task_id] = {
+                "status": "pending",
+                "message": "Задача поставлена в очередь на ручной парсинг.",
+                "result": None,
+            }
 
-                result = await run_manual_product_parse(
-                    ua_url=payload.ua_url,
-                    tr_url=payload.tr_url,
-                    in_url=payload.in_url,
-                    save_to_db=payload.save_to_db,
-                )
-            except ValueError as error:
-                raise AuthServiceError(400, str(error)) from error
-            except Exception as error:
-                logger.exception("Manual product parse failed")
-                raise AuthServiceError(500, f"Ручной парсинг не удался: {type(error).__name__}: {error}") from error
+        async def _run_manual_parse() -> None:
+            async with _manual_product_parse_tasks_lock:
+                task = _manual_product_parse_tasks.get(task_id)
+                if task is not None:
+                    task["status"] = "running"
+                    task["message"] = "Идёт ручной парсинг товара, это может занять несколько минут."
 
-            if payload.save_to_db and settings.PRODUCTS_USE_CARDS_TABLE:
+            async with _manual_product_parse_lock:
                 try:
-                    from app.database.connection import engine
-                    from app.database.product_card_rebuilder import rebuild_product_cards
+                    from parser import run_manual_product_parse
 
-                    with engine.begin() as connection:
-                        rebuild_product_cards(connection)
+                    result = await run_manual_product_parse(
+                        ua_url=payload.ua_url,
+                        tr_url=payload.tr_url,
+                        in_url=payload.in_url,
+                        save_to_db=payload.save_to_db,
+                    )
+                    parsed_result = AdminProductManualParseResponse(**result)
+
+                    if payload.save_to_db and settings.PRODUCTS_USE_CARDS_TABLE:
+                        from app.database.connection import engine
+                        from app.database.product_card_rebuilder import rebuild_product_cards
+
+                        with engine.begin() as connection:
+                            rebuild_product_cards(connection)
+
+                    async with _manual_product_parse_tasks_lock:
+                        task = _manual_product_parse_tasks.get(task_id)
+                        if task is not None:
+                            task["status"] = "completed"
+                            task["message"] = "Ручной парсинг завершён."
+                            task["result"] = parsed_result
+                except ValueError as error:
+                    async with _manual_product_parse_tasks_lock:
+                        task = _manual_product_parse_tasks.get(task_id)
+                        if task is not None:
+                            task["status"] = "failed"
+                            task["message"] = str(error)
                 except Exception as error:
-                    logger.exception("Product cards rebuild failed after manual parse")
-                    raise AuthServiceError(
-                        500,
-                        f"Товар спарсен, но product_cards не пересобрались: {type(error).__name__}: {error}",
-                    ) from error
+                    logger.exception("Manual product parse failed")
+                    async with _manual_product_parse_tasks_lock:
+                        task = _manual_product_parse_tasks.get(task_id)
+                        if task is not None:
+                            task["status"] = "failed"
+                            task["message"] = f"Ручной парсинг не удался: {type(error).__name__}: {error}"
 
-            db.expire_all()
-            return AdminProductManualParseResponse(**result)
+        asyncio.create_task(_run_manual_parse())
+        return AdminProductManualParseStartResponse(
+            task_id=task_id,
+            status="pending",
+            message="Ручной парсинг запущен в фоне.",
+        )
+
+    async def get_manual_parse_product_status(self, task_id: str) -> AdminProductManualParseStatusResponse:
+        async with _manual_product_parse_tasks_lock:
+            task = _manual_product_parse_tasks.get(task_id)
+
+        if task is None:
+            raise AuthServiceError(404, "Задача ручного парсинга не найдена.")
+
+        return AdminProductManualParseStatusResponse(
+            task_id=task_id,
+            status=str(task.get("status") or "pending"),
+            message=str(task.get("message") or ""),
+            result=task.get("result"),
+        )
 
     def update_product(
         self,

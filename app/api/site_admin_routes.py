@@ -17,7 +17,8 @@ from app.site_admin.schemas import (
     AdminProductDetailsResponse,
     AdminProductListResponse,
     AdminProductManualParseRequest,
-    AdminProductManualParseResponse,
+    AdminProductManualParseStartResponse,
+    AdminProductManualParseStatusResponse,
     AdminProductRecord,
     AdminProductUpdateRequest,
     AdminPurchaseFulfillRequest,
@@ -193,15 +194,30 @@ def create_site_admin_product(
         _raise_http_auth_error(error)
 
 
-@router.post("/products/manual-parse", response_model=AdminProductManualParseResponse, summary="Manual product parse")
+@router.post("/products/manual-parse", response_model=AdminProductManualParseStartResponse, summary="Manual product parse")
 async def manual_parse_site_admin_product(
     payload: AdminProductManualParseRequest,
-    db: Session = Depends(get_db),
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
 ):
     service = get_site_admin_service()
     try:
-        return await service.manual_parse_product(db, payload)
+        return await service.manual_parse_product(payload)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.get(
+    "/products/manual-parse/{task_id}",
+    response_model=AdminProductManualParseStatusResponse,
+    summary="Manual product parse status",
+)
+async def manual_parse_site_admin_product_status(
+    task_id: str,
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.get_manual_parse_product_status(task_id)
     except AuthServiceError as error:
         _raise_http_auth_error(error)
 

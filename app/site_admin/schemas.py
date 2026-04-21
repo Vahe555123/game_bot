@@ -392,6 +392,19 @@ class AdminProductManualParseResponse(BaseModel):
     records: list[AdminProductManualParseRecord] = Field(default_factory=list)
 
 
+class AdminProductManualParseStartResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str
+
+
+class AdminProductManualParseStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    message: str
+    result: Optional[AdminProductManualParseResponse] = None
+
+
 class AdminProductBasePayload(BaseModel):
     category: Optional[str] = None
     type: Optional[str] = None

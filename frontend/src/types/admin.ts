@@ -145,6 +145,19 @@ export type AdminProductManualParseResponse = {
   records: AdminProductManualParseRecord[]
 }
 
+export type AdminProductManualParseStartResponse = {
+  task_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  message: string
+}
+
+export type AdminProductManualParseStatusResponse = {
+  task_id: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  message: string
+  result?: AdminProductManualParseResponse | null
+}
+
 export type AdminProductPayload = {
   id?: string
   region?: 'UA' | 'TR' | 'IN'
