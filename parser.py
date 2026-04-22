@@ -4781,7 +4781,7 @@ def _parser_sqlalchemy_url() -> str:
 
 def _refresh_product_cards_sync(product_ids: list[str], *, full_rebuild: bool) -> None:
     try:
-        from sqlalchemy import create_engine
+        from sqlalchemy import create_engine, event
 
         from app.database.product_card_rebuilder import (
             rebuild_product_cards,
@@ -4796,6 +4796,26 @@ def _refresh_product_cards_sync(product_ids: list[str], *, full_rebuild: bool) -
             _parser_sqlalchemy_url(),
             connect_args={"check_same_thread": False, "timeout": 30},
         )
+
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_connection_options(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+            try:
+                dbapi_connection.create_function(
+                    "normalize_search",
+                    1,
+                    normalize_search_text,
+                    deterministic=True,
+                )
+            except TypeError:
+                dbapi_connection.create_function("normalize_search", 1, normalize_search_text)
+
         try:
             with engine.begin() as connection:
                 if full_rebuild:
