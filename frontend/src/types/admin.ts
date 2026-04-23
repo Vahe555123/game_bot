@@ -132,6 +132,7 @@ export type AdminDiscountUpdateStatus = {
   remaining?: number | null
   percent?: number | null
   discount_records?: number | null
+  notification_summary?: Record<string, number> | null
   logs?: AdminDiscountUpdateLogEntry[]
   started_at?: string | null
   completed_at?: string | null

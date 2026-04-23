@@ -4868,10 +4868,10 @@ async def refresh_product_cards_after_save(product_ids: list[str], *, full_rebui
     await asyncio.to_thread(_refresh_product_cards_sync, unique_ids, full_rebuild=full_rebuild)
 
 
-def _notify_favorite_discounts_after_save_sync(product_ids: list[str]) -> None:
+def _notify_favorite_discounts_after_save_sync(product_ids: list[str]) -> dict[str, int]:
     unique_ids = sorted({str(product_id).strip() for product_id in product_ids if product_id})
     if not unique_ids:
-        return
+        return {}
 
     try:
         from sqlalchemy import create_engine, event
@@ -4904,18 +4904,22 @@ def _notify_favorite_discounts_after_save_sync(product_ids: list[str]) -> None:
             print(
                 "[OK] Уведомления по избранному: "
                 f"отправлено {summary.get('sent', 0)}, "
+                f"email {summary.get('email_sent', 0)}, "
+                f"Telegram {summary.get('telegram_sent', 0)}, "
                 f"уже было {summary.get('skipped_existing', 0)}, "
                 f"ошибок {summary.get('failed', 0)}"
             )
+        return summary
     except Exception as exc:
         print(f"[!] Не удалось отправить уведомления по избранному: {type(exc).__name__}: {exc}")
+        return {"sent": 0, "email_sent": 0, "telegram_sent": 0, "failed": 1}
 
 
-async def notify_favorite_discounts_after_save(product_ids: list[str]) -> None:
+async def notify_favorite_discounts_after_save(product_ids: list[str]) -> dict[str, int]:
     unique_ids = sorted({str(product_id).strip() for product_id in product_ids if product_id})
     if not unique_ids:
-        return
-    await asyncio.to_thread(_notify_favorite_discounts_after_save_sync, unique_ids)
+        return {}
+    return await asyncio.to_thread(_notify_favorite_discounts_after_save_sync, unique_ids)
 
 
 async def process_and_save_to_db(result: list, promo: list, start_time: float, clear_db: bool = True):
@@ -6064,6 +6068,7 @@ async def run_discount_update(
             "saved": 0,
             "failed": 0,
             "discount_records": 0,
+            "notification_summary": {},
             "clear_stats": clear_stats,
             "url_stats": url_result,
             "elapsed_seconds": perf_counter() - started,
@@ -6138,7 +6143,6 @@ async def run_discount_update(
                 saved = await save_batch_to_db(records_to_save, promo, clear_db=False)
                 product_ids = [record.get("id") for record in records_to_save if record.get("id")]
                 await refresh_product_cards_after_save(product_ids, full_rebuild=False)
-                await notify_favorite_discounts_after_save(product_ids)
                 _update_manual_result_cache(existing_result, records_to_save)
                 saved_total += saved
 
@@ -6164,6 +6168,58 @@ async def run_discount_update(
             )
             await asyncio.sleep(sleep_seconds)
 
+    notification_summary: dict[str, int] = {}
+    discounted_product_ids = sorted(
+        {
+            str(record.get("id")).strip()
+            for record in all_final_records
+            if record.get("id")
+        }
+    )
+    if discounted_product_ids:
+        notify_start_message = (
+            f"Отправляем уведомления по избранному: товаров со скидкой {len(discounted_product_ids)}."
+        )
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                phase="notify",
+                message=notify_start_message,
+                total=total_products,
+                processed=processed,
+                saved=saved_total,
+                failed=failed_total,
+                logs=[notify_start_message],
+                discount_records=discount_records_total,
+                mode="test" if test_mode else "full",
+            ),
+        )
+        notification_summary = await notify_favorite_discounts_after_save(discounted_product_ids)
+        notify_done_message = (
+            "Уведомления по избранному: "
+            f"отправлено {notification_summary.get('sent', 0)}, "
+            f"email {notification_summary.get('email_sent', 0)}, "
+            f"Telegram {notification_summary.get('telegram_sent', 0)}, "
+            f"уже было {notification_summary.get('skipped_existing', 0)}, "
+            f"без контакта {notification_summary.get('no_recipient', 0)}, "
+            f"ошибок {notification_summary.get('failed', 0)}."
+        )
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                phase="notify",
+                message=notify_done_message,
+                total=total_products,
+                processed=processed,
+                saved=saved_total,
+                failed=failed_total,
+                logs=[notify_done_message],
+                discount_records=discount_records_total,
+                notification_summary=notification_summary,
+                mode="test" if test_mode else "full",
+            ),
+        )
+
     elapsed = perf_counter() - started
     message = (
         f"Обновление скидок завершено: обработано {processed}/{total_products}, "
@@ -6182,6 +6238,7 @@ async def run_discount_update(
             failed=failed_total,
             logs=[message],
             discount_records=discount_records_total,
+            notification_summary=notification_summary,
             mode="test" if test_mode else "full",
         ),
     )
@@ -6194,6 +6251,7 @@ async def run_discount_update(
         "saved": saved_total,
         "failed": failed_total,
         "discount_records": discount_records_total,
+        "notification_summary": notification_summary,
         "clear_stats": clear_stats,
         "url_stats": {
             key: value

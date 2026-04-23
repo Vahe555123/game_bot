@@ -9,7 +9,7 @@ from urllib.parse import quote
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.auth.email_service import EmailDeliveryError, email_is_configured
+from app.auth.email_service import email_is_configured
 from app.models import (
     FavoriteDiscountNotification,
     Product,
@@ -35,14 +35,12 @@ REGION_CURRENCY = {
 }
 
 
-class NoNotificationRecipient(RuntimeError):
-    """Raised when a user has no email and no Telegram chat id."""
-
-
 @dataclass
 class FavoriteDiscountNotificationSummary:
     candidates: int = 0
     sent: int = 0
+    email_sent: int = 0
+    telegram_sent: int = 0
     skipped_existing: int = 0
     no_recipient: int = 0
     failed: int = 0
@@ -194,17 +192,23 @@ def _ensure_notification_table(db: Session) -> None:
     FavoriteDiscountNotification.__table__.create(bind=db.get_bind(), checkfirst=True)
 
 
-def _already_sent(db: Session, *, user_id: int, product_id: str, signature: str) -> bool:
-    return bool(
-        db.query(FavoriteDiscountNotification.id)
-        .filter(
-            FavoriteDiscountNotification.user_id == user_id,
-            FavoriteDiscountNotification.product_id == product_id,
-            FavoriteDiscountNotification.discount_signature == signature,
-            FavoriteDiscountNotification.status == "sent",
-        )
-        .first()
+def _already_sent(
+    db: Session,
+    *,
+    user_id: int,
+    product_id: str,
+    signature: str,
+    channel: str | None = None,
+) -> bool:
+    query = db.query(FavoriteDiscountNotification.id).filter(
+        FavoriteDiscountNotification.user_id == user_id,
+        FavoriteDiscountNotification.product_id == product_id,
+        FavoriteDiscountNotification.discount_signature == signature,
+        FavoriteDiscountNotification.status == "sent",
     )
+    if channel:
+        query = query.filter(FavoriteDiscountNotification.channel == channel)
+    return bool(query.first())
 
 
 def _latest_purchase_email(db: Session, user_id: int) -> str | None:
@@ -239,31 +243,12 @@ async def _send_telegram(chat_id: int, text: str) -> None:
         await bot.session.close()
 
 
-async def _deliver_to_user(db: Session, user, payload: dict[str, str | None]) -> tuple[str, str]:
-    email = _preferred_email(db, user)
-    telegram_id = getattr(user, "telegram_id", None)
-
-    if email and email_is_configured():
-        try:
-            await asyncio.to_thread(
-                send_favorite_discount_email,
-                email=email,
-                notification_payload=payload,
-            )
-            return "email", email
-        except Exception as error:
-            if not telegram_id or not settings.TELEGRAM_BOT_TOKEN:
-                raise
-            logger.warning("Email discount notification failed, falling back to Telegram: %s", error)
-
-    if telegram_id and settings.TELEGRAM_BOT_TOKEN:
-        await _send_telegram(int(telegram_id), _telegram_text(payload))
-        return "telegram", str(telegram_id)
-
-    if email:
-        raise EmailDeliveryError("SMTP не настроен, Telegram для пользователя не найден.")
-
-    raise NoNotificationRecipient("У пользователя нет email для покупок, регистрационного email или Telegram chat id.")
+async def _send_email(email: str, payload: dict[str, str | None]) -> None:
+    await asyncio.to_thread(
+        send_favorite_discount_email,
+        email=email,
+        notification_payload=payload,
+    )
 
 
 def _record_notification(
@@ -319,49 +304,121 @@ async def notify_favorite_discounts_for_products(
 
         summary.candidates += 1
         signature = _discount_signature(product)
-        if _already_sent(db, user_id=int(user.id), product_id=product.id, signature=signature):
-            summary.skipped_existing += 1
-            continue
 
         payload = _notification_payload(product)
-        try:
-            channel, recipient = await _deliver_to_user(db, user, payload)
-        except NoNotificationRecipient:
-            summary.no_recipient += 1
-            continue
-        except Exception as error:
-            logger.exception(
-                "Failed to send favorite discount notification user_id=%s product_id=%s",
-                user.id,
-                product.id,
-            )
-            summary.failed += 1
-            try:
-                _record_notification(
-                    db,
-                    user_id=int(user.id),
-                    product=product,
-                    signature=signature,
-                    channel="failed",
-                    recipient=None,
-                    status="failed",
-                    error_message=f"{type(error).__name__}: {error}",
-                )
-            except Exception:
-                logger.exception("Failed to record favorite discount notification failure")
-                db.rollback()
-            continue
+        user_id = int(user.id)
+        email = _preferred_email(db, user)
+        telegram_id = getattr(user, "telegram_id", None)
+        deliverable_channels = 0
 
-        _record_notification(
-            db,
-            user_id=int(user.id),
-            product=product,
-            signature=signature,
-            channel=channel,
-            recipient=recipient,
-            status="sent",
-        )
-        summary.sent += 1
+        if email and email_is_configured():
+            deliverable_channels += 1
+            if _already_sent(
+                db,
+                user_id=user_id,
+                product_id=product.id,
+                signature=signature,
+                channel="email",
+            ):
+                summary.skipped_existing += 1
+            else:
+                try:
+                    await _send_email(email, payload)
+                except Exception as error:
+                    logger.exception(
+                        "Failed to send email favorite discount notification user_id=%s product_id=%s",
+                        user.id,
+                        product.id,
+                    )
+                    summary.failed += 1
+                    try:
+                        _record_notification(
+                            db,
+                            user_id=user_id,
+                            product=product,
+                            signature=signature,
+                            channel="email",
+                            recipient=email,
+                            status="failed",
+                            error_message=f"{type(error).__name__}: {error}",
+                        )
+                    except Exception:
+                        logger.exception("Failed to record email discount notification failure")
+                        db.rollback()
+                else:
+                    try:
+                        _record_notification(
+                            db,
+                            user_id=user_id,
+                            product=product,
+                            signature=signature,
+                            channel="email",
+                            recipient=email,
+                            status="sent",
+                        )
+                    except Exception:
+                        logger.exception("Failed to record email discount notification success")
+                        db.rollback()
+                        summary.failed += 1
+                    else:
+                        summary.sent += 1
+                        summary.email_sent += 1
+
+        if telegram_id and settings.TELEGRAM_BOT_TOKEN:
+            deliverable_channels += 1
+            if _already_sent(
+                db,
+                user_id=user_id,
+                product_id=product.id,
+                signature=signature,
+                channel="telegram",
+            ):
+                summary.skipped_existing += 1
+            else:
+                try:
+                    await _send_telegram(int(telegram_id), _telegram_text(payload))
+                except Exception as error:
+                    logger.exception(
+                        "Failed to send Telegram favorite discount notification user_id=%s product_id=%s",
+                        user.id,
+                        product.id,
+                    )
+                    summary.failed += 1
+                    try:
+                        _record_notification(
+                            db,
+                            user_id=user_id,
+                            product=product,
+                            signature=signature,
+                            channel="telegram",
+                            recipient=str(telegram_id),
+                            status="failed",
+                            error_message=f"{type(error).__name__}: {error}",
+                        )
+                    except Exception:
+                        logger.exception("Failed to record Telegram discount notification failure")
+                        db.rollback()
+                else:
+                    try:
+                        _record_notification(
+                            db,
+                            user_id=user_id,
+                            product=product,
+                            signature=signature,
+                            channel="telegram",
+                            recipient=str(telegram_id),
+                            status="sent",
+                        )
+                    except Exception:
+                        logger.exception("Failed to record Telegram discount notification success")
+                        db.rollback()
+                        summary.failed += 1
+                    else:
+                        summary.sent += 1
+                        summary.telegram_sent += 1
+
+        if deliverable_channels == 0:
+            summary.no_recipient += 1
 
     return summary.to_dict()
 

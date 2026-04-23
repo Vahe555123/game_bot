@@ -303,6 +303,7 @@ function DiscountUpdateStatusPanel({ status }: { status: AdminDiscountUpdateStat
   const percent = Math.max(0, Math.min(100, Math.round(status.percent ?? 0)))
   const isActive = status.status === 'pending' || status.status === 'running'
   const logs = status.logs || []
+  const notificationSummary = status.notification_summary
 
   return (
     <div className="mb-5 rounded-[18px] border border-white/10 bg-slate-950/40 p-4">
@@ -336,6 +337,23 @@ function DiscountUpdateStatusPanel({ status }: { status: AdminDiscountUpdateStat
           />
         </div>
       </div>
+
+      {notificationSummary ? (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
+          <span className="rounded-full border border-white/10 px-3 py-1">
+            Уведомления: {notificationSummary.sent ?? 0}
+          </span>
+          <span className="rounded-full border border-white/10 px-3 py-1">
+            Email: {notificationSummary.email_sent ?? 0}
+          </span>
+          <span className="rounded-full border border-white/10 px-3 py-1">
+            Telegram: {notificationSummary.telegram_sent ?? 0}
+          </span>
+          <span className="rounded-full border border-white/10 px-3 py-1">
+            Ошибок: {notificationSummary.failed ?? 0}
+          </span>
+        </div>
+      ) : null}
 
       <div className="mt-4 rounded-[14px] border border-white/8 bg-black/20">
         <div className="border-b border-white/8 px-3 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
