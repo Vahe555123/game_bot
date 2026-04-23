@@ -114,6 +114,30 @@ export type AdminProductListResponse = {
 
 export type AdminProductSortMode = 'popular' | 'alphabet' | 'added_desc' | 'release_desc'
 
+export type AdminDiscountUpdateLogEntry = {
+  time: string
+  message: string
+}
+
+export type AdminDiscountUpdateStatus = {
+  task_id?: string | null
+  status: 'idle' | 'pending' | 'running' | 'completed' | 'failed'
+  phase?: string | null
+  message: string
+  mode?: 'test' | 'full' | string | null
+  total?: number | null
+  processed?: number | null
+  saved?: number | null
+  failed?: number | null
+  remaining?: number | null
+  percent?: number | null
+  discount_records?: number | null
+  logs?: AdminDiscountUpdateLogEntry[]
+  started_at?: string | null
+  completed_at?: string | null
+  result?: Record<string, unknown> | null
+}
+
 export type AdminProductManualParsePayload = {
   ua_url?: string | null
   tr_url?: string | null

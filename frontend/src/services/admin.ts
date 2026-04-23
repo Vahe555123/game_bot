@@ -1,5 +1,6 @@
 import type {
   AdminDashboard,
+  AdminDiscountUpdateStatus,
   AdminHelpContent,
   AdminHelpContentPayload,
   AdminProductDetails,
@@ -69,6 +70,33 @@ export async function fetchAdminProducts(params: {
   missing_region?: string
 }) {
   const response = await apiClient.get<AdminProductListResponse>('/site/admin/products', { params })
+  return response.data
+}
+
+export async function fetchAdminDiscountProducts(params: {
+  page?: number
+  limit?: number
+  search?: string
+  region?: string
+}) {
+  const response = await apiClient.get<AdminProductListResponse>('/site/admin/discounts/products', { params })
+  return response.data
+}
+
+export async function startAdminDiscountUpdate(test: boolean) {
+  const response = await apiClient.post<AdminDiscountUpdateStatus>(
+    '/site/admin/discounts/update',
+    undefined,
+    {
+      params: { test },
+      timeout: 0,
+    },
+  )
+  return response.data
+}
+
+export async function fetchAdminDiscountUpdateStatus() {
+  const response = await apiClient.get<AdminDiscountUpdateStatus>('/site/admin/discounts/update/status')
   return response.data
 }
 

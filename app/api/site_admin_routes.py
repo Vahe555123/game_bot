@@ -167,6 +167,51 @@ def list_site_admin_products(
         _raise_http_auth_error(error)
 
 
+@router.get("/discounts/products", response_model=AdminProductListResponse, summary="List discounted products")
+def list_site_admin_discount_products(
+    page: int = Query(1, ge=1),
+    limit: int = Query(24, ge=1, le=100),
+    search: str | None = Query(None),
+    region: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.list_discount_products(
+            db,
+            page=page,
+            limit=limit,
+            search=search,
+            region=region,
+        )
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/discounts/update", summary="Start discount update parser")
+async def start_site_admin_discount_update(
+    test: bool = Query(False),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.start_discount_update(test=test)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.get("/discounts/update/status", summary="Discount update parser status")
+async def get_site_admin_discount_update_status(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.get_discount_update_status()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
 @router.get("/products/{product_id}", response_model=AdminProductDetailsResponse, summary="Product details")
 def get_site_admin_product(
     product_id: str,

@@ -1,7 +1,8 @@
-import { FileText, LayoutDashboard, LinkIcon, Package2, PanelLeftClose, PanelLeftOpen, Shield, ShoppingBag, Users } from 'lucide-react'
+import { BadgePercent, FileText, LayoutDashboard, LinkIcon, Package2, PanelLeftClose, PanelLeftOpen, Shield, ShoppingBag, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { AdminContentSection } from '../components/admin/AdminContentSection'
 import { AdminDashboardSection } from '../components/admin/AdminDashboardSection'
+import { AdminDiscountsSection } from '../components/admin/AdminDiscountsSection'
 import { AdminProductsSection } from '../components/admin/AdminProductsSection'
 import { AdminPurchasesSection } from '../components/admin/AdminPurchasesSection'
 import { AdminUnparsedSection } from '../components/admin/AdminUnparsedSection'
@@ -14,6 +15,7 @@ import { getApiErrorMessage } from '../utils/apiErrors'
 const SECTIONS = [
   { id: 'admin-dashboard', label: 'Дашборд', icon: LayoutDashboard },
   { id: 'admin-products', label: 'Товары', icon: Package2 },
+  { id: 'admin-discounts', label: 'Скидки', icon: BadgePercent },
   { id: 'admin-unparsed', label: 'Не спарсенные URL', icon: LinkIcon },
   { id: 'admin-purchases', label: 'Покупки', icon: ShoppingBag },
   { id: 'admin-content', label: 'Помощь', icon: FileText },
@@ -146,6 +148,7 @@ export function AdminPage() {
 
           <AdminDashboardSection dashboard={dashboard} isLoading={isDashboardLoading} />
           <AdminProductsSection onDataChanged={loadDashboard} />
+          <AdminDiscountsSection onDataChanged={loadDashboard} />
           <AdminUnparsedSection />
           <AdminPurchasesSection onDataChanged={loadDashboard} />
           <AdminContentSection />

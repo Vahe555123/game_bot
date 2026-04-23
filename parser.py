@@ -5575,6 +5575,573 @@ async def collect_product_urls_cache(
     return result
 
 
+DISCOUNT_CATEGORY_URL = "https://store.playstation.com/ru-ua/category/f20b1e5e-14f3-4cee-a2a0-168c6c545eec"
+DISCOUNT_TEST_LIMIT = 10
+DISCOUNT_UPDATE_BATCH_SIZE = int(os.getenv("DISCOUNT_UPDATE_BATCH_SIZE", "5") or "5")
+DISCOUNT_UPDATE_SLEEP_SECONDS = float(os.getenv("DISCOUNT_UPDATE_SLEEP_SECONDS", "1.5") or "1.5")
+
+
+def _normalize_discount_category_url(url: str = DISCOUNT_CATEGORY_URL) -> str:
+    cleaned = (url or DISCOUNT_CATEGORY_URL).strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    parts = cleaned.split("/")
+    if parts and parts[-1].isdigit():
+        cleaned = "/".join(parts[:-1])
+    return cleaned
+
+
+def _discount_progress_payload(
+    *,
+    status: str = "running",
+    phase: str,
+    message: str,
+    total: Optional[int] = None,
+    processed: Optional[int] = None,
+    saved: Optional[int] = None,
+    failed: Optional[int] = None,
+    logs: Optional[list[str]] = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "status": status,
+        "phase": phase,
+        "message": message,
+    }
+    if total is not None:
+        payload["total"] = int(total)
+    if processed is not None:
+        payload["processed"] = int(processed)
+    if saved is not None:
+        payload["saved"] = int(saved)
+    if failed is not None:
+        payload["failed"] = int(failed)
+    if total is not None and processed is not None:
+        payload["remaining"] = max(int(total) - int(processed), 0)
+        payload["percent"] = 100 if int(total) <= 0 else min(round(int(processed) / int(total) * 100), 100)
+    if logs:
+        payload["logs"] = logs
+    payload.update(extra)
+    return payload
+
+
+async def _emit_discount_progress(progress_callback, payload: dict[str, Any]) -> None:
+    if not progress_callback:
+        return
+    maybe_awaitable = progress_callback(dict(payload))
+    if asyncio.iscoroutine(maybe_awaitable):
+        await maybe_awaitable
+
+
+async def _clear_discount_fields_in_db(progress_callback=None) -> dict[str, int]:
+    await ensure_database_schema()
+
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        await prepare_sqlite_connection(db)
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*)
+            FROM products
+            WHERE COALESCE(discount, 0) > 0
+               OR COALESCE(discount_percent, 0) > 0
+               OR COALESCE(old_price, 0) > 0
+               OR COALESCE(old_price_uah, 0) > 0
+               OR COALESCE(old_price_try, 0) > 0
+               OR COALESCE(old_price_inr, 0) > 0
+            """
+        )
+        products_with_discounts = int((await cursor.fetchone())[0] or 0)
+        await cursor.close()
+
+        await db.execute(
+            """
+            UPDATE products
+            SET discount = 0,
+                discount_percent = 0,
+                discount_end = NULL,
+                old_price = NULL,
+                old_price_uah = 0,
+                old_price_try = 0,
+                old_price_inr = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE COALESCE(discount, 0) > 0
+               OR COALESCE(discount_percent, 0) > 0
+               OR COALESCE(old_price, 0) > 0
+               OR COALESCE(old_price_uah, 0) > 0
+               OR COALESCE(old_price_try, 0) > 0
+               OR COALESCE(old_price_inr, 0) > 0
+            """
+        )
+
+        product_cards_cleared = 0
+        cursor = await db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'product_cards'"
+        )
+        product_cards_exists = await cursor.fetchone()
+        await cursor.close()
+        if product_cards_exists:
+            cursor = await db.execute(
+                """
+                SELECT COUNT(*)
+                FROM product_cards
+                WHERE COALESCE(has_discount, 0) > 0
+                   OR COALESCE(max_discount_percent, 0) > 0
+                """
+            )
+            product_cards_cleared = int((await cursor.fetchone())[0] or 0)
+            await cursor.close()
+
+            await db.execute(
+                """
+                UPDATE product_cards
+                SET min_old_price_rub = NULL,
+                    max_discount_percent = NULL,
+                    has_discount = 0,
+                    ua_old_price_uah = NULL,
+                    ua_old_price_rub = NULL,
+                    ua_discount_percent = NULL,
+                    ua_has_discount = 0,
+                    ua_discount_end = NULL,
+                    tr_old_price_try = NULL,
+                    tr_old_price_rub = NULL,
+                    tr_discount_percent = NULL,
+                    tr_has_discount = 0,
+                    tr_discount_end = NULL,
+                    in_old_price_inr = NULL,
+                    in_old_price_rub = NULL,
+                    in_discount_percent = NULL,
+                    in_has_discount = 0,
+                    in_discount_end = NULL
+                WHERE COALESCE(has_discount, 0) > 0
+                   OR COALESCE(max_discount_percent, 0) > 0
+                """
+            )
+
+        await db.commit()
+
+    message = f"Старые скидки очищены: products={products_with_discounts}, product_cards={product_cards_cleared}."
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            phase="clear",
+            message=message,
+            total=0,
+            processed=0,
+            saved=0,
+            failed=0,
+            logs=[message],
+        ),
+    )
+    return {
+        "products_cleared": products_with_discounts,
+        "product_cards_cleared": product_cards_cleared,
+    }
+
+
+def _clear_discount_fields_in_records(records: list[dict]) -> int:
+    changed = 0
+    for record in records:
+        had_discount = any(
+            (record.get(field) or 0) for field in (
+                "discount",
+                "discount_percent",
+                "old_price",
+                "old_price_uah",
+                "old_price_try",
+                "old_price_inr",
+            )
+        ) or bool(record.get("discount_end"))
+
+        record["discount"] = 0
+        record["discount_percent"] = 0
+        record["discount_end"] = None
+        record["old_price"] = None
+        record["old_price_uah"] = 0.0
+        record["old_price_try"] = 0.0
+        record["old_price_inr"] = 0.0
+        if had_discount:
+            changed += 1
+    return changed
+
+
+def _count_discount_records(records: list[dict]) -> int:
+    count = 0
+    for record in records:
+        try:
+            discount = int(float(record.get("discount_percent") or record.get("discount") or 0))
+        except (TypeError, ValueError):
+            discount = 0
+        if discount > 0:
+            count += 1
+    return count
+
+
+async def collect_discount_product_urls(
+    *,
+    category_url: str = DISCOUNT_CATEGORY_URL,
+    limit: Optional[int] = None,
+    progress_callback=None,
+) -> dict[str, Any]:
+    base_url = _normalize_discount_category_url(category_url)
+    connector = aiohttp.TCPConnector(
+        limit=12,
+        limit_per_host=6,
+        keepalive_timeout=15,
+        enable_cleanup_closed=True,
+        ttl_dns_cache=300,
+    )
+
+    async with aiohttp.ClientSession(
+        trust_env=True,
+        timeout=aiohttp.ClientTimeout(total=180, connect=30),
+        connector=connector,
+    ) as session:
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                phase="collect_pages",
+                message="Получаем страницы раздела скидок PlayStation Store.",
+                total=0,
+                processed=0,
+                saved=0,
+                failed=0,
+                logs=["Получаем страницы раздела скидок PlayStation Store."],
+            ),
+        )
+
+        pages = await get_pages(session, base_url)
+        if not pages:
+            pages = [base_url]
+        if limit:
+            pages_to_scan = pages[:1]
+        else:
+            pages_to_scan = pages
+
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                phase="collect_urls",
+                message=f"Найдено страниц скидок: {len(pages)}. Собираем товары.",
+                total=len(pages_to_scan),
+                processed=0,
+                saved=0,
+                failed=0,
+                logs=[f"Найдено страниц скидок: {len(pages)}."],
+                total_pages=len(pages),
+            ),
+        )
+
+        raw_urls: list[str] = []
+        page_batch_size = max(1, min(parser_config.BATCH_SIZE_PAGES, 8))
+        for i in range(0, len(pages_to_scan), page_batch_size):
+            batch_pages = pages_to_scan[i : min(len(pages_to_scan), i + page_batch_size)]
+            page_results = await asyncio.gather(*[get_products(session, page_url) for page_url in batch_pages])
+            raw_urls.extend(sum(page_results, []))
+            raw_urls, _ = _deduplicate_product_urls(raw_urls)
+            if limit and len(raw_urls) >= limit * 2:
+                raw_urls = raw_urls[: limit * 2]
+                break
+            await asyncio.sleep(max(DISCOUNT_UPDATE_SLEEP_SECONDS, 0.5))
+
+            processed_pages = min(len(pages_to_scan), i + page_batch_size)
+            await _emit_discount_progress(
+                progress_callback,
+                _discount_progress_payload(
+                    phase="collect_urls",
+                    message=f"Собрано страниц: {processed_pages}/{len(pages_to_scan)}, URL: {len(raw_urls)}.",
+                    total=len(pages_to_scan),
+                    processed=processed_pages,
+                    saved=0,
+                    failed=0,
+                    logs=[f"Собрано URL из страниц: {len(raw_urls)}."],
+                    total_pages=len(pages),
+                ),
+            )
+
+        if limit:
+            raw_urls = raw_urls[: limit * 2]
+
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                phase="expand_urls",
+                message=f"Разворачиваем concept URL: 0/{len(raw_urls)}.",
+                total=len(raw_urls),
+                processed=0,
+                saved=0,
+                failed=0,
+                logs=[f"К разворачиванию подготовлено URL: {len(raw_urls)}."],
+            ),
+        )
+
+        product_urls: list[str] = []
+        expand_batch_size = max(1, min(parser_config.BATCH_SIZE_UNQUOTE, 10))
+        for i in range(0, len(raw_urls), expand_batch_size):
+            batch_urls = raw_urls[i : min(len(raw_urls), i + expand_batch_size)]
+            expanded = await asyncio.gather(*[unquote(session, product_url) for product_url in batch_urls])
+            product_urls.extend(sum(expanded, []))
+            product_urls, _ = _deduplicate_product_urls(product_urls)
+            if limit and len(product_urls) >= limit:
+                product_urls = product_urls[:limit]
+                break
+            await asyncio.sleep(max(DISCOUNT_UPDATE_SLEEP_SECONDS, 0.5))
+
+            processed_urls = min(len(raw_urls), i + expand_batch_size)
+            await _emit_discount_progress(
+                progress_callback,
+                _discount_progress_payload(
+                    phase="expand_urls",
+                    message=f"Развернуто URL: {processed_urls}/{len(raw_urls)}, product URL: {len(product_urls)}.",
+                    total=len(raw_urls),
+                    processed=processed_urls,
+                    saved=0,
+                    failed=0,
+                    logs=[f"Развернуто product URL: {len(product_urls)}."],
+                ),
+            )
+
+    product_urls, duplicates_removed = _deduplicate_product_urls(product_urls)
+    if limit:
+        product_urls = product_urls[:limit]
+
+    result = {
+        "category_url": base_url,
+        "total_pages": len(pages),
+        "scanned_pages": len(pages_to_scan),
+        "raw_urls": len(raw_urls),
+        "product_urls": product_urls,
+        "total_products": len(product_urls),
+        "duplicates_removed": duplicates_removed,
+        "limit": limit,
+    }
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            phase="urls_ready",
+            message=f"Список товаров со скидкой готов: {len(product_urls)} URL.",
+            total=len(product_urls),
+            processed=0,
+            saved=0,
+            failed=0,
+            logs=[f"Список товаров со скидкой готов: {len(product_urls)} URL."],
+            url_total=len(product_urls),
+        ),
+    )
+    return result
+
+
+async def run_discount_update(
+    *,
+    limit: Optional[int] = None,
+    category_url: str = DISCOUNT_CATEGORY_URL,
+    progress_callback=None,
+) -> dict[str, Any]:
+    """Очищает старые скидки и обновляет их из sale-раздела PlayStation Store."""
+    started = perf_counter()
+    test_mode = bool(limit)
+    normalized_limit = int(limit) if limit else None
+    if normalized_limit is not None and normalized_limit <= 0:
+        normalized_limit = None
+        test_mode = False
+
+    await ensure_database_schema()
+    await currency_converter.load_rates()
+
+    start_message = (
+        f"Запущено тестовое обновление скидок: первые {normalized_limit} товаров."
+        if test_mode
+        else "Запущено полное обновление скидок."
+    )
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            phase="starting",
+            message=start_message,
+            total=normalized_limit or 0,
+            processed=0,
+            saved=0,
+            failed=0,
+            mode="test" if test_mode else "full",
+            logs=[start_message],
+        ),
+    )
+
+    clear_stats = await _clear_discount_fields_in_db(progress_callback)
+    existing_result = _load_manual_result_cache()
+    result_cache_cleared = _clear_discount_fields_in_records(existing_result)
+    if result_cache_cleared:
+        _save_manual_result_cache(existing_result)
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                phase="clear",
+                message=f"Скидки очищены в result.pkl: {result_cache_cleared} записей.",
+                total=0,
+                processed=0,
+                saved=0,
+                failed=0,
+                logs=[f"Скидки очищены в result.pkl: {result_cache_cleared} записей."],
+            ),
+        )
+
+    url_result = await collect_discount_product_urls(
+        category_url=category_url,
+        limit=normalized_limit,
+        progress_callback=progress_callback,
+    )
+    product_urls: list[str] = url_result["product_urls"]
+    total_products = len(product_urls)
+    if total_products == 0:
+        message = "Список товаров со скидкой пуст, обновление завершено без парсинга."
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                status="completed",
+                phase="completed",
+                message=message,
+                total=0,
+                processed=0,
+                saved=0,
+                failed=0,
+                percent=100,
+                logs=[message],
+            ),
+        )
+        return {
+            "message": message,
+            "mode": "test" if test_mode else "full",
+            "total_products": 0,
+            "processed": 0,
+            "saved": 0,
+            "failed": 0,
+            "discount_records": 0,
+            "clear_stats": clear_stats,
+            "url_stats": url_result,
+            "elapsed_seconds": perf_counter() - started,
+        }
+
+    promo = await _load_manual_promo_cache()
+    parse_logger = ParseLogger()
+    batch_size = max(1, DISCOUNT_UPDATE_BATCH_SIZE)
+    sleep_seconds = max(DISCOUNT_UPDATE_SLEEP_SECONDS, 0.5)
+    processed = 0
+    saved_total = 0
+    discount_records_total = 0
+    failed_total = 0
+    all_final_records: list[dict] = []
+
+    connector = aiohttp.TCPConnector(
+        limit=max(batch_size * 2, 6),
+        limit_per_host=max(batch_size, 4),
+        keepalive_timeout=15,
+        enable_cleanup_closed=True,
+        ttl_dns_cache=300,
+    )
+    async with aiohttp.ClientSession(
+        trust_env=True,
+        timeout=aiohttp.ClientTimeout(total=180, connect=30),
+        connector=connector,
+    ) as session:
+        for i in range(0, total_products, batch_size):
+            batch_urls = product_urls[i : min(total_products, i + batch_size)]
+
+            async def _parse_discount_url(url: str) -> list[dict]:
+                try:
+                    return await asyncio.wait_for(
+                        parse(session, url, regions=["UA", "TR", "IN"], logger=parse_logger),
+                        timeout=240.0,
+                    )
+                except asyncio.TimeoutError:
+                    parse_logger.log_product_error(url, "DISCOUNT_TASK_TIMEOUT_240s")
+                    return []
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    raise
+                except Exception as exc:
+                    parse_logger.log_product_error(
+                        url,
+                        f"DISCOUNT_TASK_EXCEPTION | {type(exc).__name__}: {str(exc)[:150]}",
+                    )
+                    return []
+
+            parsed_batches = await asyncio.gather(*[_parse_discount_url(url) for url in batch_urls])
+            parsed_records = sum(parsed_batches, [])
+            final_records = _build_manual_final_records(parsed_records) if parsed_records else []
+            discount_records = _count_discount_records(final_records)
+            saved = 0
+            if final_records:
+                saved = await save_batch_to_db(final_records, promo, clear_db=False)
+                product_ids = [record.get("id") for record in final_records if record.get("id")]
+                await refresh_product_cards_after_save(product_ids, full_rebuild=False)
+                await notify_favorite_discounts_after_save(product_ids)
+                _update_manual_result_cache(existing_result, final_records)
+                all_final_records.extend(final_records)
+
+            empty_count = sum(1 for parsed in parsed_batches if not parsed)
+            failed_total += empty_count
+            processed += len(batch_urls)
+            saved_total += saved
+            discount_records_total += discount_records
+
+            log_line = (
+                f"Обновлено {processed}/{total_products}; "
+                f"сохранено строк: {saved_total}; скидочных строк: {discount_records_total}; "
+                f"осталось: {max(total_products - processed, 0)}."
+            )
+            await _emit_discount_progress(
+                progress_callback,
+                _discount_progress_payload(
+                    phase="parse",
+                    message=log_line,
+                    total=total_products,
+                    processed=processed,
+                    saved=saved_total,
+                    failed=failed_total,
+                    logs=[log_line],
+                    discount_records=discount_records_total,
+                    batch_size=len(batch_urls),
+                    mode="test" if test_mode else "full",
+                ),
+            )
+            await asyncio.sleep(sleep_seconds)
+
+    elapsed = perf_counter() - started
+    message = (
+        f"Обновление скидок завершено: обработано {processed}/{total_products}, "
+        f"сохранено {saved_total} строк за {elapsed / 60:.1f} мин."
+    )
+    parse_logger.log_summary(total_products=total_products, parsed_count=len(all_final_records))
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            status="completed",
+            phase="completed",
+            message=message,
+            total=total_products,
+            processed=processed,
+            saved=saved_total,
+            failed=failed_total,
+            logs=[message],
+            discount_records=discount_records_total,
+            mode="test" if test_mode else "full",
+        ),
+    )
+
+    return {
+        "message": message,
+        "mode": "test" if test_mode else "full",
+        "total_products": total_products,
+        "processed": processed,
+        "saved": saved_total,
+        "failed": failed_total,
+        "discount_records": discount_records_total,
+        "clear_stats": clear_stats,
+        "url_stats": {
+            key: value
+            for key, value in url_result.items()
+            if key != "product_urls"
+        },
+        "elapsed_seconds": elapsed,
+    }
+
+
 def _merge_chunk_into_existing(existing: List[Dict], new_items: List[Dict], reparse_mode: str) -> int:
     """
     Слияние новых записей в existing (на месте).
@@ -6168,9 +6735,10 @@ async def main():
     print("3. Допарсинг недостающих товаров (продолжить парсинг)")
     print("4. Ручной парсинг товара (UA + TR регионы, обновление result.pkl)")
     print("5. Исправление ошибок продуктов (точечный repair проблемных товаров)")
+    print("6. Обновление скидок (очистка старых скидок + парсинг sale-раздела)")
     print("=" * 80)
 
-    mode = input("\nВведите номер режима (1-5): ").strip()
+    mode = input("\nВведите номер режима (1-6): ").strip()
 
     if mode == "5":
         # Режим 5 делегируется в модуль repair (см. repair.py)
@@ -6188,6 +6756,22 @@ async def main():
             except Exception as exc:
                 print(f"[!] promo.pkl не удалось прочитать: {exc}")
         await repair.run_mode5(promo_data)
+        return
+
+    if mode == "6":
+        print("\n" + "=" * 80)
+        print(" ОБНОВЛЕНИЕ СКИДОК")
+        print("=" * 80)
+        print("1. Тестовый прогон: очистить скидки и обработать первые 10 товаров")
+        print("2. Полное обновление: очистить скидки и обработать весь sale-раздел")
+        print("=" * 80)
+        discount_mode = input("\nВыберите режим скидок (1-2): ").strip()
+        if discount_mode == "1":
+            await run_discount_update(limit=DISCOUNT_TEST_LIMIT)
+        elif discount_mode == "2":
+            await run_discount_update()
+        else:
+            print("\nНеверный выбор. Введите 1 или 2.")
         return
 
     if mode == "2":

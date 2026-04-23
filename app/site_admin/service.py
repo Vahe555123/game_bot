@@ -75,6 +75,10 @@ _product_url_collection_lock = asyncio.Lock()
 _product_url_collection_tasks: dict[str, dict[str, Any]] = {}
 _product_url_collection_current_task_id: Optional[str] = None
 _product_url_collection_tasks_lock = asyncio.Lock()
+_discount_update_lock = asyncio.Lock()
+_discount_update_tasks: dict[str, dict[str, Any]] = {}
+_discount_update_current_task_id: Optional[str] = None
+_discount_update_tasks_lock = asyncio.Lock()
 
 
 def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
@@ -679,6 +683,74 @@ class SiteAdminService:
             limit=limit,
         )
 
+    def list_discount_products(
+        self,
+        db: Session,
+        *,
+        page: int = 1,
+        limit: int = 24,
+        search: Optional[str] = None,
+        region: Optional[str] = None,
+    ) -> AdminProductListResponse:
+        favorites_subquery = (
+            db.query(
+                UserFavoriteProduct.product_id.label("product_id"),
+                func.count(UserFavoriteProduct.id).label("favorites_count"),
+            )
+            .group_by(UserFavoriteProduct.product_id)
+            .subquery()
+        )
+
+        discount_value = func.coalesce(
+            func.nullif(Product.discount_percent, 0),
+            func.nullif(Product.discount, 0),
+            0,
+        )
+        query = (
+            db.query(Product, func.coalesce(favorites_subquery.c.favorites_count, 0).label("favorites_count"))
+            .outerjoin(favorites_subquery, favorites_subquery.c.product_id == Product.id)
+            .filter(discount_value > 0)
+        )
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    Product.id.ilike(pattern),
+                    Product.name.ilike(pattern),
+                    Product.main_name.ilike(pattern),
+                    Product.search_names.ilike(pattern),
+                    Product.publisher.ilike(pattern),
+                )
+            )
+        if region:
+            query = query.filter(Product.region == region.strip().upper())
+
+        total = query.count()
+        product_rows = (
+            query
+            .order_by(
+                discount_value.desc(),
+                Product.main_name.asc(),
+                Product.name.asc(),
+                Product.region.asc(),
+            )
+            .offset(max(page - 1, 0) * limit)
+            .limit(limit)
+            .all()
+        )
+        return AdminProductListResponse(
+            products=[
+                build_admin_product_record(
+                    product,
+                    favorites_count=int(favorites_count or 0),
+                )
+                for product, favorites_count in product_rows
+            ],
+            total=total,
+            page=page,
+            limit=limit,
+        )
+
     def get_product(self, db: Session, *, product_id: str, region: str) -> AdminProductDetailsResponse:
         product = self._get_product_or_error(db, product_id=product_id, region=region)
         return self._build_product_details(db, product)
@@ -1051,6 +1123,91 @@ class SiteAdminService:
                 return dict(_product_url_collection_tasks[active_task_id])
 
         return _build_product_url_collection_cache_status(_load_products_pkl_urls())
+
+    async def start_discount_update(self, *, test: bool = False) -> dict:
+        async with _discount_update_tasks_lock:
+            active_task_id = _get_active_discount_update_task_id()
+            if active_task_id:
+                return dict(_discount_update_tasks[active_task_id])
+
+            task_id = uuid4().hex
+            status = {
+                "task_id": task_id,
+                "status": "pending",
+                "phase": "queued",
+                "message": "Обновление скидок поставлено в очередь.",
+                "mode": "test" if test else "full",
+                "total": 10 if test else None,
+                "processed": 0,
+                "saved": 0,
+                "failed": 0,
+                "remaining": 10 if test else None,
+                "percent": 0,
+                "discount_records": 0,
+                "logs": [],
+                "started_at": utcnow().isoformat(),
+                "completed_at": None,
+                "result": None,
+            }
+            _discount_update_tasks[task_id] = status
+
+            global _discount_update_current_task_id
+            _discount_update_current_task_id = task_id
+
+        async def _run_discount_update() -> None:
+            async with _discount_update_lock:
+                try:
+                    from parser import DISCOUNT_TEST_LIMIT, run_discount_update
+
+                    async def _progress(payload: dict[str, Any]) -> None:
+                        await _update_discount_update_task(task_id, payload)
+
+                    await _update_discount_update_task(
+                        task_id,
+                        {
+                            "status": "running",
+                            "phase": "starting",
+                            "message": "Запускаем парсер скидок PlayStation Store.",
+                        },
+                    )
+                    result = await run_discount_update(
+                        limit=DISCOUNT_TEST_LIMIT if test else None,
+                        progress_callback=_progress,
+                    )
+                    await _update_discount_update_task(
+                        task_id,
+                        {
+                            "status": "completed",
+                            "phase": "completed",
+                            "message": result.get("message") or "Обновление скидок завершено.",
+                            "completed_at": utcnow().isoformat(),
+                            "result": result,
+                            "percent": 100,
+                        },
+                    )
+                except Exception as error:
+                    logger.exception("Discount update failed")
+                    await _update_discount_update_task(
+                        task_id,
+                        {
+                            "status": "failed",
+                            "phase": "failed",
+                            "message": f"Обновление скидок не удалось: {type(error).__name__}: {error}",
+                            "completed_at": utcnow().isoformat(),
+                            "logs": [f"Ошибка: {type(error).__name__}: {error}"],
+                        },
+                    )
+
+        asyncio.create_task(_run_discount_update())
+        return await self.get_discount_update_status()
+
+    async def get_discount_update_status(self) -> dict:
+        async with _discount_update_tasks_lock:
+            active_task_id = _discount_update_current_task_id
+            if active_task_id and active_task_id in _discount_update_tasks:
+                return dict(_discount_update_tasks[active_task_id])
+
+        return _build_idle_discount_update_status()
 
     def list_purchases(
         self,
@@ -1549,5 +1706,76 @@ def _build_product_url_collection_cache_status(urls: list[str]) -> dict[str, Any
         "remaining": 0,
         "new_products_count": 0,
         "new_products": [],
+    }
+
+
+def _get_active_discount_update_task_id() -> Optional[str]:
+    task_id = _discount_update_current_task_id
+    if not task_id:
+        return None
+    task = _discount_update_tasks.get(task_id)
+    if not task:
+        return None
+    if task.get("status") in {"pending", "running"}:
+        return task_id
+    return None
+
+
+async def _update_discount_update_task(task_id: str, payload: dict[str, Any]) -> None:
+    async with _discount_update_tasks_lock:
+        task = _discount_update_tasks.get(task_id)
+        if task is None:
+            return
+
+        new_logs = payload.pop("logs", None)
+        if new_logs:
+            logs = list(task.get("logs") or [])
+            for entry in new_logs:
+                if isinstance(entry, dict):
+                    message = str(entry.get("message") or "")
+                    time_value = str(entry.get("time") or utcnow().isoformat())
+                else:
+                    message = str(entry)
+                    time_value = utcnow().isoformat()
+                if message:
+                    logs.append({"time": time_value, "message": message})
+            task["logs"] = logs[-200:]
+
+        task.update(payload)
+        task["task_id"] = task_id
+
+        total = task.get("total")
+        processed = task.get("processed")
+        if total is not None and processed is not None:
+            try:
+                total_int = int(total)
+                processed_int = int(processed)
+            except (TypeError, ValueError):
+                total_int = 0
+                processed_int = 0
+            task["remaining"] = max(total_int - processed_int, 0)
+            task["percent"] = 100 if total_int <= 0 and task.get("status") == "completed" else (
+                min(round(processed_int / total_int * 100), 100) if total_int > 0 else int(task.get("percent") or 0)
+            )
+
+
+def _build_idle_discount_update_status() -> dict[str, Any]:
+    return {
+        "task_id": None,
+        "status": "idle",
+        "phase": "idle",
+        "message": "Обновление скидок не запущено.",
+        "mode": None,
+        "total": None,
+        "processed": 0,
+        "saved": 0,
+        "failed": 0,
+        "remaining": None,
+        "percent": 0,
+        "discount_records": 0,
+        "logs": [],
+        "started_at": None,
+        "completed_at": None,
+        "result": None,
     }
 
