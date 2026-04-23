@@ -3,11 +3,12 @@ from __future__ import annotations
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from functools import lru_cache
+import logging
 from math import ceil
 from typing import Any, Callable, Optional
 
 from sqlalchemy import or_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, selectinload
 
 from app.auth.email_service import EmailDeliveryError, send_verification_email
@@ -41,6 +42,8 @@ REGISTER_PURPOSE = "register"
 RESET_PASSWORD_PURPOSE = "password_reset"
 SITE_ROLE_CLIENT = "client"
 SITE_ROLE_ADMIN = "admin"
+SESSION_LAST_USED_UPDATE_INTERVAL_SECONDS = 300
+logger = logging.getLogger(__name__)
 
 
 def _get_value(source: Any, key: str, default: Any = None) -> Any:
@@ -593,6 +596,7 @@ class AuthService:
         if not session_token:
             return None
         with self._session() as db:
+            current_time = self.clock()
             token_hash = hash_session_token(session_token)
             session_row = (
                 db.query(SiteAuthSession)
@@ -600,16 +604,33 @@ class AuthService:
                 .filter(
                     SiteAuthSession.session_token_hash == token_hash,
                     SiteAuthSession.revoked_at.is_(None),
-                    SiteAuthSession.expires_at > self.clock(),
+                    SiteAuthSession.expires_at > current_time,
                 )
                 .first()
             )
             if not session_row or not session_row.user or not session_row.user.is_active:
                 return None
-            session_row.last_used_at = self.clock()
+
+            public_user = build_public_user(session_row.user)
+            last_used_at = session_row.last_used_at
+            if last_used_at is not None:
+                try:
+                    if (current_time - last_used_at).total_seconds() < SESSION_LAST_USED_UPDATE_INTERVAL_SECONDS:
+                        return public_user
+                except TypeError:
+                    pass
+
+            session_row.last_used_at = current_time
             db.add(session_row)
-            db.commit()
-            return build_public_user(session_row.user)
+            try:
+                db.commit()
+            except OperationalError as error:
+                db.rollback()
+                if "database is locked" in str(error).lower():
+                    logger.warning("Skipped session last_used_at update because SQLite is locked")
+                    return public_user
+                raise
+            return public_user
 
     def get_profile(self, user_id: Any) -> SiteProfileResponse:
         with self._session() as db:

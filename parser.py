@@ -5578,7 +5578,10 @@ async def collect_product_urls_cache(
 DISCOUNT_CATEGORY_URL = "https://store.playstation.com/ru-ua/category/f20b1e5e-14f3-4cee-a2a0-168c6c545eec"
 DISCOUNT_TEST_LIMIT = 10
 DISCOUNT_UPDATE_BATCH_SIZE = int(os.getenv("DISCOUNT_UPDATE_BATCH_SIZE", "5") or "5")
+DISCOUNT_UPDATE_SAVE_INTERVAL = int(os.getenv("DISCOUNT_UPDATE_SAVE_INTERVAL", "25") or "25")
 DISCOUNT_UPDATE_SLEEP_SECONDS = float(os.getenv("DISCOUNT_UPDATE_SLEEP_SECONDS", "1.5") or "1.5")
+DISCOUNT_CLEAR_BATCH_SIZE = int(os.getenv("DISCOUNT_CLEAR_BATCH_SIZE", "200") or "200")
+DISCOUNT_DB_WRITE_PAUSE_SECONDS = float(os.getenv("DISCOUNT_DB_WRITE_PAUSE_SECONDS", "0.2") or "0.2")
 
 
 def _normalize_discount_category_url(url: str = DISCOUNT_CATEGORY_URL) -> str:
@@ -5634,42 +5637,71 @@ async def _emit_discount_progress(progress_callback, payload: dict[str, Any]) ->
 async def _clear_discount_fields_in_db(progress_callback=None) -> dict[str, int]:
     await ensure_database_schema()
 
+    products_where_sql = """
+        COALESCE(discount, 0) > 0
+        OR COALESCE(discount_percent, 0) > 0
+        OR COALESCE(old_price, 0) > 0
+        OR COALESCE(old_price_uah, 0) > 0
+        OR COALESCE(old_price_try, 0) > 0
+        OR COALESCE(old_price_inr, 0) > 0
+    """
+    product_cards_where_sql = """
+        COALESCE(has_discount, 0) > 0
+        OR COALESCE(max_discount_percent, 0) > 0
+    """
+    batch_size = max(DISCOUNT_CLEAR_BATCH_SIZE, 25)
+    write_pause = max(DISCOUNT_DB_WRITE_PAUSE_SECONDS, 0)
+
     async with aiosqlite.connect(SQLITE_DB_PATH) as db:
         await prepare_sqlite_connection(db)
-        cursor = await db.execute(
-            """
-            SELECT COUNT(*)
-            FROM products
-            WHERE COALESCE(discount, 0) > 0
-               OR COALESCE(discount_percent, 0) > 0
-               OR COALESCE(old_price, 0) > 0
-               OR COALESCE(old_price_uah, 0) > 0
-               OR COALESCE(old_price_try, 0) > 0
-               OR COALESCE(old_price_inr, 0) > 0
-            """
-        )
+        cursor = await db.execute(f"SELECT COUNT(*) FROM products WHERE {products_where_sql}")
         products_with_discounts = int((await cursor.fetchone())[0] or 0)
         await cursor.close()
 
-        await db.execute(
-            """
-            UPDATE products
-            SET discount = 0,
-                discount_percent = 0,
-                discount_end = NULL,
-                old_price = NULL,
-                old_price_uah = 0,
-                old_price_try = 0,
-                old_price_inr = 0,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE COALESCE(discount, 0) > 0
-               OR COALESCE(discount_percent, 0) > 0
-               OR COALESCE(old_price, 0) > 0
-               OR COALESCE(old_price_uah, 0) > 0
-               OR COALESCE(old_price_try, 0) > 0
-               OR COALESCE(old_price_inr, 0) > 0
-            """
-        )
+        products_cleared = 0
+        while True:
+            cursor = await db.execute(
+                f"SELECT rowid FROM products WHERE {products_where_sql} LIMIT ?",
+                (batch_size,),
+            )
+            rows = await cursor.fetchall()
+            await cursor.close()
+            row_ids = [row[0] for row in rows]
+            if not row_ids:
+                break
+
+            placeholders = ",".join("?" for _ in row_ids)
+            await db.execute(
+                f"""
+                UPDATE products
+                SET discount = 0,
+                    discount_percent = 0,
+                    discount_end = NULL,
+                    old_price = NULL,
+                    old_price_uah = 0,
+                    old_price_try = 0,
+                    old_price_inr = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE rowid IN ({placeholders})
+                """,
+                row_ids,
+            )
+            await db.commit()
+            products_cleared += len(row_ids)
+            await _emit_discount_progress(
+                progress_callback,
+                _discount_progress_payload(
+                    phase="clear",
+                    message=f"Очищаем скидки в products: {products_cleared}/{products_with_discounts}.",
+                    total=products_with_discounts,
+                    processed=products_cleared,
+                    saved=0,
+                    failed=0,
+                    logs=[f"Очищено products: {products_cleared}/{products_with_discounts}."],
+                ),
+            )
+            if write_pause:
+                await asyncio.sleep(write_pause)
 
         product_cards_cleared = 0
         cursor = await db.execute(
@@ -5678,46 +5710,65 @@ async def _clear_discount_fields_in_db(progress_callback=None) -> dict[str, int]
         product_cards_exists = await cursor.fetchone()
         await cursor.close()
         if product_cards_exists:
-            cursor = await db.execute(
-                """
-                SELECT COUNT(*)
-                FROM product_cards
-                WHERE COALESCE(has_discount, 0) > 0
-                   OR COALESCE(max_discount_percent, 0) > 0
-                """
-            )
-            product_cards_cleared = int((await cursor.fetchone())[0] or 0)
+            cursor = await db.execute(f"SELECT COUNT(*) FROM product_cards WHERE {product_cards_where_sql}")
+            product_cards_with_discounts = int((await cursor.fetchone())[0] or 0)
             await cursor.close()
 
-            await db.execute(
-                """
-                UPDATE product_cards
-                SET min_old_price_rub = NULL,
-                    max_discount_percent = NULL,
-                    has_discount = 0,
-                    ua_old_price_uah = NULL,
-                    ua_old_price_rub = NULL,
-                    ua_discount_percent = NULL,
-                    ua_has_discount = 0,
-                    ua_discount_end = NULL,
-                    tr_old_price_try = NULL,
-                    tr_old_price_rub = NULL,
-                    tr_discount_percent = NULL,
-                    tr_has_discount = 0,
-                    tr_discount_end = NULL,
-                    in_old_price_inr = NULL,
-                    in_old_price_rub = NULL,
-                    in_discount_percent = NULL,
-                    in_has_discount = 0,
-                    in_discount_end = NULL
-                WHERE COALESCE(has_discount, 0) > 0
-                   OR COALESCE(max_discount_percent, 0) > 0
-                """
-            )
+            while True:
+                cursor = await db.execute(
+                    f"SELECT rowid FROM product_cards WHERE {product_cards_where_sql} LIMIT ?",
+                    (batch_size,),
+                )
+                rows = await cursor.fetchall()
+                await cursor.close()
+                row_ids = [row[0] for row in rows]
+                if not row_ids:
+                    break
 
-        await db.commit()
+                placeholders = ",".join("?" for _ in row_ids)
+                await db.execute(
+                    f"""
+                    UPDATE product_cards
+                    SET min_old_price_rub = NULL,
+                        max_discount_percent = NULL,
+                        has_discount = 0,
+                        ua_old_price_uah = NULL,
+                        ua_old_price_rub = NULL,
+                        ua_discount_percent = NULL,
+                        ua_has_discount = 0,
+                        ua_discount_end = NULL,
+                        tr_old_price_try = NULL,
+                        tr_old_price_rub = NULL,
+                        tr_discount_percent = NULL,
+                        tr_has_discount = 0,
+                        tr_discount_end = NULL,
+                        in_old_price_inr = NULL,
+                        in_old_price_rub = NULL,
+                        in_discount_percent = NULL,
+                        in_has_discount = 0,
+                        in_discount_end = NULL
+                    WHERE rowid IN ({placeholders})
+                    """,
+                    row_ids,
+                )
+                await db.commit()
+                product_cards_cleared += len(row_ids)
+                await _emit_discount_progress(
+                    progress_callback,
+                    _discount_progress_payload(
+                        phase="clear",
+                        message=f"Очищаем скидки в product_cards: {product_cards_cleared}/{product_cards_with_discounts}.",
+                        total=product_cards_with_discounts,
+                        processed=product_cards_cleared,
+                        saved=0,
+                        failed=0,
+                        logs=[f"Очищено product_cards: {product_cards_cleared}/{product_cards_with_discounts}."],
+                    ),
+                )
+                if write_pause:
+                    await asyncio.sleep(write_pause)
 
-    message = f"Старые скидки очищены: products={products_with_discounts}, product_cards={product_cards_cleared}."
+    message = f"Старые скидки очищены: products={products_cleared}, product_cards={product_cards_cleared}."
     await _emit_discount_progress(
         progress_callback,
         _discount_progress_payload(
@@ -5731,7 +5782,7 @@ async def _clear_discount_fields_in_db(progress_callback=None) -> dict[str, int]
         ),
     )
     return {
-        "products_cleared": products_with_discounts,
+        "products_cleared": products_cleared,
         "product_cards_cleared": product_cards_cleared,
     }
 
@@ -6021,12 +6072,14 @@ async def run_discount_update(
     promo = await _load_manual_promo_cache()
     parse_logger = ParseLogger()
     batch_size = max(1, DISCOUNT_UPDATE_BATCH_SIZE)
+    save_interval = max(DISCOUNT_UPDATE_SAVE_INTERVAL, batch_size)
     sleep_seconds = max(DISCOUNT_UPDATE_SLEEP_SECONDS, 0.5)
     processed = 0
     saved_total = 0
     discount_records_total = 0
     failed_total = 0
     all_final_records: list[dict] = []
+    pending_save_records: list[dict] = []
 
     connector = aiohttp.TCPConnector(
         limit=max(batch_size * 2, 6),
@@ -6067,18 +6120,27 @@ async def run_discount_update(
             discount_records = _count_discount_records(final_records)
             saved = 0
             if final_records:
-                saved = await save_batch_to_db(final_records, promo, clear_db=False)
-                product_ids = [record.get("id") for record in final_records if record.get("id")]
-                await refresh_product_cards_after_save(product_ids, full_rebuild=False)
-                await notify_favorite_discounts_after_save(product_ids)
-                _update_manual_result_cache(existing_result, final_records)
+                pending_save_records.extend(final_records)
                 all_final_records.extend(final_records)
 
             empty_count = sum(1 for parsed in parsed_batches if not parsed)
             failed_total += empty_count
             processed += len(batch_urls)
-            saved_total += saved
             discount_records_total += discount_records
+
+            should_flush = bool(pending_save_records) and (
+                processed >= total_products
+                or len(pending_save_records) >= save_interval
+            )
+            if should_flush:
+                records_to_save = pending_save_records
+                pending_save_records = []
+                saved = await save_batch_to_db(records_to_save, promo, clear_db=False)
+                product_ids = [record.get("id") for record in records_to_save if record.get("id")]
+                await refresh_product_cards_after_save(product_ids, full_rebuild=False)
+                await notify_favorite_discounts_after_save(product_ids)
+                _update_manual_result_cache(existing_result, records_to_save)
+                saved_total += saved
 
             log_line = (
                 f"Обновлено {processed}/{total_products}; "
