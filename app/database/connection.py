@@ -760,6 +760,7 @@ def get_db_session():
 def create_tables():
     from app.models import (
         CurrencyRate,
+        FavoriteDiscountNotification,
         Localization,
         PSNAccount,
         Product,
@@ -774,6 +775,7 @@ def create_tables():
 
     _ = (
         CurrencyRate,
+        FavoriteDiscountNotification,
         Localization,
         PSNAccount,
         Product,

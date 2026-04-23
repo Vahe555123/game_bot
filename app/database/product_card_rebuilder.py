@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 CARDS_REBUILD_STATE_KEY = "product_cards_signature"
 CARDS_REBUILD_VERSION_KEY = "product_cards_version"
-CARDS_REBUILD_VERSION = "2"
+CARDS_REBUILD_VERSION = "3"
 
 # Приоритет локализации: меньше число — лучше
 _LOCALIZATION_RANK = {
@@ -264,6 +264,15 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
     ua = by_region.get("UA") or {}
     tr = by_region.get("TR") or {}
     in_ = by_region.get("IN") or {}
+    image = _first_text(
+        [
+            representative.get("image"),
+            ua.get("image"),
+            tr.get("image"),
+            in_.get("image"),
+            *[item.get("image") for item in group],
+        ]
+    )
 
     ua_price_rub = _region_rub(converter, ua.get("price_uah"), "UAH", fallback=ua.get("price_rub") if ua.get("region") == "UA" else None)
     tr_price_rub = _region_rub(converter, tr.get("price_try"), "TRY", fallback=tr.get("price_rub") if tr.get("region") == "TR" else None)
@@ -305,7 +314,7 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
         "main_name": main_name,
         "search_names": representative.get("search_names"),
         "sort_name": sort_name,
-        "image": representative.get("image"),
+        "image": image,
         "category": representative.get("category"),
         "type": representative.get("type"),
         "platforms": representative.get("platforms"),
@@ -402,6 +411,16 @@ def _best_localization(codes: list[Any]) -> str | None:
 def _best_date_value(values: Iterable[Any]) -> str | None:
     normalized = [str(value).strip() for value in values if value]
     return max(normalized) if normalized else None
+
+
+def _first_text(values: Iterable[Any]) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
 
 
 def _region_rub(converter, local_value: Any, currency: str, fallback: Any = None) -> float | None:

@@ -273,6 +273,7 @@ def get_site_admin_unparsed_urls(
     mode: str = Query("missing_any"),
     locale: str | None = Query(None),
     search: str | None = Query(None),
+    region_count: int | None = Query(None, ge=0, le=3),
     db: Session = Depends(get_db),
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
 ):
@@ -285,7 +286,30 @@ def get_site_admin_unparsed_urls(
             mode=mode,
             locale=locale,
             search=search,
+            region_count=region_count,
         )
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/unparsed-urls/collect", summary="Start collecting product URLs into products.pkl")
+async def collect_site_admin_unparsed_urls(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.start_product_url_collection()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.get("/unparsed-urls/collect/status", summary="Product URL collection status")
+async def get_site_admin_unparsed_urls_collection_status(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.get_product_url_collection_status()
     except AuthServiceError as error:
         _raise_http_auth_error(error)
 

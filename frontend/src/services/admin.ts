@@ -81,11 +81,36 @@ export type AdminUnparsedUrlsResponse = {
     url: string
     locale: string
     product_id: string
+    product_name?: string | null
+    added_at?: string | null
+    regions_count: number
+    ua_url: string
     exists_in_regions: string[]
     missing_regions: string[]
   }[]
   page: number
   limit: number
+}
+
+export type AdminUnparsedUrlCollectionStatus = {
+  task_id?: string | null
+  status: 'idle' | 'pending' | 'running' | 'completed' | 'failed'
+  phase?: string | null
+  message: string
+  skipped?: boolean
+  total_urls?: number
+  processed_pages?: number
+  total_pages?: number
+  raw_urls?: number
+  processed_concepts?: number
+  total_concepts?: number
+  expanded_urls?: number
+  duplicates_removed?: number
+  remaining?: number | null
+  new_products_count?: number
+  new_products?: string[]
+  started_at?: string | null
+  completed_at?: string | null
 }
 
 export async function fetchAdminUnparsedUrls(params: {
@@ -94,8 +119,25 @@ export async function fetchAdminUnparsedUrls(params: {
   mode?: 'missing_all' | 'missing_any' | 'all'
   locale?: string
   search?: string
+  region_count?: number
 }) {
   const response = await apiClient.get<AdminUnparsedUrlsResponse>('/site/admin/unparsed-urls', { params })
+  return response.data
+}
+
+export async function collectAdminUnparsedUrls() {
+  const response = await apiClient.post<AdminUnparsedUrlCollectionStatus>(
+    '/site/admin/unparsed-urls/collect',
+    undefined,
+    { timeout: 0 },
+  )
+  return response.data
+}
+
+export async function fetchAdminUnparsedUrlCollectionStatus() {
+  const response = await apiClient.get<AdminUnparsedUrlCollectionStatus>(
+    '/site/admin/unparsed-urls/collect/status',
+  )
   return response.data
 }
 

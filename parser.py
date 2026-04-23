@@ -850,6 +850,16 @@ class AccessController:
 access_controller = AccessController()
 
 
+class RegionCloudflareBlockedError(RuntimeError):
+    def __init__(self, region: str, url: str):
+        self.region = region
+        self.url = url
+        super().__init__(
+            f"{region}: PlayStation Store вернул Cloudflare-блокировку. "
+            f"Проверьте/замените PARSER_PROXY_URL и повторите ручной парсинг."
+        )
+
+
 # Utility functions
 def format_time(seconds: float) -> str:
     """Форматирует секунды в читаемый формат (Ч:ММ:СС)"""
@@ -3246,7 +3256,13 @@ def _extract_product_image(product: dict) -> str:
     return ""
 
 
-async def parse_tr(session: aiohttp.ClientSession, url: str):
+async def parse_tr(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    logger: Optional["ParseLogger"] = None,
+    wait_on_cloudflare: bool = True,
+):
     """
     Парсит товар из TR региона (специально для режима 4)
     Возвращает товары только с TR ценами (trl_price) из API, БЕЗ HTML парсинга
@@ -3281,6 +3297,10 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
             # Проверяем на блокировку Cloudflare
             if "You don't have permission to access" in tr_text:
                 print(f"   Обнаружена блокировка Cloudflare")
+                if logger:
+                    logger.log_product_error(url, "TR_CLOUDFLARE_BLOCKED | PlayStation Store вернул Cloudflare-блокировку")
+                if not wait_on_cloudflare:
+                    raise RegionCloudflareBlockedError("TR", url)
                 await access_controller.wait_for_access(session)
                 counter = 0
                 continue
@@ -3650,8 +3670,8 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
         except (asyncio.CancelledError, KeyboardInterrupt):
             return []
 
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            return []
+        except RegionCloudflareBlockedError:
+            raise
 
         except Exception as e:
             print(f"     Ошибка парсинга TR (попытка {counter + 1}/2): {type(e).__name__}: {str(e)}")
@@ -3662,7 +3682,13 @@ async def parse_tr(session: aiohttp.ClientSession, url: str):
         return []
 
 
-async def parse_in(session: aiohttp.ClientSession, url: str):
+async def parse_in(
+    session: aiohttp.ClientSession,
+    url: str,
+    *,
+    logger: Optional["ParseLogger"] = None,
+    wait_on_cloudflare: bool = True,
+):
     """
     Парсит товар из IN региона (специально для режима 4)
     Возвращает товары только с IN ценами из API, БЕЗ HTML парсинга
@@ -3696,6 +3722,10 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
             # Проверяем на блокировку
             if "You don't have permission to access" in in_text:
                 print(f"   Обнаружена блокировка Cloudflare")
+                if logger:
+                    logger.log_product_error(url, "IN_CLOUDFLARE_BLOCKED | PlayStation Store вернул Cloudflare-блокировку")
+                if not wait_on_cloudflare:
+                    raise RegionCloudflareBlockedError("IN", url)
                 await access_controller.wait_for_access(session)
                 counter = 0
                 continue
@@ -4031,6 +4061,9 @@ async def parse_in(session: aiohttp.ClientSession, url: str):
 
         except (asyncio.CancelledError, KeyboardInterrupt):
             return []
+
+        except RegionCloudflareBlockedError:
+            raise
 
         except Exception as e:
             print(f"     Ошибка парсинга IN (попытка {counter + 1}/2): {type(e).__name__}: {str(e)}")
@@ -4835,6 +4868,56 @@ async def refresh_product_cards_after_save(product_ids: list[str], *, full_rebui
     await asyncio.to_thread(_refresh_product_cards_sync, unique_ids, full_rebuild=full_rebuild)
 
 
+def _notify_favorite_discounts_after_save_sync(product_ids: list[str]) -> None:
+    unique_ids = sorted({str(product_id).strip() for product_id in product_ids if product_id})
+    if not unique_ids:
+        return
+
+    try:
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import sessionmaker
+
+        from app.notifications.favorite_discounts import notify_favorite_discounts_for_product_ids_sync
+
+        engine = create_engine(
+            _parser_sqlalchemy_url(),
+            connect_args={"check_same_thread": False, "timeout": 30},
+        )
+
+        @event.listens_for(engine, "connect")
+        def _set_sqlite_connection_options(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
+        Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        try:
+            with Session() as db:
+                summary = notify_favorite_discounts_for_product_ids_sync(db, unique_ids)
+        finally:
+            engine.dispose()
+
+        if summary.get("sent") or summary.get("failed"):
+            print(
+                "[OK] Уведомления по избранному: "
+                f"отправлено {summary.get('sent', 0)}, "
+                f"уже было {summary.get('skipped_existing', 0)}, "
+                f"ошибок {summary.get('failed', 0)}"
+            )
+    except Exception as exc:
+        print(f"[!] Не удалось отправить уведомления по избранному: {type(exc).__name__}: {exc}")
+
+
+async def notify_favorite_discounts_after_save(product_ids: list[str]) -> None:
+    unique_ids = sorted({str(product_id).strip() for product_id in product_ids if product_id})
+    if not unique_ids:
+        return
+    await asyncio.to_thread(_notify_favorite_discounts_after_save_sync, unique_ids)
+
+
 async def process_and_save_to_db(result: list, promo: list, start_time: float, clear_db: bool = True):
     """
     Обработка спарсенных данных и сохранение в SQLite БД
@@ -4876,6 +4959,7 @@ async def process_and_save_to_db(result: list, promo: list, start_time: float, c
     product_ids = [row[0] for row in products_to_insert if row and row[0]]
     product_cards_full_rebuild = clear_db or len(set(product_ids)) > 1000
     await refresh_product_cards_after_save(product_ids, full_rebuild=product_cards_full_rebuild)
+    await notify_favorite_discounts_after_save(product_ids)
 
     # Статистика
     end = perf_counter()
@@ -4976,17 +5060,39 @@ async def _parse_manual_product_urls(
     region: str,
     regions: Optional[list[str]] = None,
     parse_logger: Optional["ParseLogger"] = None,
+    errors: Optional[list[str]] = None,
 ) -> list[dict]:
     parsed_records: list[dict] = []
     for url in urls:
-        if region == "UA":
-            parsed_data = await parse(session, url, regions=regions, logger=parse_logger)
-        elif region == "TR":
-            parsed_data = await parse_tr(session, url)
-        elif region == "IN":
-            parsed_data = await parse_in(session, url)
-        else:
-            parsed_data = []
+        try:
+            if region == "UA":
+                parsed_data = await parse(session, url, regions=regions, logger=parse_logger)
+            elif region == "TR":
+                parsed_data = await parse_tr(
+                    session,
+                    url,
+                    logger=parse_logger,
+                    wait_on_cloudflare=False,
+                )
+            elif region == "IN":
+                parsed_data = await parse_in(
+                    session,
+                    url,
+                    logger=parse_logger,
+                    wait_on_cloudflare=False,
+                )
+            else:
+                parsed_data = []
+        except RegionCloudflareBlockedError as exc:
+            if errors is not None:
+                errors.append(str(exc))
+            continue
+        except Exception as exc:
+            if parse_logger:
+                parse_logger.log_parse_exception(url, exc)
+            if errors is not None:
+                errors.append(f"{region}: {type(exc).__name__}: {exc}")
+            continue
 
         if parsed_data:
             parsed_records.extend(parsed_data)
@@ -5120,6 +5226,7 @@ async def run_manual_product_parse(
                         region="UA",
                         regions=ua_regions,
                         parse_logger=parse_logger,
+                        errors=errors,
                     )
                 )
             else:
@@ -5128,20 +5235,38 @@ async def run_manual_product_parse(
         if tr_url:
             tr_product_urls = await _expand_manual_product_urls(session, tr_url)
             if tr_product_urls:
-                all_parsed_records.extend(await _parse_manual_product_urls(session, tr_product_urls, region="TR"))
+                all_parsed_records.extend(
+                    await _parse_manual_product_urls(
+                        session,
+                        tr_product_urls,
+                        region="TR",
+                        parse_logger=parse_logger,
+                        errors=errors,
+                    )
+                )
             else:
                 errors.append("TR concept не удалось развернуть в product URL")
 
         if in_url:
             in_product_urls = await _expand_manual_product_urls(session, in_url)
             if in_product_urls:
-                all_parsed_records.extend(await _parse_manual_product_urls(session, in_product_urls, region="IN"))
+                all_parsed_records.extend(
+                    await _parse_manual_product_urls(
+                        session,
+                        in_product_urls,
+                        region="IN",
+                        parse_logger=parse_logger,
+                        errors=errors,
+                    )
+                )
             else:
                 errors.append("IN concept не удалось развернуть в product URL")
 
     if not all_parsed_records:
         parse_logger.log_summary(total_products=0, parsed_count=0)
-        raise ValueError("Ничего не спарсено. Проверьте ссылки или блокировку PlayStation Store.")
+        details = "; ".join(dict.fromkeys(errors))
+        suffix = f" {details}" if details else " Проверьте ссылки или блокировку PlayStation Store."
+        raise ValueError(f"Ничего не спарсено.{suffix}")
 
     final_records = _build_manual_final_records(all_parsed_records)
     updated_count, added_count, duplicates_removed, result_count = _update_manual_result_cache(
@@ -5209,6 +5334,245 @@ def _save_pkl_atomic(path: str, data) -> None:
     with open(tmp, "wb") as f:
         pickle.dump(data, f)
     os.replace(tmp, path)
+
+
+def _load_product_url_cache(path: str) -> list[str]:
+    try:
+        if not os.path.exists(path):
+            return []
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+    except Exception:
+        return []
+
+    if isinstance(data, list):
+        return [str(item) for item in data if item]
+    if isinstance(data, set):
+        return [str(item) for item in data if item]
+    if isinstance(data, dict):
+        return [str(value) for value in data.values() if isinstance(value, str) and value]
+    return []
+
+
+def _deduplicate_product_urls(product_urls: list[str]) -> tuple[list[str], int]:
+    seen_products: dict[tuple[str, str], str] = {}
+    unique_products: list[str] = []
+    duplicates_removed = 0
+
+    for product_url in product_urls:
+        url_parts = str(product_url).strip().rstrip("/").split("/")
+        if len(url_parts) >= 5:
+            locale = url_parts[3]
+            product_id = url_parts[-1].upper()
+            product_key = (locale, product_id)
+            if product_key in seen_products:
+                duplicates_removed += 1
+                continue
+            seen_products[product_key] = product_url
+        unique_products.append(product_url)
+
+    return unique_products, duplicates_removed
+
+
+async def _emit_url_collection_progress(progress_callback, payload: dict[str, Any]) -> None:
+    if not progress_callback:
+        return
+    maybe_awaitable = progress_callback(dict(payload))
+    if asyncio.iscoroutine(maybe_awaitable):
+        await maybe_awaitable
+
+
+async def collect_product_urls_cache(
+    *,
+    products_path: str = "products.pkl",
+    force: bool = False,
+    progress_callback=None,
+) -> dict[str, Any]:
+    """Collects PS Store product URLs into products.pkl without parsing products."""
+    existing_products = _load_product_url_cache(products_path)
+    if existing_products and not force:
+        result = {
+            "status": "completed",
+            "phase": "skipped",
+            "message": f"products.pkl уже содержит {len(existing_products)} URL, сбор пропущен.",
+            "skipped": True,
+            "total_urls": len(existing_products),
+            "processed_pages": 0,
+            "total_pages": 0,
+            "raw_urls": 0,
+            "processed_concepts": 0,
+            "total_concepts": 0,
+            "expanded_urls": 0,
+            "duplicates_removed": 0,
+            "remaining": 0,
+            "new_products_count": 0,
+            "new_products": [],
+        }
+        await _emit_url_collection_progress(progress_callback, result)
+        return result
+
+    existing_keys: set[tuple[str, str]] = set()
+    for url in existing_products:
+        url_parts = str(url).strip().rstrip("/").split("/")
+        if len(url_parts) >= 5:
+            existing_keys.add((url_parts[3], url_parts[-1].upper()))
+
+    connector = aiohttp.TCPConnector(
+        limit=60,
+        limit_per_host=15,
+        keepalive_timeout=15,
+        enable_cleanup_closed=True,
+        force_close=False,
+        ttl_dns_cache=300,
+    )
+
+    start = perf_counter()
+    async with aiohttp.ClientSession(
+        trust_env=True,
+        timeout=aiohttp.ClientTimeout(total=120, connect=30),
+        connector=connector,
+    ) as session:
+        base_categories = [
+            "https://store.playstation.com/ru-ua/pages/browse",
+            "https://store.playstation.com/ru-ua/category/51c9aa7a-c0c7-4b68-90b4-328ad11bf42e",
+            "https://store.playstation.com/ru-ua/category/3c49d223-9344-4009-b296-08e168854749",
+        ]
+        extra_categories = parser_config.EXTRA_CATEGORIES
+
+        await _emit_url_collection_progress(
+            progress_callback,
+            {
+                "status": "running",
+                "phase": "pages",
+                "message": "Собираем страницы категорий.",
+                "processed_pages": 0,
+                "total_pages": len(base_categories) + len(extra_categories),
+                "remaining": len(base_categories) + len(extra_categories),
+            },
+        )
+
+        pages_results = await asyncio.gather(*[get_pages(session, url) for url in base_categories])
+        pages = sum(pages_results, [])
+        extra_pages_results = await asyncio.gather(*[get_pages(session, url) for url in extra_categories])
+        extra_pages = sum(extra_pages_results, [])
+        all_pages = pages + extra_pages
+
+        await _emit_url_collection_progress(
+            progress_callback,
+            {
+                "status": "running",
+                "phase": "product_urls",
+                "message": f"Получено страниц: {len(all_pages)}. Собираем URL товаров.",
+                "processed_pages": 0,
+                "total_pages": len(all_pages),
+                "raw_urls": 0,
+                "remaining": len(all_pages),
+            },
+        )
+
+        urls: list[str] = []
+        shift = parser_config.BATCH_SIZE_PAGES
+        for i in range(0, len(all_pages), shift):
+            parser_config.load_config()
+            shift = parser_config.BATCH_SIZE_PAGES
+            batch_pages = all_pages[i : min(len(all_pages), i + shift)]
+            batch_urls = await asyncio.gather(*[get_products(session, page_url) for page_url in batch_pages])
+            urls.extend(sum(batch_urls, []))
+            await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
+
+            processed = min(len(all_pages), i + shift)
+            await _emit_url_collection_progress(
+                progress_callback,
+                {
+                    "status": "running",
+                    "phase": "product_urls",
+                    "message": f"Собираем URL товаров: {processed}/{len(all_pages)} страниц.",
+                    "processed_pages": processed,
+                    "total_pages": len(all_pages),
+                    "raw_urls": len(urls),
+                    "remaining": max(len(all_pages) - processed, 0),
+                },
+            )
+
+        special_products = [
+            "https://store.playstation.com/ru-ua/concept/10004507",
+            "https://store.playstation.com/ru-ua/concept/10010783",
+        ]
+        urls.extend(special_products)
+        urls = urls[::-1]
+
+        await _emit_url_collection_progress(
+            progress_callback,
+            {
+                "status": "running",
+                "phase": "expand",
+                "message": f"Разворачиваем concept URL: 0/{len(urls)}.",
+                "processed_concepts": 0,
+                "total_concepts": len(urls),
+                "raw_urls": len(urls),
+                "expanded_urls": 0,
+                "remaining": len(urls),
+            },
+        )
+
+        products: list[str] = []
+        shift = parser_config.BATCH_SIZE_UNQUOTE
+        for i in range(0, len(urls), shift):
+            parser_config.load_config()
+            shift = parser_config.BATCH_SIZE_UNQUOTE
+            batch_urls = urls[i : min(len(urls), i + shift)]
+            expanded = await asyncio.gather(*[unquote(session, product_url) for product_url in batch_urls])
+            products.extend(sum(expanded, []))
+            await asyncio.sleep(parser_config.SLEEP_BETWEEN_BATCHES)
+
+            processed = min(len(urls), i + shift)
+            await _emit_url_collection_progress(
+                progress_callback,
+                {
+                    "status": "running",
+                    "phase": "expand",
+                    "message": f"Разворачиваем concept URL: {processed}/{len(urls)}.",
+                    "processed_concepts": processed,
+                    "total_concepts": len(urls),
+                    "raw_urls": len(urls),
+                    "expanded_urls": len(products),
+                    "remaining": max(len(urls) - processed, 0),
+                },
+            )
+
+    products, duplicates_removed = _deduplicate_product_urls(products)
+    new_products: list[str] = []
+    for product_url in products:
+        url_parts = str(product_url).strip().rstrip("/").split("/")
+        if len(url_parts) < 5:
+            new_products.append(product_url)
+            continue
+        key = (url_parts[3], url_parts[-1].upper())
+        if key not in existing_keys:
+            new_products.append(product_url)
+
+    _save_pkl_atomic(products_path, products)
+
+    elapsed = perf_counter() - start
+    result = {
+        "status": "completed",
+        "phase": "completed",
+        "message": f"Сбор URL завершён: {len(products)} URL за {elapsed / 60:.1f} мин.",
+        "skipped": False,
+        "total_urls": len(products),
+        "processed_pages": len(all_pages),
+        "total_pages": len(all_pages),
+        "raw_urls": len(urls),
+        "processed_concepts": len(urls),
+        "total_concepts": len(urls),
+        "expanded_urls": len(products),
+        "duplicates_removed": duplicates_removed,
+        "remaining": 0,
+        "new_products_count": len(new_products),
+        "new_products": new_products[:50],
+    }
+    await _emit_url_collection_progress(progress_callback, result)
+    return result
 
 
 def _merge_chunk_into_existing(existing: List[Dict], new_items: List[Dict], reparse_mode: str) -> int:

@@ -32,6 +32,10 @@ from app.models import User, UserFavoriteProduct
 from app.models.site_auth import SiteAuthCode, SiteAuthSession, SiteContent
 from app.models.product import Product
 from app.models.purchase_order import SitePurchaseOrder
+from app.notifications.favorite_discounts import (
+    notify_favorite_discounts_for_product_ids,
+    notify_favorite_discounts_for_products_sync,
+)
 from app.database.connection import SessionLocal
 from app.site_orders.service import build_status_label, serialize_purchase_order
 from config.settings import settings
@@ -67,6 +71,10 @@ logger = logging.getLogger(__name__)
 _manual_product_parse_lock = asyncio.Lock()
 _manual_product_parse_tasks: dict[str, dict[str, Any]] = {}
 _manual_product_parse_tasks_lock = asyncio.Lock()
+_product_url_collection_lock = asyncio.Lock()
+_product_url_collection_tasks: dict[str, dict[str, Any]] = {}
+_product_url_collection_current_task_id: Optional[str] = None
+_product_url_collection_tasks_lock = asyncio.Lock()
 
 
 def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
@@ -689,6 +697,7 @@ class SiteAdminService:
         db.add(product)
         db.commit()
         db.refresh(product)
+        self._notify_favorite_discounts_for_changed_products(db, [product])
         return self._build_product_details(db, product)
 
     async def manual_parse_product(
@@ -721,6 +730,14 @@ class SiteAdminService:
                         save_to_db=payload.save_to_db,
                     )
                     parsed_result = AdminProductManualParseResponse(**result)
+                    if payload.save_to_db and parsed_result.db_updated:
+                        notification_summary = await self._notify_favorite_discounts_after_manual_parse(parsed_result)
+                        if notification_summary.get("sent") or notification_summary.get("failed"):
+                            parsed_result.message = (
+                                f"{parsed_result.message} Уведомления по избранному: "
+                                f"отправлено {notification_summary.get('sent', 0)}, "
+                                f"ошибок {notification_summary.get('failed', 0)}."
+                            )
 
                     async with _manual_product_parse_tasks_lock:
                         task = _manual_product_parse_tasks.get(task_id)
@@ -763,6 +780,42 @@ class SiteAdminService:
             result=task.get("result"),
         )
 
+    async def _notify_favorite_discounts_after_manual_parse(
+        self,
+        parsed_result: AdminProductManualParseResponse,
+    ) -> dict[str, int]:
+        product_ids = [
+            record.id
+            for record in parsed_result.records
+            if record.id
+        ]
+        if not product_ids:
+            return {}
+
+        with self._session() as db:
+            try:
+                summary = await notify_favorite_discounts_for_product_ids(db, product_ids)
+            except Exception:
+                logger.exception("Favorite discount notifications failed after manual parse")
+                return {"sent": 0, "failed": 1}
+
+        logger.info("Favorite discount notifications after manual parse: %s", summary)
+        return summary
+
+    def _notify_favorite_discounts_for_changed_products(
+        self,
+        db: Session,
+        products: list[Product],
+    ) -> None:
+        try:
+            summary = notify_favorite_discounts_for_products_sync(db, products)
+        except Exception:
+            logger.exception("Favorite discount notifications failed after product change")
+            return
+
+        if summary.get("sent") or summary.get("failed"):
+            logger.info("Favorite discount notifications after product change: %s", summary)
+
     def update_product(
         self,
         db: Session,
@@ -776,6 +829,7 @@ class SiteAdminService:
         db.add(product)
         db.commit()
         db.refresh(product)
+        self._notify_favorite_discounts_for_changed_products(db, [product])
         return self._build_product_details(db, product)
 
     def delete_product(self, db: Session, *, product_id: str, region: str) -> None:
@@ -823,22 +877,24 @@ class SiteAdminService:
         mode: str = "missing_any",
         locale: Optional[str] = None,
         search: Optional[str] = None,
+        region_count: Optional[int] = None,
     ) -> dict:
         """Сравнивает products.pkl с products-таблицей и возвращает URL,
         по которым нет записей в БД (mode='missing_any' — не хватает региона URL'а,
         mode='missing_all' — в БД нет ни одного региона для этого id,
         mode='all' — все URL)."""
         urls = _load_products_pkl_urls()
-        db_regions_by_id = _load_db_regions_by_id(db)
+        db_products_by_id = _load_db_product_summaries(db)
 
         normalized_mode = (mode or "missing_any").strip().lower()
         normalized_locale = (locale or "").strip().lower() or None
         search_term = (search or "").strip().lower() or None
+        normalized_region_count = region_count if region_count in (0, 1, 2, 3) else None
 
         items: list[dict] = []
         missing_by_locale: dict[str, int] = {}
 
-        for raw_url in urls:
+        for pkl_index, raw_url in enumerate(urls):
             url = raw_url.strip()
             if not url:
                 continue
@@ -848,23 +904,34 @@ class SiteAdminService:
             url_locale = parts[3]
             product_id = parts[-1].upper()
             expected_region = _LOCALE_TO_REGION.get(url_locale)
-            db_regions = db_regions_by_id.get(product_id, set())
+            product_summary = db_products_by_id.get(product_id, {})
+            db_regions = product_summary.get("regions", set())
+            product_name = product_summary.get("product_name")
+            added_at = product_summary.get("added_at")
+            regions_count = len(db_regions)
 
             # Фильтры выборки
             if normalized_locale and url_locale != normalized_locale:
                 continue
-            if search_term and search_term not in url.lower():
+            if normalized_region_count is not None and regions_count != normalized_region_count:
+                continue
+
+            search_blob = " ".join(
+                str(value or "").lower()
+                for value in (url, product_id, product_name, product_summary.get("search_names"))
+            )
+            if search_term and search_term not in search_blob:
                 continue
 
             if normalized_mode == "missing_all":
-                include = len(db_regions) == 0
+                include = regions_count == 0
             elif normalized_mode == "all":
                 include = True
             else:  # missing_any
                 if expected_region:
                     include = expected_region not in db_regions
                 else:
-                    include = len(db_regions) == 0
+                    include = regions_count == 0
 
             if not include:
                 continue
@@ -875,6 +942,11 @@ class SiteAdminService:
                     "url": url,
                     "locale": url_locale,
                     "product_id": product_id,
+                    "product_name": product_name,
+                    "added_at": added_at,
+                    "regions_count": regions_count,
+                    "ua_url": f"https://store.playstation.com/ru-ua/product/{product_id}",
+                    "_pkl_index": pkl_index,
                     "exists_in_regions": sorted(db_regions),
                     "missing_regions": sorted(
                         r for r in ("UA", "TR", "IN") if r not in db_regions
@@ -882,19 +954,103 @@ class SiteAdminService:
                 }
             )
 
+        items.sort(key=lambda item: (item.get("added_at") or "", -int(item.get("_pkl_index") or 0)), reverse=True)
         total = len(items)
         offset = max(page - 1, 0) * limit
         page_items = items[offset : offset + limit]
+        for item in page_items:
+            item.pop("_pkl_index", None)
 
         return {
             "total_urls_in_pkl": len(urls),
-            "parsed_ids": len(db_regions_by_id),
+            "parsed_ids": len(db_products_by_id),
             "unparsed_total": total,
             "missing_by_locale": missing_by_locale,
             "items": page_items,
             "page": page,
             "limit": limit,
         }
+
+    async def start_product_url_collection(self) -> dict:
+        existing_urls = _load_products_pkl_urls()
+        if existing_urls:
+            status = _build_product_url_collection_cache_status(existing_urls)
+            await _set_product_url_collection_status(status)
+            return status
+
+        async with _product_url_collection_tasks_lock:
+            active_task_id = _get_active_product_url_collection_task_id()
+            if active_task_id:
+                return dict(_product_url_collection_tasks[active_task_id])
+
+            task_id = uuid4().hex
+            status = {
+                "task_id": task_id,
+                "status": "pending",
+                "phase": "queued",
+                "message": "Сбор URL поставлен в очередь.",
+                "skipped": False,
+                "started_at": utcnow().isoformat(),
+                "remaining": None,
+                "new_products": [],
+                "new_products_count": 0,
+            }
+            _product_url_collection_tasks[task_id] = status
+
+            global _product_url_collection_current_task_id
+            _product_url_collection_current_task_id = task_id
+
+        async def _run_collection() -> None:
+            async with _product_url_collection_lock:
+                try:
+                    from parser import collect_product_urls_cache
+
+                    async def _progress(payload: dict[str, Any]) -> None:
+                        await _update_product_url_collection_task(task_id, payload)
+
+                    await _update_product_url_collection_task(
+                        task_id,
+                        {
+                            "status": "running",
+                            "phase": "starting",
+                            "message": "Запускаем сбор URL PlayStation Store.",
+                        },
+                    )
+                    result = await collect_product_urls_cache(
+                        products_path=_products_pkl_path(),
+                        progress_callback=_progress,
+                    )
+                    await _update_product_url_collection_task(
+                        task_id,
+                        {
+                            **result,
+                            "status": "completed",
+                            "completed_at": utcnow().isoformat(),
+                        },
+                    )
+                    _clear_products_pkl_cache()
+                except Exception as error:
+                    logger.exception("Product URL collection failed")
+                    await _update_product_url_collection_task(
+                        task_id,
+                        {
+                            "status": "failed",
+                            "phase": "failed",
+                            "message": f"Сбор URL не удался: {type(error).__name__}: {error}",
+                            "completed_at": utcnow().isoformat(),
+                        },
+                    )
+
+        asyncio.create_task(_run_collection())
+        return await self.get_product_url_collection_status()
+
+    async def get_product_url_collection_status(self) -> dict:
+        async with _product_url_collection_tasks_lock:
+            active_task_id = _product_url_collection_current_task_id
+            if active_task_id and active_task_id in _product_url_collection_tasks:
+                return dict(_product_url_collection_tasks[active_task_id])
+
+        return _build_product_url_collection_cache_status(_load_products_pkl_urls())
 
     def list_purchases(
         self,
@@ -1229,7 +1385,7 @@ _LOCALE_TO_REGION = {
 }
 
 _PRODUCTS_PKL_CACHE: dict[str, Any] = {"mtime": None, "urls": None}
-_DB_REGIONS_CACHE: dict[str, Any] = {"signature": None, "regions_by_id": None}
+_DB_PRODUCTS_CACHE: dict[str, Any] = {"signature": None, "products_by_id": None}
 _UNPARSED_LOCK = threading.Lock()
 
 
@@ -1270,31 +1426,128 @@ def _load_products_pkl_urls() -> list[str]:
         return urls
 
 
-def _load_db_regions_by_id(db: Session) -> dict[str, set[str]]:
-    """Возвращает {product_id: {"UA","TR","IN"} подмножество} по текущему состоянию БД.
-    Кэшируется по суммарному числу строк — если счёт не менялся, возвращается кэш."""
+def _clear_products_pkl_cache() -> None:
+    with _UNPARSED_LOCK:
+        _PRODUCTS_PKL_CACHE["mtime"] = None
+        _PRODUCTS_PKL_CACHE["urls"] = None
+
+
+def _load_db_product_summaries(db: Session) -> dict[str, dict[str, Any]]:
+    """Возвращает краткую карточку по product_id: регионы, название и дату добавления."""
     total_rows = db.query(func.count(Product.id)).scalar() or 0
-    signature = total_rows
+    latest_created_at = db.query(func.max(Product.created_at)).scalar()
+    latest_updated_at = db.query(func.max(Product.updated_at)).scalar()
+    signature = (total_rows, str(latest_created_at or ""), str(latest_updated_at or ""))
 
     with _UNPARSED_LOCK:
         if (
-            _DB_REGIONS_CACHE["signature"] == signature
-            and _DB_REGIONS_CACHE["regions_by_id"] is not None
+            _DB_PRODUCTS_CACHE["signature"] == signature
+            and _DB_PRODUCTS_CACHE["products_by_id"] is not None
         ):
-            return _DB_REGIONS_CACHE["regions_by_id"]
+            return _DB_PRODUCTS_CACHE["products_by_id"]
 
-        rows = db.query(Product.id, Product.region).all()
-        regions_by_id: dict[str, set[str]] = {}
-        for product_id, region in rows:
+        rows = db.query(
+            Product.id,
+            Product.region,
+            Product.name,
+            Product.main_name,
+            Product.search_names,
+            Product.created_at,
+        ).all()
+        products_by_id: dict[str, dict[str, Any]] = {}
+        region_rank = {"UA": 0, "TR": 1, "IN": 2}
+
+        for product_id, region, name, main_name, search_names, created_at in rows:
             if not product_id:
                 continue
             pid = str(product_id).upper()
             reg = (region or "").upper()
-            bucket = regions_by_id.setdefault(pid, set())
+            summary = products_by_id.setdefault(
+                pid,
+                {
+                    "regions": set(),
+                    "product_name": None,
+                    "search_names": None,
+                    "added_at": None,
+                    "_name_rank": 999,
+                },
+            )
             if reg:
-                bucket.add(reg)
+                summary["regions"].add(reg)
 
-        _DB_REGIONS_CACHE["signature"] = signature
-        _DB_REGIONS_CACHE["regions_by_id"] = regions_by_id
-        return regions_by_id
+            display_name = (main_name or name or "").strip() if (main_name or name) else None
+            current_rank = region_rank.get(reg, 999)
+            if display_name and current_rank < int(summary.get("_name_rank", 999)):
+                summary["product_name"] = display_name
+                summary["search_names"] = search_names
+                summary["_name_rank"] = current_rank
+
+            if created_at:
+                created_value = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+                if not summary["added_at"] or created_value > summary["added_at"]:
+                    summary["added_at"] = created_value
+
+        for summary in products_by_id.values():
+            summary.pop("_name_rank", None)
+
+        _DB_PRODUCTS_CACHE["signature"] = signature
+        _DB_PRODUCTS_CACHE["products_by_id"] = products_by_id
+        return products_by_id
+
+
+def _get_active_product_url_collection_task_id() -> Optional[str]:
+    task_id = _product_url_collection_current_task_id
+    if not task_id:
+        return None
+    task = _product_url_collection_tasks.get(task_id)
+    if not task:
+        return None
+    if task.get("status") in {"pending", "running"}:
+        return task_id
+    return None
+
+
+async def _update_product_url_collection_task(task_id: str, payload: dict[str, Any]) -> None:
+    async with _product_url_collection_tasks_lock:
+        task = _product_url_collection_tasks.get(task_id)
+        if task is None:
+            return
+        task.update(payload)
+        task["task_id"] = task_id
+
+
+async def _set_product_url_collection_status(status: dict[str, Any]) -> None:
+    task_id = str(status.get("task_id") or "products-cache")
+    status["task_id"] = task_id
+
+    async with _product_url_collection_tasks_lock:
+        _product_url_collection_tasks[task_id] = dict(status)
+        global _product_url_collection_current_task_id
+        _product_url_collection_current_task_id = task_id
+
+
+def _build_product_url_collection_cache_status(urls: list[str]) -> dict[str, Any]:
+    has_cache = bool(urls)
+    return {
+        "task_id": "products-cache" if has_cache else None,
+        "status": "completed" if has_cache else "idle",
+        "phase": "skipped" if has_cache else "idle",
+        "message": (
+            f"products.pkl уже содержит {len(urls)} URL, повторный сбор не нужен."
+            if has_cache
+            else "products.pkl пустой или не найден. Можно запустить сбор URL."
+        ),
+        "skipped": has_cache,
+        "total_urls": len(urls),
+        "processed_pages": 0,
+        "total_pages": 0,
+        "raw_urls": 0,
+        "processed_concepts": 0,
+        "total_concepts": 0,
+        "expanded_urls": 0,
+        "duplicates_removed": 0,
+        "remaining": 0,
+        "new_products_count": 0,
+        "new_products": [],
+    }
 

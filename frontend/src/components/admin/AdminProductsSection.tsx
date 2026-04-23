@@ -488,7 +488,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
         in_url: manualParseForm.in_url.trim() || null,
         save_to_db: manualParseForm.save_to_db,
       })
-      const maxPollAttempts = 180
+      const maxPollAttempts = 360
       let response: AdminProductManualParseResponse | null = null
 
       for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {

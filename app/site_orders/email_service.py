@@ -469,3 +469,75 @@ def send_purchase_fulfilled_email(*, email: str, order_payload: dict) -> None:
     except Exception as error:
         logger.exception("Failed to send purchase fulfilled email to %s", email)
         raise EmailDeliveryError("Не удалось отправить письмо с данными заказа.") from error
+
+
+def send_favorite_discount_email(*, email: str, notification_payload: dict) -> None:
+    if not email_is_configured():
+        raise EmailDeliveryError("SMTP не настроен. Укажите SMTP_USERNAME и SMTP_APP_PASSWORD.")
+
+    product_name = str(notification_payload.get("product_name") or "Игра из избранного")
+    region_label = str(notification_payload.get("region_label") or notification_payload.get("region") or "Регион")
+    discount_text = str(notification_payload.get("discount_text") or "Скидка")
+    price_text = str(notification_payload.get("price_text") or "Цена уточняется")
+    old_price_text = notification_payload.get("old_price_text")
+    discount_end = notification_payload.get("discount_end")
+    product_url = notification_payload.get("product_url")
+
+    rows = [
+        ("Товар", product_name),
+        ("Регион", region_label),
+        ("Скидка", discount_text),
+        ("Цена сейчас", price_text),
+    ]
+    if old_price_text:
+        rows.append(("Цена до скидки", str(old_price_text)))
+    if discount_end:
+        rows.append(("Действует до", str(discount_end)))
+
+    body_html = (
+        _details_table(rows)
+        + """
+        <div class="email-card email-card-info">
+          <div class="email-card-text">
+            Товар из избранного сейчас продаётся со скидкой. По этой же активной скидке повторное письмо не отправим.
+          </div>
+        </div>
+        """
+    )
+
+    plain_lines = [
+        "Скидка на игру из избранного.",
+        f"Товар: {product_name}",
+        f"Регион: {region_label}",
+        f"Скидка: {discount_text}",
+        f"Цена сейчас: {price_text}",
+    ]
+    if old_price_text:
+        plain_lines.append(f"Цена до скидки: {old_price_text}")
+    if discount_end:
+        plain_lines.append(f"Действует до: {discount_end}")
+    if product_url:
+        plain_lines.append(f"Ссылка: {product_url}")
+
+    message = EmailMessage()
+    message["Subject"] = f"Скидка на {product_name}"
+    message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
+    message["To"] = email
+    message.set_content("\n".join(plain_lines), charset="utf-8")
+    message.add_alternative(
+        _build_shell(
+            "Скидка на игру из избранного",
+            "Мы заметили скидку на товар, который вы добавили в избранное.",
+            body_html,
+            button_url=product_url,
+            button_text="Открыть товар" if product_url else None,
+        ),
+        subtype="html",
+        charset="utf-8",
+    )
+
+    try:
+        _send_message(message)
+    except Exception as error:
+        logger.exception("Failed to send favorite discount email to %s", email)
+        raise EmailDeliveryError("Не удалось отправить письмо о скидке на избранный товар.") from error
