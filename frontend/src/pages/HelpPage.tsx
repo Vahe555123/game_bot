@@ -1,61 +1,8 @@
 import { ArrowRight, ChevronDown, ExternalLink, ShieldCheck, ShoppingBag } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { SectionHeader } from '../components/common/SectionHeader'
-import { fetchHelpContent } from '../services/help'
+import { useHelpContent } from '../context/HelpContentContext'
 import type { HelpContent } from '../types/help'
-import { getApiErrorMessage } from '../utils/apiErrors'
-
-function buildFallbackHelpContent(): HelpContent {
-  const supportUrl = import.meta.env.VITE_MANAGER_TELEGRAM_URL || import.meta.env.VITE_TELEGRAM_BOT_URL || null
-
-  return {
-    eyebrow: 'Помощь',
-    title: 'Помощь по покупкам и доступу к заказам',
-    subtitle:
-      'Здесь собраны ответы по оплате, истории заказов и связи с менеджером. Если вопрос срочный, откройте поддержку и напишите нам напрямую.',
-    support_title: 'Нужна помощь менеджера?',
-    support_description:
-      'Если не нашли покупку, не открывается доступ или нужна консультация по региону и подписке, напишите нам напрямую.',
-    support_button_label: 'Написать менеджеру',
-    support_button_url: supportUrl,
-    purchases_title: 'Где посмотреть мои покупки',
-    purchases_description:
-      'История заказов и переписка по ним доступны на oplata.info. Используйте тот же email, который указан как email для покупок.',
-    purchases_button_label: 'Открыть oplata.info',
-    purchases_button_url: 'https://oplata.info',
-    social_links: supportUrl ? [{ label: 'Telegram', url: supportUrl }] : [],
-    sections: [
-      {
-        title: 'Как оформить заказ',
-        body: 'Выберите товар, проверьте регион и завершите оплату. Все новые покупки будут привязаны к email для покупок.',
-      },
-      {
-        title: 'Как найти уже оплаченный заказ',
-        body: 'Откройте oplata.info, войдите по email для покупок и найдите нужный заказ в истории.',
-      },
-      {
-        title: 'Когда писать в поддержку',
-        body: 'Если после оплаты появилась ошибка, не пришёл код или нужен совет по региону, сразу напишите менеджеру.',
-      },
-    ],
-    faq_items: [
-      {
-        question: 'Где посмотреть мои покупки?',
-        answer: 'Перейдите на oplata.info и используйте email для покупок, чтобы открыть историю заказов.',
-      },
-      {
-        question: 'Что делать, если после оплаты появилась ошибка?',
-        answer:
-          'Проверьте почту и папку спам, затем откройте oplata.info. Если заказ всё ещё недоступен, свяжитесь с менеджером.',
-      },
-      {
-        question: 'Какой email использовать для заказов?',
-        answer: 'Указывайте рабочий email для покупок. К нему привязываются все новые заказы и уведомления.',
-      },
-    ],
-    updated_at: null,
-  }
-}
 
 function HelpActionCard({
   title,
@@ -97,36 +44,12 @@ function HelpActionCard({
 }
 
 export function HelpPage() {
-  const [content, setContent] = useState<HelpContent>(() => buildFallbackHelpContent())
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { content, error, isLoading } = useHelpContent()
   const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0)
 
   useEffect(() => {
-    let ignore = false
-
-    ;(async () => {
-      try {
-        const response = await fetchHelpContent()
-        if (!ignore) {
-          setContent(response)
-          setOpenFaqIndex(response.faq_items.length ? 0 : null)
-        }
-      } catch (requestError) {
-        if (!ignore) {
-          setError(getApiErrorMessage(requestError, 'Не удалось загрузить страницу помощи.'))
-        }
-      } finally {
-        if (!ignore) {
-          setIsLoading(false)
-        }
-      }
-    })()
-
-    return () => {
-      ignore = true
-    }
-  }, [])
+    setOpenFaqIndex(content.faq_items.length ? 0 : null)
+  }, [content.faq_items])
 
   return (
     <div className="container space-y-10 py-10 md:space-y-12 md:py-14">

@@ -70,6 +70,41 @@ describe('normalizeCatalogProduct', () => {
     expect(product.displayOldPrice).toBe(formatRub(612.5))
     expect(product.regionalPrices).toHaveLength(2)
   })
+
+  it('prefers PS Plus regional price for display when it is the active sale price', () => {
+    const rawProduct: RawCatalogProduct = {
+      id: 'ps-plus-sale',
+      main_name: 'Planet of Lana II',
+      region: 'TR',
+      release_date: '2026-04-24',
+      rub_price: 428.75,
+      rub_price_old: 612.5,
+      has_discount: true,
+      regional_prices: [
+        {
+          region: 'TR',
+          currency_code: 'TRY',
+          price_local: 100,
+          old_price_local: 100,
+          ps_plus_price_local: 80,
+          price_rub: 428.75,
+          old_price_rub: 612.5,
+          ps_plus_price_rub: 350,
+          has_discount: true,
+          discount_percent: null,
+          ps_plus_discount_percent: 20,
+        },
+      ],
+    }
+
+    const product = normalizeCatalogProduct(rawProduct)
+
+    expect(product.releaseDate).toBe('2026-04-24')
+    expect(product.priceRub).toBe(350)
+    expect(product.oldPriceRub).toBe(612.5)
+    expect(product.displayPrice).toBe(formatRub(350))
+    expect(product.displayOldPrice).toBe(formatRub(612.5))
+  })
 })
 
 function formatRub(value: number) {

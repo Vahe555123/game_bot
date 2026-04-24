@@ -9,10 +9,13 @@ from app.api.crud import FavoriteCRUD, ProductCRUD
 from app.api.schemas import PaginationParams, ProductFilter
 from app.database.connection import Base, _ensure_product_search_index, _normalize_search_text
 from app.models import Product, User, UserFavoriteProduct
+from config.settings import settings
 
 
 class ProductResolutionTests(unittest.TestCase):
     def setUp(self):
+        self._original_use_cards_table = settings.PRODUCTS_USE_CARDS_TABLE
+        settings.PRODUCTS_USE_CARDS_TABLE = False
         self.engine = create_engine(
             "sqlite://",
             connect_args={"check_same_thread": False},
@@ -37,6 +40,7 @@ class ProductResolutionTests(unittest.TestCase):
         )
 
     def tearDown(self):
+        settings.PRODUCTS_USE_CARDS_TABLE = self._original_use_cards_table
         self.engine.dispose()
 
     def test_normalize_search_text_strips_diacritics_and_yo(self):
@@ -225,6 +229,82 @@ class ProductResolutionTests(unittest.TestCase):
 
         self.assertEqual(total, 1)
         self.assertEqual([product["id"] for product in products], ["god-of-war"])
+
+    def test_get_products_grouped_by_name_supports_rating_sort(self):
+        with self.SessionLocal() as db:
+            db.add_all(
+                [
+                    Product(
+                        id="game-top",
+                        region="TR",
+                        name="Top Game",
+                        main_name="Top Game",
+                        search_names="Top Game",
+                        localization="full",
+                        type="Game",
+                        rating=4.9,
+                        price_try=100,
+                    ),
+                    Product(
+                        id="game-mid",
+                        region="TR",
+                        name="Mid Game",
+                        main_name="Mid Game",
+                        search_names="Mid Game",
+                        localization="full",
+                        type="Game",
+                        rating=3.7,
+                        price_try=120,
+                    ),
+                ]
+            )
+            db.commit()
+
+            with patch.object(
+                ProductCRUD,
+                "prepare_product_with_multi_region_prices",
+                side_effect=lambda product, *args, **kwargs: {
+                    "id": product.id,
+                    "rating": product.rating,
+                },
+            ):
+                products, total = ProductCRUD.get_products_grouped_by_name(
+                    db,
+                    ProductFilter(sort="rating_desc"),
+                    PaginationParams(page=1, limit=20),
+                )
+
+        self.assertEqual(total, 2)
+        self.assertEqual([product["id"] for product in products], ["game-top", "game-mid"])
+
+    def test_prepare_product_with_all_regions_marks_ps_plus_sale_as_discount(self):
+        with self.SessionLocal() as db:
+            product = Product(
+                id="game-ps-plus-sale",
+                region="TR",
+                name="PS Plus Sale",
+                main_name="PS Plus Sale",
+                search_names="PS Plus Sale",
+                localization="full",
+                type="Game",
+                price_try=100,
+                old_price_try=100,
+                ps_plus_price_try=80,
+                release_date="2025-05-17",
+            )
+            db.add(product)
+            db.commit()
+
+            prepared = ProductCRUD.prepare_product_with_all_regions(product, db)
+
+        tr_price = next(price for price in prepared["regional_prices"] if price["region"] == "TR")
+
+        self.assertTrue(prepared["has_discount"])
+        self.assertEqual(prepared["discount_percent"], 20)
+        self.assertEqual(prepared["release_date"], "2025-05-17")
+        self.assertTrue(tr_price["has_discount"])
+        self.assertIsNone(tr_price["discount_percent"])
+        self.assertEqual(tr_price["ps_plus_discount_percent"], 20)
 
     def test_get_by_id_with_fallback_handles_missing_region(self):
         with self.SessionLocal() as db:

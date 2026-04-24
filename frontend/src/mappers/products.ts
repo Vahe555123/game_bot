@@ -8,6 +8,7 @@ import type {
   RegionInfo,
 } from '../types/catalog'
 import { formatCurrency } from '../utils/format'
+import { getEffectiveRegionalPrice } from '../utils/productPresentation'
 
 const regionMeta: Record<string, { code: string; symbol: string; name: string }> = {
   TR: { code: 'TRY', symbol: '₺', name: 'Турция' },
@@ -60,12 +61,28 @@ function normalizeRegionalPrice(price: RawRegionalPrice): ProductRegionPrice {
 
 function pickPrimaryRegionalPrice(regionalPrices: ProductRegionPrice[]) {
   return regionalPrices
-    .filter((price) => price.available && typeof price.priceRub === 'number')
-    .sort((left, right) => (left.priceRub ?? Number.POSITIVE_INFINITY) - (right.priceRub ?? Number.POSITIVE_INFINITY))[0]
+    .filter((price) => price.available && (typeof price.priceRub === 'number' || typeof price.psPlusPriceRub === 'number'))
+    .sort((left, right) => {
+      const leftEffective = getEffectiveRegionalPrice(left)
+      const rightEffective = getEffectiveRegionalPrice(right)
+      const leftPrice = leftEffective.currentRub ?? left.priceRub ?? Number.POSITIVE_INFINITY
+      const rightPrice = rightEffective.currentRub ?? right.priceRub ?? Number.POSITIVE_INFINITY
+      return leftPrice - rightPrice
+    })[0]
 }
 
 function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | null, primaryRegionalPrice?: ProductRegionPrice) {
+  const effectiveRegionalPrice = primaryRegionalPrice ? getEffectiveRegionalPrice(primaryRegionalPrice) : null
+  const hasRubPrice =
+    effectiveRegionalPrice?.currentRub !== null && effectiveRegionalPrice?.currentRub !== undefined
+      ? true
+      : raw.rub_price !== null && raw.rub_price !== undefined
+        ? true
+        : raw.min_price_rub !== null && raw.min_price_rub !== undefined
+          ? true
+          : primaryRegionalPrice?.priceRub !== null && primaryRegionalPrice?.priceRub !== undefined
   const fallbackPrice =
+    effectiveRegionalPrice?.currentRub ??
     raw.rub_price ??
     raw.min_price_rub ??
     primaryRegionalPrice?.priceRub ??
@@ -74,6 +91,7 @@ function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | nu
     null
 
   const fallbackOldPrice =
+    effectiveRegionalPrice?.oldRub ??
     raw.rub_price_old ??
     primaryRegionalPrice?.oldPriceRub ??
     raw.old_price ??
@@ -82,7 +100,7 @@ function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | nu
   const displayPrice =
     raw.price_with_currency?.trim() ||
     (fallbackPrice !== null
-      ? formatCurrency(fallbackPrice, raw.rub_price || raw.min_price_rub || primaryRegionalPrice?.priceRub ? 'RUB' : regionInfo?.code)
+      ? formatCurrency(fallbackPrice, hasRubPrice ? 'RUB' : regionInfo?.code)
       : null)
 
   const displayOldPrice =
@@ -94,8 +112,8 @@ function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | nu
       : null
 
   return {
-    priceRub: raw.rub_price ?? raw.min_price_rub ?? primaryRegionalPrice?.priceRub ?? null,
-    oldPriceRub: raw.rub_price_old ?? primaryRegionalPrice?.oldPriceRub ?? null,
+    priceRub: effectiveRegionalPrice?.currentRub ?? raw.rub_price ?? raw.min_price_rub ?? primaryRegionalPrice?.priceRub ?? null,
+    oldPriceRub: effectiveRegionalPrice?.oldRub ?? raw.rub_price_old ?? primaryRegionalPrice?.oldPriceRub ?? null,
     displayPrice,
     displayOldPrice,
   }
@@ -119,6 +137,7 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     platforms: raw.platforms ?? null,
     publisher: raw.publisher ?? null,
     rating: raw.rating ?? null,
+    releaseDate: raw.release_date ?? null,
     edition: raw.edition ?? null,
     description: raw.description ?? null,
     localization: raw.localization ?? null,

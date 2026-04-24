@@ -1,5 +1,6 @@
 import { Plus, RefreshCw, Trash2 } from 'lucide-react'
 import { useEffect, useState, type FormEvent } from 'react'
+import { useHelpContent } from '../../context/HelpContentContext'
 import { fetchAdminHelpContent, updateAdminHelpContent } from '../../services/admin'
 import type { AdminHelpContent, AdminHelpContentPayload } from '../../types/admin'
 import type { HelpContentFaqItem, HelpContentSection, HelpSocialLink } from '../../types/help'
@@ -80,6 +81,7 @@ function buildEmptySocialLink(): HelpSocialLink {
 }
 
 export function AdminContentSection() {
+  const { setHelpContent } = useHelpContent()
   const [content, setContent] = useState<AdminHelpContent | null>(null)
   const [form, setForm] = useState<AdminHelpContentPayload>(EMPTY_FORM)
   const [isLoading, setIsLoading] = useState(true)
@@ -169,6 +171,7 @@ export function AdminContentSection() {
       }
       const response = await updateAdminHelpContent(payload)
       setContent(response)
+      setHelpContent(response)
       setForm(buildFormState(response))
       setNotice({ type: 'success', message: 'Страница помощи обновлена.' })
     } catch (error) {

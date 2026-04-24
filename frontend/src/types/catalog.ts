@@ -34,6 +34,7 @@ export type RawCatalogProduct = {
   platforms?: string | null
   publisher?: string | null
   rating?: number | null
+  release_date?: string | null
   edition?: string | null
   description?: string | null
   price?: number | null
@@ -95,6 +96,7 @@ export type CatalogProduct = {
   platforms: string | null
   publisher: string | null
   rating: number | null
+  releaseDate?: string | null
   edition: string | null
   description: string | null
   localization: string | null

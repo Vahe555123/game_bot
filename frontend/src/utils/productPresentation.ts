@@ -76,6 +76,74 @@ function normalizeRegionCode(value?: string | null) {
   return value?.trim().toUpperCase() || null
 }
 
+function isPositiveNumber(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+export function shouldUsePsPlusPrice(
+  price: Pick<
+    ProductRegionPrice,
+    | 'priceLocal'
+    | 'oldPriceLocal'
+    | 'psPlusPriceLocal'
+    | 'priceRub'
+    | 'oldPriceRub'
+    | 'psPlusPriceRub'
+    | 'discountPercent'
+    | 'psPlusDiscountPercent'
+  >,
+) {
+  const psPlusComparable = price.psPlusPriceRub ?? price.psPlusPriceLocal
+  if (!isPositiveNumber(psPlusComparable)) {
+    return false
+  }
+
+  const regularComparable = price.priceRub ?? price.priceLocal
+  if (!isPositiveNumber(regularComparable)) {
+    return true
+  }
+
+  if (psPlusComparable < regularComparable) {
+    return true
+  }
+
+  const oldComparable = price.oldPriceRub ?? price.oldPriceLocal
+  if (
+    isPositiveNumber(oldComparable) &&
+    psPlusComparable < oldComparable &&
+    (price.psPlusDiscountPercent ?? 0) > (price.discountPercent ?? 0)
+  ) {
+    return true
+  }
+
+  return false
+}
+
+export function getEffectiveRegionalPrice(
+  price: Pick<
+    ProductRegionPrice,
+    | 'priceLocal'
+    | 'oldPriceLocal'
+    | 'psPlusPriceLocal'
+    | 'priceRub'
+    | 'oldPriceRub'
+    | 'psPlusPriceRub'
+    | 'discountPercent'
+    | 'psPlusDiscountPercent'
+  >,
+) {
+  const isPsPlus = shouldUsePsPlusPrice(price)
+
+  return {
+    isPsPlus,
+    currentLocal: isPsPlus ? (price.psPlusPriceLocal ?? price.priceLocal) : price.priceLocal,
+    currentRub: isPsPlus ? (price.psPlusPriceRub ?? price.priceRub) : price.priceRub,
+    oldLocal: price.oldPriceLocal ?? null,
+    oldRub: price.oldPriceRub ?? null,
+    discountPercent: isPsPlus ? (price.psPlusDiscountPercent ?? price.discountPercent ?? null) : (price.discountPercent ?? null),
+  }
+}
+
 export function getProductPsPlusSavingsPercent(
   product: Pick<CatalogProduct, 'regionalPrices' | 'routeRegion' | 'region'>,
 ) {
@@ -114,6 +182,24 @@ export function getProductPsPlusSavingsPercent(
 
     return bestSavings
   }, null)
+}
+
+export function getProductRegularDiscountPercent(
+  product: Pick<CatalogProduct, 'regionalPrices' | 'discountPercent'>,
+) {
+  const regionalDiscounts = product.regionalPrices
+    .map((price) => price.discountPercent)
+    .filter((discount): discount is number => typeof discount === 'number' && discount > 0)
+
+  if (regionalDiscounts.length) {
+    return Math.max(...regionalDiscounts)
+  }
+
+  if (product.regionalPrices.length) {
+    return null
+  }
+
+  return typeof product.discountPercent === 'number' && product.discountPercent > 0 ? product.discountPercent : null
 }
 
 export function getProductTitle(product: Pick<CatalogProduct, 'name' | 'mainName' | 'edition'>) {
@@ -208,14 +294,14 @@ export function getProductLocalizationPresentation(product: Pick<CatalogProduct,
 }
 
 export function shouldShowOldPrice(
-  price: Pick<ProductRegionPrice, 'hasDiscount' | 'oldPriceRub' | 'priceRub' | 'oldPriceLocal' | 'priceLocal'>,
+  price: Pick<
+    ProductRegionPrice,
+    'oldPriceRub' | 'priceRub' | 'oldPriceLocal' | 'priceLocal' | 'psPlusPriceRub' | 'psPlusPriceLocal' | 'discountPercent' | 'psPlusDiscountPercent'
+  >,
 ) {
-  if (!price.hasDiscount) {
-    return false
-  }
-
-  const currentPrice = price.priceRub ?? price.priceLocal
-  const oldPrice = price.oldPriceRub ?? price.oldPriceLocal
+  const effectivePrice = getEffectiveRegionalPrice(price)
+  const currentPrice = effectivePrice.currentRub ?? effectivePrice.currentLocal
+  const oldPrice = effectivePrice.oldRub ?? effectivePrice.oldLocal
 
   if (oldPrice === null) {
     return false

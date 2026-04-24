@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { CatalogProduct, ProductRegionPrice } from '../types/catalog'
 import {
+  getEffectiveRegionalPrice,
   getBestLocalizationPresentation,
   getLocalizationPresentation,
   getProductLocalizationPresentation,
   getProductPsPlusSavingsPercent,
+  getProductRegularDiscountPercent,
   getProductTitle,
   getVisibleRegionalPrices,
+  shouldUsePsPlusPrice,
   shouldShowOldPrice,
   sortRegionalPrices,
 } from './productPresentation'
@@ -90,6 +93,42 @@ describe('getProductPsPlusSavingsPercent', () => {
   })
 })
 
+describe('PS Plus pricing helpers', () => {
+  it('switches to PS Plus price when it is cheaper than the regular one', () => {
+    const price = buildRegionalPrice('TR', 'Турция', 1499, null, {
+      priceLocal: 100,
+      oldPriceLocal: 100,
+      oldPriceRub: 1499,
+      psPlusPriceLocal: 80,
+      psPlusPriceRub: 1199,
+      discountPercent: null,
+      psPlusDiscountPercent: 20,
+    })
+
+    expect(shouldUsePsPlusPrice(price)).toBe(true)
+    expect(getEffectiveRegionalPrice(price)).toMatchObject({
+      isPsPlus: true,
+      currentRub: 1199,
+      oldRub: 1499,
+      discountPercent: 20,
+    })
+  })
+
+  it('keeps only regular discounts in the red sale badge helper', () => {
+    const product = buildProduct({
+      discountPercent: 20,
+      regionalPrices: [
+        buildRegionalPrice('TR', 'Турция', 1499, null, {
+          discountPercent: null,
+          psPlusDiscountPercent: 20,
+        }),
+      ],
+    })
+
+    expect(getProductRegularDiscountPercent(product)).toBeNull()
+  })
+})
+
 describe('getLocalizationPresentation', () => {
   it('marks full Russian localization correctly', () => {
     const localization = getLocalizationPresentation('Полностью на русском')
@@ -163,11 +202,14 @@ describe('shouldShowOldPrice', () => {
   it('hides old price when product has no discount', () => {
     expect(
       shouldShowOldPrice({
-        hasDiscount: false,
         priceLocal: null,
         priceRub: 1516,
         oldPriceLocal: null,
         oldPriceRub: 1516,
+        psPlusPriceLocal: null,
+        psPlusPriceRub: null,
+        discountPercent: null,
+        psPlusDiscountPercent: null,
       }),
     ).toBe(false)
   })
@@ -175,11 +217,29 @@ describe('shouldShowOldPrice', () => {
   it('shows old price only when it is really higher than the current one', () => {
     expect(
       shouldShowOldPrice({
-        hasDiscount: true,
         priceLocal: null,
         priceRub: 1623,
         oldPriceLocal: null,
         oldPriceRub: 1723,
+        psPlusPriceLocal: null,
+        psPlusPriceRub: null,
+        discountPercent: 6,
+        psPlusDiscountPercent: null,
+      }),
+    ).toBe(true)
+  })
+
+  it('shows old price for PS Plus sales too', () => {
+    expect(
+      shouldShowOldPrice({
+        priceLocal: 100,
+        priceRub: 1623,
+        oldPriceLocal: 100,
+        oldPriceRub: 1723,
+        psPlusPriceLocal: 80,
+        psPlusPriceRub: 1400,
+        discountPercent: null,
+        psPlusDiscountPercent: 19,
       }),
     ).toBe(true)
   })

@@ -84,6 +84,7 @@ class ProductBase(BaseModel):
     platforms: Optional[str] = Field(None, description="Поддерживаемые платформы")
     publisher: Optional[str] = Field(None, description="Издатель")
     rating: Optional[float] = Field(None, description="Рейтинг товара")
+    release_date: Optional[str] = Field(None, description="Дата выхода")
     edition: Optional[str] = Field(None, description="Издание игры")
     description: Optional[str] = Field(None, description="Описание товара")
 
@@ -145,6 +146,7 @@ class Product(ProductBase):
                 'platforms': obj.platforms,
                 'publisher': obj.publisher,
                 'rating': obj.rating,
+                'release_date': obj.release_date,
                 'edition': obj.edition,
                 'description': obj.description,
                 'compound': obj.get_compound_list(),
@@ -241,7 +243,7 @@ class ProductFilter(BaseModel):
         None,
         description="Язык игры: full_ru (полный русский), partial_ru (субтитры/интерфейс), no_ru (без русского)",
     )
-    sort: Optional[str] = Field(None, description="Сортировка (popular, added_desc, release_desc, alphabet, price_asc, price_desc)")
+    sort: Optional[str] = Field(None, description="Сортировка (popular, added_desc, release_desc, rating_desc, alphabet, price_asc, price_desc)")
 
 class PaginationParams(BaseModel):
     page: int = Field(1, ge=1, description="Номер страницы")

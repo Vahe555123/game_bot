@@ -4,6 +4,7 @@ import { GuestOnly, RequireAdmin, RequireAuth } from './components/auth/RouteGua
 import { SiteLayout } from './components/layout/SiteLayout'
 import { AuthProvider } from './context/AuthContext'
 import { FavoritesProvider } from './context/FavoritesContext'
+import { HelpContentProvider } from './context/HelpContentContext'
 import { AdminPage } from './pages/AdminPage'
 import { CatalogPage } from './pages/CatalogPage'
 import { FavoritesPage } from './pages/FavoritesPage'
@@ -37,34 +38,36 @@ function App() {
   return (
     <AuthProvider>
       <FavoritesProvider>
-        <BrowserRouter>
-          <ViewportManager />
-          <Routes>
-            <Route element={<SiteLayout />}>
-              <Route index element={<CatalogPage />} />
-              <Route path="/catalog" element={<CatalogPage />} />
-              <Route path="/catalog/:productId" element={<ProductPage />} />
-              <Route path="/favorites" element={<FavoritesPage />} />
-              <Route path="/help" element={<HelpPage />} />
+        <HelpContentProvider>
+          <BrowserRouter>
+            <ViewportManager />
+            <Routes>
+              <Route element={<SiteLayout />}>
+                <Route index element={<CatalogPage />} />
+                <Route path="/catalog" element={<CatalogPage />} />
+                <Route path="/catalog/:productId" element={<ProductPage />} />
+                <Route path="/favorites" element={<FavoritesPage />} />
+                <Route path="/help" element={<HelpPage />} />
 
-              <Route element={<GuestOnly />}>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="/register" element={<RegisterPage />} />
-                <Route path="/verify-email" element={<VerifyEmailPage />} />
+                <Route element={<GuestOnly />}>
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route path="/register" element={<RegisterPage />} />
+                  <Route path="/verify-email" element={<VerifyEmailPage />} />
+                </Route>
+
+                <Route element={<RequireAuth />}>
+                  <Route path="/profile" element={<ProfilePage />} />
+                </Route>
+
+                <Route element={<RequireAdmin />}>
+                  <Route path="/admin" element={<AdminPage />} />
+                </Route>
+
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
-
-              <Route element={<RequireAuth />}>
-                <Route path="/profile" element={<ProfilePage />} />
-              </Route>
-
-              <Route element={<RequireAdmin />}>
-                <Route path="/admin" element={<AdminPage />} />
-              </Route>
-
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
+            </Routes>
+          </BrowserRouter>
+        </HelpContentProvider>
       </FavoritesProvider>
     </AuthProvider>
   )

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 CARDS_REBUILD_STATE_KEY = "product_cards_signature"
 CARDS_REBUILD_VERSION_KEY = "product_cards_version"
-CARDS_REBUILD_VERSION = "3"
+CARDS_REBUILD_VERSION = "4"
 
 # Приоритет локализации: меньше число — лучше
 _LOCALIZATION_RANK = {
@@ -294,19 +294,39 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
     else:
         min_price_rub, min_price_region, min_old_price_rub = None, None, None
 
-    ua_discount_percent = _compute_discount_percent(ua.get("price_uah"), ua.get("old_price_uah"))
-    tr_discount_percent = _compute_discount_percent(tr.get("price_try"), tr.get("old_price_try"))
-    in_discount_percent = _compute_discount_percent(in_.get("price_inr"), in_.get("old_price_inr"))
-    discount_values = [d for d in (ua_discount_percent, tr_discount_percent, in_discount_percent) if d]
-    max_discount = max(discount_values) if discount_values else None
-
-    has_discount = 1 if any(discount_values) else 0
-    has_ps_plus_collection = 1 if representative.get("ps_plus_collection") else 0
-    has_ea_access = 1 if _truthy_ea_access(representative.get("ea_access")) else 0
-
     ua_ps_plus_price_rub = _region_rub(converter, ua.get("ps_plus_price_uah"), "UAH")
     tr_ps_plus_price_rub = _region_rub(converter, tr.get("ps_plus_price_try"), "TRY")
     in_ps_plus_price_rub = _region_rub(converter, in_.get("ps_plus_price_inr"), "INR")
+
+    ua_discount_percent = _compute_discount_percent(ua.get("price_uah"), ua.get("old_price_uah"))
+    tr_discount_percent = _compute_discount_percent(tr.get("price_try"), tr.get("old_price_try"))
+    in_discount_percent = _compute_discount_percent(in_.get("price_inr"), in_.get("old_price_inr"))
+
+    ua_ps_plus_discount_percent = _compute_discount_percent(ua.get("ps_plus_price_uah"), ua.get("old_price_uah"))
+    tr_ps_plus_discount_percent = _compute_discount_percent(tr.get("ps_plus_price_try"), tr.get("old_price_try"))
+    in_ps_plus_discount_percent = _compute_discount_percent(in_.get("ps_plus_price_inr"), in_.get("old_price_inr"))
+
+    discount_values = [
+        value
+        for value in (
+            ua_discount_percent,
+            tr_discount_percent,
+            in_discount_percent,
+            ua_ps_plus_discount_percent,
+            tr_ps_plus_discount_percent,
+            in_ps_plus_discount_percent,
+        )
+        if value
+    ]
+    max_discount = max(discount_values) if discount_values else None
+
+    ua_has_discount = 1 if (ua_discount_percent or ua_ps_plus_discount_percent) else 0
+    tr_has_discount = 1 if (tr_discount_percent or tr_ps_plus_discount_percent) else 0
+    in_has_discount = 1 if (in_discount_percent or in_ps_plus_discount_percent) else 0
+
+    has_discount = 1 if (ua_has_discount or tr_has_discount or in_has_discount) else 0
+    has_ps_plus_collection = 1 if representative.get("ps_plus_collection") else 0
+    has_ea_access = 1 if _truthy_ea_access(representative.get("ea_access")) else 0
 
     return {
         "card_id": card_id,
@@ -351,7 +371,7 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
         "ua_ps_plus_price_uah": _to_optional_float(ua.get("ps_plus_price_uah")) if ua else None,
         "ua_ps_plus_price_rub": ua_ps_plus_price_rub,
         "ua_discount_percent": ua_discount_percent,
-        "ua_has_discount": 1 if ua_discount_percent else 0,
+        "ua_has_discount": ua_has_discount,
         "ua_discount_end": ua.get("discount_end") if ua else None,
         "ua_ps_plus": _to_optional_int(ua.get("ps_plus")) if ua else None,
         # TR
@@ -364,7 +384,7 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
         "tr_ps_plus_price_try": _to_optional_float(tr.get("ps_plus_price_try")) if tr else None,
         "tr_ps_plus_price_rub": tr_ps_plus_price_rub,
         "tr_discount_percent": tr_discount_percent,
-        "tr_has_discount": 1 if tr_discount_percent else 0,
+        "tr_has_discount": tr_has_discount,
         "tr_discount_end": tr.get("discount_end") if tr else None,
         "tr_ps_plus": _to_optional_int(tr.get("ps_plus")) if tr else None,
         # IN
@@ -377,7 +397,7 @@ def _build_card_row(group: list[dict[str, Any]], converter) -> dict[str, Any]:
         "in_ps_plus_price_inr": _to_optional_float(in_.get("ps_plus_price_inr")) if in_ else None,
         "in_ps_plus_price_rub": in_ps_plus_price_rub,
         "in_discount_percent": in_discount_percent,
-        "in_has_discount": 1 if in_discount_percent else 0,
+        "in_has_discount": in_has_discount,
         "in_discount_end": in_.get("discount_end") if in_ else None,
         "in_ps_plus": _to_optional_int(in_.get("ps_plus")) if in_ else None,
         "favorites_count": 0,

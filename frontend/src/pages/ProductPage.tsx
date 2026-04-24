@@ -5,9 +5,7 @@
   CreditCard,
   ExternalLink,
   Gamepad2,
-  Globe,
   LoaderCircle,
-  ShieldCheck,
   Star,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type MouseEvent } from 'react'
@@ -36,6 +34,7 @@ import {
 } from '../utils/format'
 import {
   getProductPsPlusSavingsPercent,
+  getProductRegularDiscountPercent,
   getProductTitle,
   getVisibleRegionalPrices,
 } from '../utils/productPresentation'
@@ -102,6 +101,10 @@ function formatDiscountEndDate(value?: string | null) {
   return parsedDate.toLocaleDateString('ru-RU')
 }
 
+function formatReleaseDate(value?: string | null) {
+  return formatDiscountEndDate(value)
+}
+
 function getMissingCheckoutFields(
   region: string,
   form: CheckoutFormState,
@@ -127,28 +130,6 @@ function getMissingCheckoutFields(
   }
 
   return missingFields
-}
-
-function buildHighlights(product: CatalogProduct) {
-  const region = resolveRegionPresentation(product.region, product.regionInfo?.name)
-
-  return [
-    {
-      label: 'Издатель',
-      value: product.publisher || 'PlayStation Store',
-      icon: ShieldCheck,
-    },
-    {
-      label: 'Платформы',
-      value: product.platforms || 'PS5 / PS4',
-      icon: Gamepad2,
-    },
-    {
-      label: 'Регион',
-      value: region.name,
-      icon: Globe,
-    },
-  ]
 }
 
 function getPlayerWord(value: number) {
@@ -194,12 +175,20 @@ function resolvePlayersLabel(product: CatalogProduct) {
   return infoPlayers.replace(/^\s*Игроки\s*:\s*/i, '').trim() || infoPlayers.trim()
 }
 
-function buildInfoItems(product: CatalogProduct) {
-  const infoItems = product.info.filter((item) => Boolean(item) && !/игрок/i.test(item))
-  const hasGenreInfo = infoItems.some((item) => /жанр/i.test(item))
+function buildInfoItems(product: CatalogProduct, playersLabel: string | null) {
+  const region = resolveRegionPresentation(product.region, product.regionInfo?.name)
+  const infoItems = product.info.filter((item) => Boolean(item) && !/игрок/i.test(item) && !/жанр/i.test(item))
+  const releaseDate = formatReleaseDate(product.releaseDate)
 
   return [
-    !hasGenreInfo && product.category ? `Жанр: ${product.category}` : null,
+    `Есть в PS Plus: ${product.hasPsPlus ? 'Да' : 'Нет'}`,
+    `Есть в EA Play: ${product.hasEaAccess ? 'Да' : 'Нет'}`,
+    `Дата выхода: ${releaseDate || 'Не указана'}`,
+    product.publisher ? `Издатель: ${product.publisher}` : null,
+    product.platforms ? `Платформы: ${product.platforms}` : null,
+    region.name ? `Регион: ${region.name}` : null,
+    playersLabel ? `Игроки: ${playersLabel}` : null,
+    product.category ? `Жанр: ${product.category}` : null,
     ...infoItems,
   ].filter((item): item is string => Boolean(item))
 }
@@ -788,13 +777,13 @@ export function ProductPage() {
   }, [productId, requestedRegion])
 
   const coverUrl = normalizeImageUrl(product?.image)
-  const highlights = useMemo(() => (product ? buildHighlights(product) : []), [product])
   const regionalPrices = useMemo(() => (product ? getVisibleRegionalPrices(product).slice(0, 3) : []), [product])
   const favoriteActive = product ? isFavorite(product.id) : false
   const productTitle = product ? getProductTitle(product) : 'Товар'
   const psPlusSavingsPercent = product ? getProductPsPlusSavingsPercent(product) : null
+  const regularDiscountPercent = product ? getProductRegularDiscountPercent(product) : null
   const playersLabel = useMemo(() => (product ? resolvePlayersLabel(product) : null), [product])
-  const infoItems = useMemo(() => (product ? buildInfoItems(product) : []), [product])
+  const infoItems = useMemo(() => (product ? buildInfoItems(product, playersLabel) : []), [product, playersLabel])
   const checkoutPrices = useMemo(
     () =>
       regionalPrices.filter(
@@ -1046,18 +1035,14 @@ export function ProductPage() {
                 <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/15 to-transparent" />
 
                 <div className="absolute left-5 right-20 top-5 flex flex-wrap gap-2">
-                  {product.hasDiscount ? (
+                  {regularDiscountPercent ? (
                     <span className="pill border-rose-400/40 bg-rose-500 px-3 py-1.5 text-[11px] text-white shadow-lg shadow-rose-950/30">
                       <BadgePercent size={12} />
-                      {product.discountPercent ? `-${product.discountPercent}%` : 'Скидка'}
+                      -{regularDiscountPercent}%
                     </span>
                   ) : null}
                   {psPlusSavingsPercent ? (
-                    <PsPlusSavingsBadge percent={psPlusSavingsPercent} className="px-3 py-1.5 text-[11px]" />
-                  ) : product.hasPsPlus ? (
-                    <span className="pill border-amber-300/50 bg-amber-400 px-3 py-1.5 text-[11px] text-slate-950 shadow-lg shadow-amber-950/20">
-                      PS Plus
-                    </span>
+                    <PsPlusSavingsBadge percent={psPlusSavingsPercent} className="px-3 py-1.5 text-[13px]" />
                   ) : null}
                 </div>
 
@@ -1079,7 +1064,6 @@ export function ProductPage() {
 
             <div className="space-y-6">
               <div className="space-y-4">
-                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Карточка товара</p>
                 <h1 className="text-4xl text-white md:text-5xl">{productTitle}</h1>
 
                 <div className="flex flex-wrap gap-2">
@@ -1110,18 +1094,6 @@ export function ProductPage() {
                   <CreditCard size={16} />
                   {isAuthenticated ? 'Купить' : 'Войти и купить'}
                 </button>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-3">
-                {highlights.map(({ label, value, icon: Icon }) => (
-                  <div key={label} className="rounded-[22px] border border-white/10 bg-white/5 p-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-500/15 text-brand-200">
-                      <Icon size={18} />
-                    </div>
-                    <p className="mt-4 text-xs uppercase tracking-[0.24em] text-slate-500">{label}</p>
-                    <p className="mt-2 text-sm font-semibold text-white">{value}</p>
-                  </div>
-                ))}
               </div>
             </div>
           </section>

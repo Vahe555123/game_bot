@@ -49,6 +49,16 @@ PRODUCT_SEARCH_INDEX_TABLE = Table(
     Column("search_text", Text),
 )
 
+# FTS5-таблица для product_cards — используется в каталоге /products/ (grouped).
+# Без неё поиск идёт через normalize_search(col) LIKE '%…%' — ~4 сек на 28K карточек.
+PRODUCT_CARDS_FTS_INDEX_TABLE = Table(
+    "product_cards_fts",
+    MetaData(),
+    Column("rowid", Integer, primary_key=True),
+    Column("card_id", Text),
+    Column("search_text", Text),
+)
+
 class UserCRUD:
     @staticmethod
     def get_by_telegram_id(db: Session, telegram_id: int) -> Optional[User]:
@@ -111,6 +121,9 @@ class ProductCRUD:
 
         if normalized in {'release', 'release_desc', 'release_date', 'released', 'new_releases'}:
             return 'release_desc'
+
+        if normalized in {'rating', 'rating_desc', 'top_rated', 'score', 'score_desc'}:
+            return 'rating_desc'
 
         return 'popular'
 
@@ -695,12 +708,14 @@ class ProductCRUD:
                 old_price_rub = None
                 ps_plus_price_rub = None
 
-            has_discount = bool(has_numeric_price and old_price and old_price > price)
-            discount_percent = int(((old_price - price) / old_price) * 100) if has_discount else None
+            has_regular_discount = bool(has_numeric_price and old_price and old_price > price)
+            discount_percent = int(((old_price - price) / old_price) * 100) if has_regular_discount else None
 
             ps_plus_discount_percent = None
             if ps_plus_price_rub and old_price_rub and ps_plus_price_rub < old_price_rub:
                 ps_plus_discount_percent = int(((old_price_rub - ps_plus_price_rub) / old_price_rub) * 100)
+
+            has_discount = bool(has_regular_discount or ps_plus_discount_percent)
 
             localization_code = regional_product.localization
             localization_name = ProductCRUD._get_localization_name_cached(
@@ -765,7 +780,12 @@ class ProductCRUD:
         regional_prices.sort(key=lambda p: region_order.get(p['region'], 99))
 
         max_discount_percent = None
-        discounts = [price.get('discount_percent') for price in regional_prices if price.get('discount_percent')]
+        discounts = [
+            discount
+            for price in regional_prices
+            for discount in (price.get('discount_percent'), price.get('ps_plus_discount_percent'))
+            if discount
+        ]
         if discounts:
             max_discount_percent = max(discounts)
 
@@ -1131,6 +1151,7 @@ class ProductCRUD:
             'ps_plus_collection': product.ps_plus_collection,
             'has_ps_plus_extra_deluxe': product.has_ps_plus_extra_deluxe,
             'rating': product.rating,
+            'release_date': product.release_date,
             'edition': product.edition,
             'platforms': product.platforms,
             'localization': product.localization,
@@ -1224,6 +1245,7 @@ class ProductCRUD:
             'discount': product.discount,
             'discount_end': product.discount_end,
             'discount_percent': regional_price_data['max_discount_percent'],
+            'release_date': product.release_date,
             'ps_plus': product.ps_plus,
             'has_ps_plus': product.has_ps_plus,
             'ps_price': product.ps_price,
@@ -1463,6 +1485,7 @@ class ProductCRUD:
             'discount': product.discount,
             'discount_end': product.discount_end,
             'discount_percent': regional_price_data.get('max_discount_percent'),
+            'release_date': product.release_date,
             'ps_plus': product.ps_plus,
             'has_ps_plus': product.has_ps_plus,
             'ps_price': product.ps_price,
@@ -1739,16 +1762,37 @@ class ProductCRUD:
         if filters.search:
             search_term = ProductCRUD._normalize_search_text(filters.search)
             if search_term:
-                search_pattern = f"%{search_term}%"
-                query = query.filter(
-                    or_(
-                        func.normalize_search(ProductCard.card_id).like(search_pattern),
-                        func.normalize_search(ProductCard.main_name).like(search_pattern),
-                        func.normalize_search(ProductCard.name).like(search_pattern),
-                        func.normalize_search(ProductCard.search_names).like(search_pattern),
-                        func.normalize_search(ProductCard.edition).like(search_pattern),
+                # Быстрый путь: FTS5 MATCH по product_cards_fts (~1-10 мс на 28K строк).
+                # Если FTS-таблицы нет (старая БД / миграция не прошла) — фолбэк на LIKE.
+                fts_used = False
+                bind = db.get_bind() if hasattr(db, "get_bind") else None
+                if bind is not None and getattr(bind, "dialect", None) and bind.dialect.name == "sqlite":
+                    try:
+                        if inspect(bind).has_table("product_cards_fts"):
+                            # prefix-запрос: "god of war" → "god* of* war*"
+                            fts_query = " ".join(f"{t}*" for t in search_term.split() if t)
+                            if fts_query:
+                                query = query.join(
+                                    PRODUCT_CARDS_FTS_INDEX_TABLE,
+                                    PRODUCT_CARDS_FTS_INDEX_TABLE.c.card_id == ProductCard.card_id,
+                                ).filter(
+                                    PRODUCT_CARDS_FTS_INDEX_TABLE.c.search_text.match(fts_query)
+                                )
+                                fts_used = True
+                    except Exception:
+                        fts_used = False
+
+                if not fts_used:
+                    search_pattern = f"%{search_term}%"
+                    query = query.filter(
+                        or_(
+                            func.normalize_search(ProductCard.card_id).like(search_pattern),
+                            func.normalize_search(ProductCard.main_name).like(search_pattern),
+                            func.normalize_search(ProductCard.name).like(search_pattern),
+                            func.normalize_search(ProductCard.search_names).like(search_pattern),
+                            func.normalize_search(ProductCard.edition).like(search_pattern),
+                        )
                     )
-                )
 
         if filters.has_discount is not None and filters.has_discount:
             if filter_region == 'UA':
@@ -1805,6 +1849,7 @@ class ProductCRUD:
         null_prices_last = case((price_column.is_(None), 1), else_=0)
         null_added_last = case((ProductCard.added_at.is_(None), 1), else_=0)
         null_release_last = case((ProductCard.release_date.is_(None), 1), else_=0)
+        null_rating_last = case((ProductCard.rating.is_(None), 1), else_=0)
         if sort_mode == 'price_desc':
             query = query.order_by(
                 null_prices_last.asc(),
@@ -1835,6 +1880,13 @@ class ProductCRUD:
             query = query.order_by(
                 null_release_last.asc(),
                 ProductCard.release_date.desc(),
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            )
+        elif sort_mode == 'rating_desc':
+            query = query.order_by(
+                null_rating_last.asc(),
+                ProductCard.rating.desc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
             )
@@ -1889,6 +1941,7 @@ class ProductCRUD:
             ps_plus_discount_percent = None
             if ps_plus_price_rub and old_price_rub and ps_plus_price_rub < old_price_rub and old_price_rub > 0:
                 ps_plus_discount_percent = int(((old_price_rub - ps_plus_price_rub) / old_price_rub) * 100)
+            has_discount = bool(has_discount_flag or ps_plus_discount_percent)
 
             localization_name = ProductCRUD._get_localization_name_cached(
                 db, localization_code, localization_cache,
@@ -1905,7 +1958,7 @@ class ProductCRUD:
                 'price_rub': price_rub,
                 'old_price_rub': old_price_rub,
                 'ps_plus_price_rub': ps_plus_price_rub,
-                'has_discount': bool(has_discount_flag),
+                'has_discount': has_discount,
                 'discount_percent': discount_percent,
                 'ps_plus_discount_percent': ps_plus_discount_percent,
                 'localization_code': localization_code,
@@ -1937,6 +1990,7 @@ class ProductCRUD:
             'discount': None,
             'discount_end': None,
             'discount_percent': card.max_discount_percent,
+            'release_date': card.release_date,
             'ps_plus': 1 if has_ps_plus_collection else 0,
             'has_ps_plus': has_ps_plus_collection,
             'ps_price': None,
@@ -2091,7 +2145,13 @@ class ProductCRUD:
                     and_(
                         Product.region == 'UA',
                         Product.old_price_uah.isnot(None),
-                        Product.old_price_uah > Product.price_uah
+                        or_(
+                            Product.old_price_uah > Product.price_uah,
+                            and_(
+                                Product.ps_plus_price_uah.isnot(None),
+                                Product.old_price_uah > Product.ps_plus_price_uah,
+                            ),
+                        ),
                     )
                 )
             if not filter_region or filter_region in ['TR', 'try']:
@@ -2099,7 +2159,13 @@ class ProductCRUD:
                     and_(
                         Product.region == 'TR',
                         Product.old_price_try.isnot(None),
-                        Product.old_price_try > Product.price_try
+                        or_(
+                            Product.old_price_try > Product.price_try,
+                            and_(
+                                Product.ps_plus_price_try.isnot(None),
+                                Product.old_price_try > Product.ps_plus_price_try,
+                            ),
+                        ),
                     )
                 )
             if not filter_region or filter_region in ['IN', 'inr']:
@@ -2107,7 +2173,13 @@ class ProductCRUD:
                     and_(
                         Product.region == 'IN',
                         Product.old_price_inr.isnot(None),
-                        Product.old_price_inr > Product.price_inr
+                        or_(
+                            Product.old_price_inr > Product.price_inr,
+                            and_(
+                                Product.ps_plus_price_inr.isnot(None),
+                                Product.old_price_inr > Product.ps_plus_price_inr,
+                            ),
+                        ),
                     )
                 )
             if discount_conditions:
@@ -2156,12 +2228,14 @@ class ProductCRUD:
         favorites_count_column = func.coalesce(favorites_subquery.c.favorites_count, 0).label('favorites_count')
         added_at_column = func.max(Product.created_at).label('added_at')
         release_date_column = func.max(Product.release_date).label('release_date')
+        rating_column = func.max(Product.rating).label('rating')
         price_filter_currency = (getattr(filters, 'price_currency', None) or 'RUB').upper()
         row_price_column = ProductCRUD._build_row_price_expression(db, price_filter_currency)
         min_price_filter_column = func.min(row_price_column).label('min_price_filter')
         null_prices_last_column = case((min_price_filter_column.is_(None), 1), else_=0)
         null_added_last_column = case((added_at_column.is_(None), 1), else_=0)
         null_release_last_column = case((release_date_column.is_(None), 1), else_=0)
+        null_rating_last_column = case((rating_column.is_(None), 1), else_=0)
 
         grouped_query = (
             query.outerjoin(favorites_subquery, favorites_subquery.c.product_id == Product.id)
@@ -2171,6 +2245,7 @@ class ProductCRUD:
                 favorites_count_column,
                 added_at_column,
                 release_date_column,
+                rating_column,
                 min_price_filter_column,
                 min_localization_rank_column,
             )
@@ -2215,6 +2290,13 @@ class ProductCRUD:
             grouped_query = grouped_query.order_by(
                 null_release_last_column.asc(),
                 release_date_column.desc(),
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            )
+        elif sort_mode == 'rating_desc':
+            grouped_query = grouped_query.order_by(
+                null_rating_last_column.asc(),
+                rating_column.desc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
             )

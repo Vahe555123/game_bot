@@ -402,7 +402,7 @@ export function CatalogPage() {
   }
 
   return (
-    <div className="container pb-4 pt-6 md:pb-6 md:pt-8">
+    <div className="container pb-4 pt-3 md:pb-6 md:pt-4">
       <section className="sticky top-[5.75rem] z-30 rounded-[26px] border border-white/10 bg-gradient-to-br from-slate-950/95 via-slate-900/92 to-sky-950/76 p-3 shadow-[0_24px_80px_rgba(8,18,34,0.38)] ring-1 ring-brand-300/10 backdrop-blur-xl md:top-28 md:rounded-[32px] md:p-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <label className={clsx('input-shell flex-1 shadow-[0_18px_50px_rgba(8,18,34,0.2)] sm:flex', isMobileSearchOpen ? 'flex' : 'hidden')}>
@@ -462,7 +462,7 @@ export function CatalogPage() {
         </div>
       ) : null}
 
-      <div className="mt-5 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:mt-6 md:gap-4 lg:grid-cols-3 2xl:grid-cols-4">
+      <div className="mt-5 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:mt-6 md:gap-4 xl:grid-cols-4 2xl:grid-cols-5">
         {isLoading
           ? Array.from({ length: filters.limit }).map((_, index) => <ProductSkeleton key={index} />)
           : products.map((product) => <ProductCard key={`${product.id}-${product.region || 'all'}`} product={product} />)}

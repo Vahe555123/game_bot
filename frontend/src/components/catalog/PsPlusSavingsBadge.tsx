@@ -13,7 +13,7 @@ export function PsPlusSavingsBadge({ percent, className }: PsPlusSavingsBadgePro
   return (
     <span
       className={clsx(
-        'pill border-[#f4b526] bg-gradient-to-r from-[#ffd54a] to-[#f5a623] px-3 py-1.5 text-[11px] font-bold tracking-normal text-slate-950 shadow-lg shadow-amber-950/20',
+        'pill border-[#f4b526] bg-gradient-to-r from-[#ffd54a] to-[#f5a623] px-3 py-1.5 text-[13px] font-bold tracking-normal text-slate-950 shadow-lg shadow-amber-950/20',
         className,
       )}
     >

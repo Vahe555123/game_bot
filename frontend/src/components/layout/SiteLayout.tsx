@@ -17,6 +17,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { useFavorites } from '../../context/FavoritesContext'
+import { useHelpContent } from '../../context/HelpContentContext'
 import { SORT_OPTIONS } from '../../utils/catalogFilters'
 import { AuthModal } from '../auth/AuthModal'
 import { buildAuthModalPath, buildBaseAuthPath, normalizeAuthModalView } from '../auth/authModalState'
@@ -244,20 +245,13 @@ export function SiteLayout() {
   const [isGlobalSearchOpen, setIsGlobalSearchOpen] = useState(false)
   const { isAuthenticated, user } = useAuth()
   const { favorites } = useFavorites()
+  const { questionSupportLinks } = useHelpContent()
   const location = useLocation()
   const navigate = useNavigate()
   const currentCatalogParams = new URLSearchParams(location.search)
   const [globalSearch, setGlobalSearch] = useState(currentCatalogParams.get('search') || '')
   const telegramUrl = import.meta.env.VITE_TELEGRAM_BOT_URL
-  const managerTelegramUrl = import.meta.env.VITE_MANAGER_TELEGRAM_URL || telegramUrl
-  const supportVkUrl = import.meta.env.VITE_SUPPORT_VK_URL
-  const supportMaxUrl = import.meta.env.VITE_SUPPORT_MAX_URL
   const authView = normalizeAuthModalView(new URLSearchParams(location.search).get('auth'))
-  const supportLinks = [
-    managerTelegramUrl ? { label: 'Телеграм', href: managerTelegramUrl } : null,
-    supportVkUrl ? { label: 'ВКонтакте', href: supportVkUrl } : null,
-    supportMaxUrl ? { label: 'Max', href: supportMaxUrl } : null,
-  ].filter((item): item is { label: string; href: string } => Boolean(item))
   const currentSort = currentCatalogParams.get('sort') || 'popular'
   const isCatalogPage = location.pathname === '/' || location.pathname === '/catalog'
   const isCatalogFiltersOpen = isCatalogPage && currentCatalogParams.get('filters') === 'open'
@@ -591,16 +585,16 @@ export function SiteLayout() {
         <Outlet />
       </main>
 
-      {supportLinks.length ? (
+      {questionSupportLinks.length ? (
         <div className="fixed bottom-3 right-3 z-40 flex flex-col items-end gap-2.5 sm:bottom-5 sm:right-5 sm:gap-3">
           {isSupportOpen ? (
             <div className="w-[220px] rounded-[22px] border border-white/10 bg-slate-950/95 p-3 shadow-card backdrop-blur-xl sm:rounded-[24px]">
               <p className="px-2 pb-2 text-xs uppercase tracking-[0.24em] text-slate-500">Задать вопрос</p>
               <div className="space-y-2">
-                {supportLinks.map((item) => (
+                {questionSupportLinks.map((item) => (
                   <ActionLink
                     key={item.label}
-                    href={item.href}
+                    href={item.url}
                     external
                     className="flex min-h-[44px] items-center justify-center rounded-[18px] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-slate-100 transition hover:border-brand-300/50 hover:bg-brand-500/10"
                   >

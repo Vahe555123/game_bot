@@ -2,7 +2,7 @@ import clsx from 'clsx'
 import { BadgePercent } from 'lucide-react'
 import type { ProductRegionPrice } from '../../types/catalog'
 import { getDualCurrencyPriceDisplay } from '../../utils/format'
-import { getLocalizationPresentation, shouldShowOldPrice } from '../../utils/productPresentation'
+import { getEffectiveRegionalPrice, getLocalizationPresentation, shouldShowOldPrice } from '../../utils/productPresentation'
 
 type RegionalPriceListProps = {
   prices: ProductRegionPrice[]
@@ -45,15 +45,16 @@ function RegionalPriceRow({
     return <UnavailableRegionRow price={price} variant={variant} />
   }
 
+  const effectivePrice = getEffectiveRegionalPrice(price)
   const showOldPrice = shouldShowOldPrice(price)
-  const currentPrice = getDualCurrencyPriceDisplay(price.priceLocal, price.currencyCode, price.priceRub)
+  const currentPrice = getDualCurrencyPriceDisplay(
+    effectivePrice.currentLocal,
+    price.currencyCode,
+    effectivePrice.currentRub,
+  )
   const oldPrice = showOldPrice
-    ? getDualCurrencyPriceDisplay(price.oldPriceLocal, price.currencyCode, price.oldPriceRub)
+    ? getDualCurrencyPriceDisplay(effectivePrice.oldLocal, price.currencyCode, effectivePrice.oldRub)
     : null
-  const psPlusPrice =
-    variant === 'detail' && price.psPlusPriceRub !== null
-      ? getDualCurrencyPriceDisplay(price.psPlusPriceLocal, price.currencyCode, price.psPlusPriceRub)
-      : null
   const localization = getLocalizationPresentation(price.localizationName)
 
   return (
@@ -94,6 +95,12 @@ function RegionalPriceRow({
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            {effectivePrice.isPsPlus ? (
+              <span className="rounded-full border border-amber-300/35 bg-amber-400/15 px-2.5 py-1 text-[11px] font-semibold text-amber-100">
+                PS Plus
+              </span>
+            ) : null}
+
             <span className={clsx('font-display text-white', variant === 'card' ? 'text-sm md:text-base' : 'text-2xl')}>
               {currentPrice.primary}
             </span>
@@ -106,13 +113,6 @@ function RegionalPriceRow({
 
             {oldPrice?.secondary ? (
               <span className="text-[11px] text-slate-600 line-through md:text-xs">{oldPrice.secondary}</span>
-            ) : null}
-
-            {psPlusPrice ? (
-              <span className="text-xs font-medium text-amber-200">
-                PS Plus {psPlusPrice.primary}
-                {psPlusPrice.secondary ? <span className="ml-1 text-amber-100/80">/ {psPlusPrice.secondary}</span> : null}
-              </span>
             ) : null}
           </div>
         </div>

@@ -154,6 +154,18 @@ PRODUCT_SEARCH_FTS_FIELDS = (
     "edition",
 )
 
+# FTS5 для product_cards: по нему работает основной каталог /products/.
+# Индексация поднята отдельно, потому что схема полей отличается (card_id вместо id).
+PRODUCT_CARDS_FTS_TABLE = "product_cards_fts"
+PRODUCT_CARDS_FTS_VERSION = 1
+PRODUCT_CARDS_FTS_FIELDS = (
+    "card_id",
+    "main_name",
+    "name",
+    "search_names",
+    "edition",
+)
+
 
 def _product_search_text_sql(prefix: str) -> str:
     parts = [f"coalesce({prefix}.{field}, '')" for field in PRODUCT_SEARCH_FTS_FIELDS]
@@ -262,6 +274,119 @@ def _ensure_product_search_index(connection) -> None:
         elapsed,
         new_count,
         PRODUCT_SEARCH_INDEX_VERSION,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  FTS5 для product_cards (быстрый поиск в каталоге)
+# ──────────────────────────────────────────────────────────────────────────────
+def _product_cards_search_text_sql(prefix: str) -> str:
+    parts = [f"coalesce({prefix}.{field}, '')" for field in PRODUCT_CARDS_FTS_FIELDS]
+    return "normalize_search(" + " || ' ' || ".join(parts) + ")"
+
+
+def _product_cards_fts_ddl() -> str:
+    return (
+        f"CREATE VIRTUAL TABLE {PRODUCT_CARDS_FTS_TABLE} "
+        "USING fts5(card_id UNINDEXED, search_text, "
+        "tokenize='unicode61 remove_diacritics 2', prefix='2 3 4 5 6 7 8')"
+    )
+
+
+def _create_product_cards_search_triggers(connection) -> None:
+    search_text_new = _product_cards_search_text_sql("new")
+    connection.execute(text("DROP TRIGGER IF EXISTS product_cards_ai"))
+    connection.execute(text("DROP TRIGGER IF EXISTS product_cards_ad"))
+    connection.execute(text("DROP TRIGGER IF EXISTS product_cards_au"))
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS product_cards_ai AFTER INSERT ON product_cards BEGIN
+                INSERT INTO {PRODUCT_CARDS_FTS_TABLE}(rowid, card_id, search_text)
+                VALUES (new.rowid, new.card_id, {search_text_new});
+            END;
+            """
+        )
+    )
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS product_cards_ad AFTER DELETE ON product_cards BEGIN
+                DELETE FROM {PRODUCT_CARDS_FTS_TABLE} WHERE rowid = old.rowid;
+            END;
+            """
+        )
+    )
+    connection.execute(
+        text(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS product_cards_au AFTER UPDATE ON product_cards BEGIN
+                DELETE FROM {PRODUCT_CARDS_FTS_TABLE} WHERE rowid = old.rowid;
+                INSERT INTO {PRODUCT_CARDS_FTS_TABLE}(rowid, card_id, search_text)
+                VALUES (new.rowid, new.card_id, {search_text_new});
+            END;
+            """
+        )
+    )
+
+
+def _ensure_product_cards_search_index(connection) -> None:
+    # Если сам product_cards ещё не создан — пропускаем (каталог пойдёт по старому пути).
+    if not _sqlite_table_exists(connection, "product_cards"):
+        return
+
+    connection.execute(text(f"CREATE VIRTUAL TABLE IF NOT EXISTS {PRODUCT_CARDS_FTS_TABLE} "
+                            "USING fts5(card_id UNINDEXED, search_text, "
+                            "tokenize='unicode61 remove_diacritics 2', prefix='2 3 4 5 6 7 8')"))
+    _create_product_cards_search_triggers(connection)
+
+    # Версию храним в отдельной мета-таблице, чтобы не воевать с user_version products-FTS.
+    connection.execute(
+        text("CREATE TABLE IF NOT EXISTS _meta_versions (key TEXT PRIMARY KEY, value INTEGER NOT NULL)")
+    )
+    current_version = connection.execute(
+        text("SELECT value FROM _meta_versions WHERE key = 'product_cards_fts'")
+    ).scalar() or 0
+
+    cards_count = connection.execute(text("SELECT COUNT(*) FROM product_cards")).scalar() or 0
+    fts_count = connection.execute(text(f"SELECT COUNT(*) FROM {PRODUCT_CARDS_FTS_TABLE}")).scalar() or 0
+    if current_version == PRODUCT_CARDS_FTS_VERSION and cards_count == fts_count:
+        return
+
+    logger.info(
+        "Rebuilding product_cards search index: cards=%s index=%s (version %s -> %s)",
+        cards_count, fts_count, current_version, PRODUCT_CARDS_FTS_VERSION,
+    )
+    started = time.monotonic()
+    connection.execute(text("DROP TRIGGER IF EXISTS product_cards_ai"))
+    connection.execute(text("DROP TRIGGER IF EXISTS product_cards_ad"))
+    connection.execute(text("DROP TRIGGER IF EXISTS product_cards_au"))
+    connection.execute(text(f"DROP TABLE IF EXISTS {PRODUCT_CARDS_FTS_TABLE}"))
+    connection.execute(text(_product_cards_fts_ddl()))
+    _create_product_cards_search_triggers(connection)
+    connection.execute(
+        text(
+            f"""
+            INSERT INTO {PRODUCT_CARDS_FTS_TABLE}(rowid, card_id, search_text)
+            SELECT
+                rowid,
+                card_id,
+                {_product_cards_search_text_sql("product_cards")}
+            FROM product_cards
+            """
+        )
+    )
+    connection.execute(
+        text(
+            "INSERT INTO _meta_versions(key, value) VALUES('product_cards_fts', :v) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+        ),
+        {"v": PRODUCT_CARDS_FTS_VERSION},
+    )
+    new_count = connection.execute(text(f"SELECT COUNT(*) FROM {PRODUCT_CARDS_FTS_TABLE}")).scalar() or 0
+    logger.info(
+        "product_cards search index rebuilt in %.1fs (rows=%s)",
+        time.monotonic() - started, new_count,
     )
 
 
@@ -377,6 +502,11 @@ def _build_engine(database_url: str):
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.execute("PRAGMA busy_timeout=30000")
             cursor.execute("PRAGMA foreign_keys=ON")
+            # Память под горячий кэш — каталог и фильтры держим в RAM,
+            # чтобы ilike/ORDER BY не упирались в диск.
+            cursor.execute("PRAGMA cache_size=-65536")   # 64 MB page cache (было ~2 MB)
+            cursor.execute("PRAGMA mmap_size=268435456")  # 256 MB mmap для чтения БД
+            cursor.execute("PRAGMA temp_store=MEMORY")    # сортировки/DISTINCT в RAM
             cursor.close()
 
             try:
@@ -826,6 +956,10 @@ def create_tables():
                                 "product_cards rebuild failed (catalog will fall back to GROUP BY path): %s",
                                 exc,
                             )
+
+                    # Индексируем product_cards для быстрого поиска (FTS5).
+                    # Вызывается после rebuild_product_cards — иначе индекс будет пустой.
+                    _ensure_product_cards_search_index(connection)
 
                     connection.execute(text("PRAGMA optimize"))
             finally:
