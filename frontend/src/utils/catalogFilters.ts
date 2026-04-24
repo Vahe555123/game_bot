@@ -35,7 +35,7 @@ export const SORT_OPTIONS = [
   { value: 'rating_desc', label: 'Рейтинг: высокий' },
   { value: 'added_desc', label: 'Сначала добавленные' },
   { value: 'release_desc', label: 'Дата выхода: новые' },
-  { value: 'alphabet', label: 'По алфавиту' },
+  { value: 'alphabet', label: 'По алфавиту ' },
   { value: 'price_asc', label: 'Цена: по возрастанию' },
   { value: 'price_desc', label: 'Цена: по убыванию' },
 ] as const
