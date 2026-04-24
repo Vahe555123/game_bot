@@ -222,6 +222,35 @@ class ProductListResponse(BaseModel):
     limit: int
     has_next: bool
 
+
+class ProductBatchRequest(BaseModel):
+    product_ids: List[str] = Field(
+        ...,
+        description="Список ID товаров для пакетной загрузки карточек",
+        max_length=20,
+    )
+
+    @field_validator("product_ids")
+    @classmethod
+    def validate_product_ids(cls, value: List[str]) -> List[str]:
+        normalized_ids: List[str] = []
+        seen_ids: set[str] = set()
+
+        for raw_product_id in value:
+            product_id = str(raw_product_id or "").strip()
+            if not product_id or product_id in seen_ids:
+                continue
+            seen_ids.add(product_id)
+            normalized_ids.append(product_id)
+
+        if not normalized_ids:
+            raise ValueError("Укажите хотя бы один ID товара.")
+
+        if len(normalized_ids) > 20:
+            raise ValueError("За один запрос можно загрузить не более 20 товаров.")
+
+        return normalized_ids
+
 class UserWithFavorites(User):
     favorite_products: List[Favorite] = []
 

@@ -28,3 +28,30 @@ export async function fetchProduct(productId: string, region?: string) {
 
   return normalizeCatalogProduct(response.data)
 }
+
+export async function fetchProductsBatch(productIds: string[]) {
+  const normalizedIds = Array.from(
+    new Set(
+      productIds
+        .map((productId) => productId.trim())
+        .filter(Boolean)
+        .slice(0, 20),
+    ),
+  )
+
+  if (!normalizedIds.length) {
+    return normalizeCatalogResponse({
+      products: [],
+      total: 0,
+      page: 1,
+      limit: 0,
+      has_next: false,
+    })
+  }
+
+  const response = await apiClient.post<RawCatalogListResponse>('/products/batch', {
+    product_ids: normalizedIds,
+  })
+
+  return normalizeCatalogResponse(response.data)
+}

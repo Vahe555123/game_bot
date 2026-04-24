@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.api.crud import FavoriteCRUD, ProductCRUD
 from app.api.schemas import PaginationParams, ProductFilter
 from app.database.connection import Base, _ensure_product_search_index, _normalize_search_text
-from app.models import Product, User, UserFavoriteProduct
+from app.models import Product, ProductCard, User, UserFavoriteProduct
 from config.settings import settings
 
 
@@ -386,6 +386,43 @@ class ProductResolutionTests(unittest.TestCase):
             stored = db.query(UserFavoriteProduct).filter(UserFavoriteProduct.user_id == user.id).one()
             self.assertEqual(stored.product_id, "EP9000-PPSA08332_00-GOWRAGNAROK00000")
             self.assertEqual(stored.region, "UA")
+
+    def test_get_products_batch_by_ids_preserves_requested_order(self):
+        with self.SessionLocal() as db:
+            settings.PRODUCTS_USE_CARDS_TABLE = True
+            db.add_all(
+                [
+                    ProductCard(
+                        card_id="game-1",
+                        name="Game One",
+                        main_name="Game One",
+                        sort_name="game one",
+                        tr_product_id="game-1",
+                        tr_price_try=120,
+                        tr_price_rub=300,
+                        min_price_rub=300,
+                        min_price_region="TR",
+                    ),
+                    ProductCard(
+                        card_id="game-2",
+                        name="Game Two",
+                        main_name="Game Two",
+                        sort_name="game two",
+                        ua_product_id="game-2",
+                        ua_price_uah=240,
+                        ua_price_rub=480,
+                        min_price_rub=480,
+                        min_price_region="UA",
+                    ),
+                ]
+            )
+            db.commit()
+
+            products = ProductCRUD.get_products_batch_by_ids(db, ["game-2", "game-1"])
+
+        self.assertEqual([product["id"] for product in products], ["game-2", "game-1"])
+        self.assertEqual(products[0]["main_name"], "Game Two")
+        self.assertEqual(products[1]["main_name"], "Game One")
 
 
 if __name__ == "__main__":

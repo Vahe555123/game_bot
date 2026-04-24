@@ -2361,6 +2361,161 @@ class ProductCRUD:
 
         return result, total
 
+    @staticmethod
+    def get_products_batch_by_ids(
+        db: Session,
+        product_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        requested_ids: List[str] = []
+        seen_ids: set[str] = set()
+
+        for raw_product_id in product_ids:
+            normalized_product_id = ProductCRUD._normalize_product_id_token(raw_product_id)
+            if not normalized_product_id or normalized_product_id in seen_ids:
+                continue
+            seen_ids.add(normalized_product_id)
+            requested_ids.append(normalized_product_id)
+
+        if not requested_ids:
+            return []
+
+        if settings.PRODUCTS_USE_CARDS_TABLE:
+            try:
+                return ProductCRUD._get_products_batch_from_cards(db, requested_ids)
+            except Exception as exc:
+                import logging as _logging
+
+                _logging.getLogger(__name__).exception(
+                    "product_cards batch path failed, falling back to products lookup: %s",
+                    exc,
+                )
+
+        return ProductCRUD._get_products_batch_legacy(db, requested_ids)
+
+    @staticmethod
+    def _get_products_batch_from_cards(
+        db: Session,
+        requested_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        if not requested_ids:
+            return []
+
+        cards = (
+            db.query(ProductCard)
+            .filter(
+                or_(
+                    ProductCard.card_id.in_(requested_ids),
+                    ProductCard.ua_product_id.in_(requested_ids),
+                    ProductCard.tr_product_id.in_(requested_ids),
+                    ProductCard.in_product_id.in_(requested_ids),
+                )
+            )
+            .all()
+        )
+
+        cards_by_requested_id: Dict[str, ProductCard] = {}
+        for card in cards:
+            for candidate_id in (card.card_id, card.ua_product_id, card.tr_product_id, card.in_product_id):
+                if candidate_id and candidate_id not in cards_by_requested_id:
+                    cards_by_requested_id[candidate_id] = card
+
+        missing_ids = [product_id for product_id in requested_ids if product_id not in cards_by_requested_id]
+        fallback_products = ProductCRUD._get_products_batch_legacy(db, missing_ids) if missing_ids else []
+        fallback_by_requested_id = {
+            missing_id: fallback_products[index]
+            for index, missing_id in enumerate(missing_ids[: len(fallback_products)])
+        }
+
+        localization_cache: Dict[str, Optional[str]] = {}
+        result: List[Dict[str, Any]] = []
+
+        for requested_id in requested_ids:
+            card = cards_by_requested_id.get(requested_id)
+            if card is not None:
+                result.append(ProductCRUD._card_to_catalog_dict(card, db, localization_cache))
+                continue
+
+            fallback_product = fallback_by_requested_id.get(requested_id)
+            if fallback_product is not None:
+                result.append(fallback_product)
+
+        return result
+
+    @staticmethod
+    def _get_products_batch_legacy(
+        db: Session,
+        requested_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        if not requested_ids:
+            return []
+
+        visible_regions = ['TR', 'IN', 'UA']
+        page_products = (
+            db.query(Product)
+            .filter(
+                Product.id.in_(requested_ids),
+                Product.region.in_(visible_regions),
+            )
+            .all()
+        )
+
+        regional_products_by_id: Dict[str, List[Product]] = defaultdict(list)
+        for product in page_products:
+            regional_products_by_id[product.id].append(product)
+
+        representative_cache: Dict[str, Product] = {}
+        resolved_groups_by_requested_id: Dict[str, List[Product]] = {}
+        localization_cache: Dict[str, Optional[str]] = {}
+        result: List[Dict[str, Any]] = []
+
+        for requested_id in requested_ids:
+            regional_products = regional_products_by_id.get(requested_id)
+
+            if not regional_products:
+                if requested_id not in resolved_groups_by_requested_id:
+                    fallback_product = ProductCRUD.get_by_id_with_fallback(db, requested_id)
+                    if fallback_product is None:
+                        resolved_groups_by_requested_id[requested_id] = []
+                    else:
+                        resolved_products = (
+                            db.query(Product)
+                            .filter(
+                                Product.id == fallback_product.id,
+                                Product.region.in_(visible_regions),
+                            )
+                            .all()
+                        )
+                        resolved_groups_by_requested_id[requested_id] = resolved_products or [fallback_product]
+                        regional_products_by_id[fallback_product.id] = resolved_groups_by_requested_id[requested_id]
+
+                regional_products = resolved_groups_by_requested_id.get(requested_id) or []
+
+            if not regional_products:
+                continue
+
+            representative_key = regional_products[0].id
+            representative = representative_cache.get(representative_key)
+            if representative is None:
+                representative = ProductCRUD._choose_representative_products(
+                    regional_products,
+                    user=None,
+                    filter_region=None,
+                ).get(representative_key) or regional_products[0]
+                representative_cache[representative_key] = representative
+
+            result.append(
+                ProductCRUD.prepare_product_with_multi_region_prices(
+                    representative,
+                    db,
+                    None,
+                    None,
+                    regional_products=regional_products,
+                    localization_cache=localization_cache,
+                )
+            )
+
+        return result
+
 class FavoriteCRUD:
     @staticmethod
     def _resolve_favorite_product_candidates(

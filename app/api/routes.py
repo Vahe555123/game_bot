@@ -7,7 +7,7 @@ from urllib.parse import quote, urlparse, parse_qs, urlencode, urlunparse
 from app.database.connection import get_db
 from app.api.schemas import (
     User, UserCreate, UserUpdate, UserWithFavorites,
-    Product, ProductListResponse, ProductFilter, PaginationParams,
+    Product, ProductBatchRequest, ProductFilter, PaginationParams,
     Favorite, FavoriteCreate, RegionEnum, RegionSettings,
     PSNCredentials, PSNCredentialsResponse,
     PSNAccountCreate, PSNAccountUpdate, PSNAccountResponse, PSNAccountsListResponse,
@@ -423,6 +423,22 @@ def get_products(
         "page": page,
         "limit": limit,
         "has_next": (page * limit) < total
+    }
+
+@router.post("/products/batch", tags=["Products"], summary="Получить карточки товаров пачкой")
+def get_products_batch(
+    payload: ProductBatchRequest,
+    db: Session = Depends(get_db)
+):
+    """Получить карточки каталога по списку ID в одном запросе."""
+    products_with_prices = product_crud.get_products_batch_by_ids(db, payload.product_ids)
+
+    return {
+        "products": products_with_prices,
+        "total": len(products_with_prices),
+        "page": 1,
+        "limit": len(payload.product_ids),
+        "has_next": False,
     }
 
 @router.get("/products/{product_id}", response_model=dict, tags=["Products"], summary="Получить товар")
