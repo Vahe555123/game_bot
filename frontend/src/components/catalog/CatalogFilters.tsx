@@ -130,25 +130,31 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-1">
-          <span className="whitespace-nowrap">Доступно в PS Plus</span>
-          <input
-            type="checkbox"
-            checked={draftFilters.hasPsPlus}
-            onChange={(event) => onDraftChange({ hasPsPlus: event.target.checked })}
-            className="h-4 w-4 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
-          />
-        </label>
+        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 md:rounded-2xl lg:col-span-2 xl:col-span-2">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Доступны в подписке</p>
 
-        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-1">
-          <span className="whitespace-nowrap">Доступно в EA PLAY</span>
-          <input
-            type="checkbox"
-            checked={draftFilters.hasEaAccess}
-            onChange={(event) => onDraftChange({ hasEaAccess: event.target.checked })}
-            className="h-4 w-4 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
-          />
-        </label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2.5 text-sm transition hover:border-brand-400/40">
+              <span className="whitespace-nowrap">PS Plus Extra</span>
+              <input
+                type="checkbox"
+                checked={draftFilters.hasPsPlus}
+                onChange={(event) => onDraftChange({ hasPsPlus: event.target.checked })}
+                className="h-4 w-4 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
+              />
+            </label>
+
+            <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2.5 text-sm transition hover:border-brand-400/40">
+              <span className="whitespace-nowrap">EA Play</span>
+              <input
+                type="checkbox"
+                checked={draftFilters.hasEaAccess}
+                onChange={(event) => onDraftChange({ hasEaAccess: event.target.checked })}
+                className="h-4 w-4 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
+              />
+            </label>
+          </div>
+        </div>
 
         <div className="grid gap-2 sm:col-span-2 lg:col-span-6 xl:col-span-2 xl:grid-cols-2">
           <button
