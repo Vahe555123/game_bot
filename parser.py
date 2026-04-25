@@ -3274,6 +3274,50 @@ def _extract_product_image(product: dict) -> str:
     return ""
 
 
+async def _extract_product_image_from_page(session: aiohttp.ClientSession, url: str) -> str:
+    """
+    Fallback для TR/IN ручного парсинга, когда GraphQL не вернул `media`.
+    Пытаемся вытащить картинку из og:image / twitter:image / встроенного JSON страницы.
+    """
+    try:
+        async with session.get(url, headers=page_headers(), timeout=aiohttp.ClientTimeout(30)) as resp:
+            text = await resp.text()
+    except Exception:
+        return ""
+
+    try:
+        meta_match = search(
+            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+            text,
+            IGNORECASE,
+        )
+        if meta_match and meta_match.group(1):
+            return meta_match.group(1).strip()
+
+        twitter_match = search(
+            r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+            text,
+            IGNORECASE,
+        )
+        if twitter_match and twitter_match.group(1):
+            return twitter_match.group(1).strip()
+
+        background_match = search(
+            r'"background-image"\s*:\s*\{"text":"([^"]+)"\}',
+            text,
+            IGNORECASE,
+        )
+        if background_match and background_match.group(1):
+            payload = loads(background_match.group(1))
+            meta_match = search(r'"url":"([^"]+)"', dumps(payload))
+            if meta_match and meta_match.group(1):
+                return meta_match.group(1).replace("\\/", "/")
+    except Exception:
+        return ""
+
+    return ""
+
+
 async def parse_tr(
     session: aiohttp.ClientSession,
     url: str,
@@ -3493,8 +3537,10 @@ async def parse_tr(
 
                     product_type = EditionTypeNormalizer.normalize_type(product_type)
 
-                    # Image из API
+                    # Image из API; у части TR товаров media пустой, поэтому добираем из HTML страницы.
                     image = _extract_product_image(product)
+                    if not image:
+                        image = await _extract_product_image_from_page(session, url)
 
                     # Tags - собираем все уникальные названия для двуязычного поиска
                     tags = [main_name, name]
@@ -3901,8 +3947,10 @@ async def parse_in(
 
                     product_type = EditionTypeNormalizer.normalize_type(product_type)
 
-                    # Image
+                    # Image; у части IN товаров media пустой, поэтому добираем из HTML страницы.
                     image = _extract_product_image(product)
+                    if not image:
+                        image = await _extract_product_image_from_page(session, url)
 
                     # Tags - собираем все уникальные названия для двуязычного поиска
                     tags = [main_name, name]
