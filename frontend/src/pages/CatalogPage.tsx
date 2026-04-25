@@ -192,7 +192,7 @@ export function CatalogPage() {
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null)
   const previousFiltersKeyRef = useRef(filtersKey)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const hasAutoCollapsedFiltersRef = useRef(false)
+  const lastScrollYRef = useRef(0)
   const activeFiltersCount = countActiveFilters(filters)
 
   useEffect(() => {
@@ -211,7 +211,7 @@ export function CatalogPage() {
       return
     }
 
-    if (typeof window !== 'undefined' && isMainPage && window.innerWidth >= 1024 && !hasAutoCollapsedFiltersRef.current) {
+    if (typeof window !== 'undefined' && isMainPage && window.innerWidth >= 1024) {
       setIsFiltersOpen(true)
     }
   }, [isMainPage, searchParams])
@@ -221,24 +221,44 @@ export function CatalogPage() {
       return undefined
     }
 
+    const SCROLL_DELTA_THRESHOLD = 10
+
     const handleScroll = () => {
-      if (window.innerWidth < 1024 || hasAutoCollapsedFiltersRef.current || !isFiltersOpen) {
+      if (window.innerWidth < 1024) {
         return
       }
 
-      if (window.scrollY >= window.innerHeight / 2) {
-        hasAutoCollapsedFiltersRef.current = true
-        setIsFiltersOpen(false)
+      const currentScrollY = window.scrollY
+      const previousScrollY = lastScrollYRef.current
+      const scrollDelta = currentScrollY - previousScrollY
+
+      // Keep filters visible near top to avoid jumpy behavior.
+      if (currentScrollY <= 24) {
+        if (!isFiltersOpen) {
+          setIsFiltersOpen(true)
+        }
+        lastScrollYRef.current = currentScrollY
+        return
       }
+
+      if (Math.abs(scrollDelta) < SCROLL_DELTA_THRESHOLD) {
+        return
+      }
+
+      if (scrollDelta > 0 && isFiltersOpen) {
+        setIsFiltersOpen(false)
+      } else if (scrollDelta < 0 && !isFiltersOpen) {
+        setIsFiltersOpen(true)
+      }
+
+      lastScrollYRef.current = currentScrollY
     }
 
+    lastScrollYRef.current = window.scrollY
     window.addEventListener('scroll', handleScroll, { passive: true })
-    window.addEventListener('resize', handleScroll)
-    handleScroll()
 
     return () => {
       window.removeEventListener('scroll', handleScroll)
-      window.removeEventListener('resize', handleScroll)
     }
   }, [isFiltersOpen, isMainPage])
 

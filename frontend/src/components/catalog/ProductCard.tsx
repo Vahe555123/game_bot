@@ -38,6 +38,7 @@ export function ProductCard({ product }: ProductCardProps) {
   const regularDiscountPercent = getProductRegularDiscountPercent(product)
   const localization = getProductLocalizationPresentation(product)
   const vrLabel = getProductVrLabel(product)
+  const platformLabel = [product.platforms, vrLabel].filter(Boolean).join(' • ')
 
   function handleFavoriteClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -96,14 +97,9 @@ export function ProductCard({ product }: ProductCardProps) {
         <FavoriteButton active={favoriteActive} onClick={handleFavoriteClick} className="absolute right-2.5 top-2.5 z-20 md:right-4 md:top-4" />
 
         <div className="absolute inset-x-2.5 bottom-2.5 flex flex-wrap gap-1.5 md:inset-x-3 md:bottom-3 md:gap-2">
-          {product.platforms ? (
+          {platformLabel ? (
             <span className="pill border-white/10 bg-slate-950/85 px-2.5 py-1 text-[11px] text-slate-100 shadow-lg">
-              {product.platforms}
-            </span>
-          ) : null}
-          {vrLabel ? (
-            <span className="pill border-white/10 bg-slate-950/85 px-2.5 py-1 text-[11px] text-slate-100 shadow-lg">
-              {vrLabel}
+              {platformLabel}
             </span>
           ) : null}
           <LocalizationBadge
