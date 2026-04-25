@@ -5256,7 +5256,15 @@ def _update_manual_result_cache(existing_result: list[dict], final_records: list
             existing_result.append(record)
             added_count += 1
         else:
-            existing_result[existing_index].update(record)
+            current_record = existing_result[existing_index]
+            merged_record = dict(current_record)
+            merged_record.update(record)
+
+            # Не даём ручному парсингу затереть уже сохранённую картинку пустой строкой.
+            if not (record.get("image") or "").strip() and (current_record.get("image") or "").strip():
+                merged_record["image"] = current_record.get("image")
+
+            existing_result[existing_index] = merged_record
             updated_count += 1
 
     before_dedupe = len(existing_result)
