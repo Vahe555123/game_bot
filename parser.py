@@ -2609,10 +2609,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     "ps_price": ps_plus_price_rub_ua,
                                     "price_uah": uah_price,
                                     "old_price_uah": uah_old_price,
-                                    "price_try": 0.0,
-                                    "old_price_try": 0.0,
-                                    "price_inr": 0.0,
-                                    "old_price_inr": 0.0,
+                                    "price_try": None,
+                                    "old_price_try": None,
+                                    "price_inr": None,
+                                    "old_price_inr": None,
                                     "price_rub": price_rub_ua,
                                     "price_rub_region": "UA",
                                     "ps_plus_price_uah": ps_price_ua,
@@ -2647,12 +2647,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     "price": price_rub_tr,
                                     "old_price": old_price_rub_tr,
                                     "ps_price": ps_plus_price_rub_tr,
-                                    "price_uah": 0.0,
-                                    "old_price_uah": 0.0,
+                                    "price_uah": None,
+                                    "old_price_uah": None,
                                     "price_try": trl_price,
                                     "old_price_try": trl_old_price,
-                                    "price_inr": 0.0,
-                                    "old_price_inr": 0.0,
+                                    "price_inr": None,
+                                    "old_price_inr": None,
                                     "price_rub": price_rub_tr,
                                     "price_rub_region": "TR",
                                     "ps_plus_price_uah": None,
@@ -2687,10 +2687,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                                     "price": price_rub_in,
                                     "old_price": old_price_rub_in,
                                     "ps_price": ps_plus_price_rub_in,
-                                    "price_uah": 0.0,
-                                    "old_price_uah": 0.0,
-                                    "price_try": 0.0,
-                                    "old_price_try": 0.0,
+                                    "price_uah": None,
+                                    "old_price_uah": None,
+                                    "price_try": None,
+                                    "old_price_try": None,
                                     "price_inr": inr_price,
                                     "old_price_inr": inr_old_price,
                                     "price_rub": price_rub_in,
@@ -3104,10 +3104,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                             "ps_price": ps_plus_price_rub_ua,
                             "price_uah": uah_price,
                             "old_price_uah": uah_old_price,
-                            "price_try": 0.0,
-                            "old_price_try": 0.0,
-                            "price_inr": 0.0,
-                            "old_price_inr": 0.0,
+                            "price_try": None,
+                            "old_price_try": None,
+                            "price_inr": None,
+                            "old_price_inr": None,
                             "price_rub": price_rub_ua,
                             "price_rub_region": "UA",
                             "ps_plus_price_uah": ps_price_ua,
@@ -3141,12 +3141,12 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                             "price": price_rub_tr,
                             "old_price": old_price_rub_tr,
                             "ps_price": ps_plus_price_rub_tr,
-                            "price_uah": 0.0,
-                            "old_price_uah": 0.0,
+                            "price_uah": None,
+                            "old_price_uah": None,
                             "price_try": trl_price,
                             "old_price_try": trl_old_price,
-                            "price_inr": 0.0,
-                            "old_price_inr": 0.0,
+                            "price_inr": None,
+                            "old_price_inr": None,
                             "price_rub": price_rub_tr,
                             "price_rub_region": "TR",
                             "ps_plus_price_uah": None,
@@ -3180,10 +3180,10 @@ async def parse(session: aiohttp.ClientSession, url: str, regions: list = None, 
                             "price": price_rub_in,
                             "old_price": old_price_rub_in,
                             "ps_price": ps_plus_price_rub_in,
-                            "price_uah": 0.0,
-                            "old_price_uah": 0.0,
-                            "price_try": 0.0,
-                            "old_price_try": 0.0,
+                            "price_uah": None,
+                            "old_price_uah": None,
+                            "price_try": None,
+                            "old_price_try": None,
                             "price_inr": inr_price,
                             "old_price_inr": inr_old_price,
                             "price_rub": price_rub_in,
@@ -3291,6 +3291,37 @@ async def _extract_product_image_from_page(
 
     try:
         soup = bs(text, "html.parser")
+        resolved_product_id = (product_id or url.rstrip("/").split("/")[-1]).strip()
+
+        for script in soup.find_all("script", attrs={"type": "application/json"}):
+            raw = (script.string or script.text or "").strip()
+            if not raw.startswith("{"):
+                continue
+            try:
+                payload = loads(raw)
+            except Exception:
+                continue
+
+            cache = payload.get("cache") if isinstance(payload, dict) else None
+            if not isinstance(cache, dict):
+                continue
+
+            if resolved_product_id:
+                product_entry = cache.get(f"Product:{resolved_product_id}")
+                if isinstance(product_entry, dict):
+                    image = _extract_product_image(product_entry)
+                    if image:
+                        return image
+
+            for value in cache.values():
+                if not isinstance(value, dict):
+                    continue
+                personalized_meta = value.get("personalizedMeta")
+                if isinstance(personalized_meta, dict):
+                    image = _extract_product_image({"media": personalized_meta.get("media") or []})
+                    if image:
+                        return image
+
         for meta in soup.find_all("meta"):
             candidate = (
                 meta.get("content")
@@ -3299,36 +3330,6 @@ async def _extract_product_image_from_page(
             )
             if candidate:
                 return candidate.strip()
-
-        resolved_product_id = product_id or url.rstrip("/").split("/")[-1]
-        if resolved_product_id:
-            product_media_match = re.search(
-                rf'Product:{re.escape(resolved_product_id)}.*?"media":(\[.*?\])',
-                text,
-                re.S,
-            )
-            if product_media_match:
-                try:
-                    media_items = loads(product_media_match.group(1))
-                    image = _extract_product_image({"media": media_items})
-                    if image:
-                        return image
-                except Exception:
-                    pass
-
-        concept_media_match = re.search(
-            r'"personalizedMeta"\s*:\s*\{.*?"media":(\[.*?\])',
-            text,
-            re.S,
-        )
-        if concept_media_match:
-            try:
-                media_items = loads(concept_media_match.group(1))
-                image = _extract_product_image({"media": media_items})
-                if image:
-                    return image
-            except Exception:
-                pass
 
         direct_image_match = re.search(
             r'https://image\.api\.playstation\.com[^"\\< ]+\.(?:png|jpg|jpeg|webp)',
@@ -3418,13 +3419,17 @@ async def parse_tr(
                 await asyncio.sleep(5)
                 continue
 
+            # Для обычного product URL парсим только этот продукт.
+            # Разворачивать весь concept можно только если пользователь дал concept URL явно.
+            is_concept_url = "/concept/" in url
+
             # Проверяем есть ли concept с изданиями
             has_concept = False
             products_list = []
             main_name = ""
             concept_id = None
 
-            if "concept" in product_retrieve and product_retrieve["concept"]:
+            if is_concept_url and "concept" in product_retrieve and product_retrieve["concept"]:
                 concept = product_retrieve["concept"]
                 concept_id = concept.get("id")
                 main_name = concept.get("name", "")
@@ -3712,12 +3717,12 @@ async def parse_tr(
                             "localization": localization_tr,  # Парсится из TR
                             "rating": 0.0,  # Берется из UA
                             "info": None,  # Берется из UA
-                            "price_uah": 0.0,  # Только TR цены
-                            "old_price_uah": 0.0,
+                            "price_uah": None,  # Только TR цены
+                            "old_price_uah": None,
                             "price_try": trl_price,
                             "old_price_try": trl_old_price,
-                            "price_inr": 0.0,
-                            "old_price_inr": 0.0,
+                            "price_inr": None,
+                            "old_price_inr": None,
                             "price_rub": price_rub_tr,  # TR цена в рублях
                             "price_rub_region": "TR",
                             "ps_plus_price_uah": None,
@@ -3844,13 +3849,17 @@ async def parse_in(
                 await asyncio.sleep(5)
                 continue
 
+            # Для обычного product URL парсим только этот продукт.
+            # Разворачивать весь concept можно только если пользователь дал concept URL явно.
+            is_concept_url = "/concept/" in url
+
             # Обработка concept/products аналогично parse_tr()
             has_concept = False
             products_list = []
             main_name = ""
             concept_id = None
 
-            if "concept" in product_retrieve and product_retrieve["concept"]:
+            if is_concept_url and "concept" in product_retrieve and product_retrieve["concept"]:
                 concept = product_retrieve["concept"]
                 concept_id = concept.get("id")
                 main_name = concept.get("name", "")
@@ -4107,10 +4116,10 @@ async def parse_in(
                             "localization": localization_in,
                             "rating": 0.0,
                             "info": None,
-                            "price_uah": 0.0,
-                            "old_price_uah": 0.0,
-                            "price_try": 0.0,
-                            "old_price_try": 0.0,
+                            "price_uah": None,
+                            "old_price_uah": None,
+                            "price_try": None,
+                            "old_price_try": None,
                             "price_inr": inr_price,
                             "old_price_inr": inr_old_price,
                             "price_rub": price_rub_in,
@@ -7680,33 +7689,33 @@ def merge_region_data(ua_item: Dict, other_item: Dict, region: str) -> Dict:
 
     # Обновляем цены из другого региона
     if region == "TR":
-        merged["price_try"] = other_item.get("price_try", 0.0)
-        merged["old_price_try"] = other_item.get("old_price_try", 0.0)
+        merged["price_try"] = other_item.get("price_try")
+        merged["old_price_try"] = other_item.get("old_price_try")
         merged["ps_plus_price_try"] = other_item.get("ps_plus_price_try")
-        merged["price_rub"] = other_item.get("price_rub", 0.0)
+        merged["price_rub"] = other_item.get("price_rub")
         merged["price_rub_region"] = "TR"
 
-        # Обнуляем цены других регионов
-        merged["price_uah"] = 0.0
-        merged["old_price_uah"] = 0.0
+        # Отсутствующие регионы оставляем пустыми, чтобы каталог не показывал 0.
+        merged["price_uah"] = None
+        merged["old_price_uah"] = None
         merged["ps_plus_price_uah"] = None
-        merged["price_inr"] = 0.0
-        merged["old_price_inr"] = 0.0
+        merged["price_inr"] = None
+        merged["old_price_inr"] = None
         merged["ps_plus_price_inr"] = None
 
     elif region == "IN":
-        merged["price_inr"] = other_item.get("price_inr", 0.0)
-        merged["old_price_inr"] = other_item.get("old_price_inr", 0.0)
+        merged["price_inr"] = other_item.get("price_inr")
+        merged["old_price_inr"] = other_item.get("old_price_inr")
         merged["ps_plus_price_inr"] = other_item.get("ps_plus_price_inr")
-        merged["price_rub"] = other_item.get("price_rub", 0.0)
+        merged["price_rub"] = other_item.get("price_rub")
         merged["price_rub_region"] = "IN"
 
-        # Обнуляем цены других регионов
-        merged["price_uah"] = 0.0
-        merged["old_price_uah"] = 0.0
+        # Отсутствующие регионы оставляем пустыми, чтобы каталог не показывал 0.
+        merged["price_uah"] = None
+        merged["old_price_uah"] = None
         merged["ps_plus_price_uah"] = None
-        merged["price_try"] = 0.0
-        merged["old_price_try"] = 0.0
+        merged["price_try"] = None
+        merged["old_price_try"] = None
         merged["ps_plus_price_try"] = None
 
     # Локализация всегда берётся из записи целевого региона.
