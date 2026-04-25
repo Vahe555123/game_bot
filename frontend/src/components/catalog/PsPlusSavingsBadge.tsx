@@ -1,14 +1,12 @@
 import clsx from 'clsx'
 
 type PsPlusSavingsBadgeProps = {
-  percent: number
+  percent?: number | null
   className?: string
 }
 
 export function PsPlusSavingsBadge({ percent, className }: PsPlusSavingsBadgeProps) {
-  if (!Number.isFinite(percent) || percent <= 0) {
-    return null
-  }
+  const hasSavingsPercent = typeof percent === 'number' && Number.isFinite(percent) && percent > 0
 
   return (
     <span
@@ -18,7 +16,7 @@ export function PsPlusSavingsBadge({ percent, className }: PsPlusSavingsBadgePro
       )}
     >
       <img src="/static/images/psplussub.png" alt="" aria-hidden="true" className="h-3.5 w-3.5 shrink-0 object-contain" />
-      {`Сэкономьте ${percent}% с PS+`}
+      {hasSavingsPercent ? `Сэкономьте ${percent}% с PS+` : 'Сэкономьте с PS+'}
     </span>
   )
 }

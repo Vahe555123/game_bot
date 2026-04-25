@@ -91,6 +91,22 @@ describe('getProductPsPlusSavingsPercent', () => {
 
     expect(getProductPsPlusSavingsPercent(product)).toBe(40)
   })
+
+  it('derives the PS Plus discount from old price when explicit percent is missing', () => {
+    const product = buildProduct({
+      hasPsPlus: true,
+      regionalPrices: [
+        buildRegionalPrice('TR', 'РўСѓСЂС†РёСЏ', 1499, null, {
+          priceRub: null,
+          oldPriceRub: 1499,
+          psPlusPriceRub: 1199,
+          psPlusDiscountPercent: null,
+        }),
+      ],
+    })
+
+    expect(getProductPsPlusSavingsPercent(product)).toBe(20)
+  })
 })
 
 describe('PS Plus pricing helpers', () => {

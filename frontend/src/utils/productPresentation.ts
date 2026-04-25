@@ -143,6 +143,32 @@ function isPositiveNumber(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
 }
 
+function getRegionalPsPlusSavingsPercent(
+  price: Pick<
+    ProductRegionPrice,
+    | 'priceRub'
+    | 'priceLocal'
+    | 'oldPriceRub'
+    | 'oldPriceLocal'
+    | 'psPlusPriceRub'
+    | 'psPlusPriceLocal'
+    | 'psPlusDiscountPercent'
+  >,
+) {
+  if (typeof price.psPlusDiscountPercent === 'number' && price.psPlusDiscountPercent > 0) {
+    return price.psPlusDiscountPercent
+  }
+
+  const regularComparable = price.priceRub ?? price.priceLocal ?? price.oldPriceRub ?? price.oldPriceLocal
+  const psPlusComparable = price.psPlusPriceRub ?? price.psPlusPriceLocal
+
+  if (!isPositiveNumber(regularComparable) || !isPositiveNumber(psPlusComparable) || psPlusComparable >= regularComparable) {
+    return null
+  }
+
+  return Math.round(((regularComparable - psPlusComparable) / regularComparable) * 100)
+}
+
 export function shouldUsePsPlusPrice(
   price: Pick<
     ProductRegionPrice,
@@ -210,9 +236,12 @@ export function getEffectiveRegionalPrice(
 export function getProductPsPlusSavingsPercent(
   product: Pick<CatalogProduct, 'regionalPrices' | 'routeRegion' | 'region'>,
 ) {
-  const regionalPricesWithSavings = sortRegionalPrices(product.regionalPrices).filter(
-    (price) => typeof price.psPlusDiscountPercent === 'number' && price.psPlusDiscountPercent > 0,
-  )
+  const regionalPricesWithSavings = sortRegionalPrices(product.regionalPrices)
+    .map((price) => ({
+      region: normalizeRegionCode(price.region),
+      savingsPercent: getRegionalPsPlusSavingsPercent(price),
+    }))
+    .filter((price): price is { region: string | null; savingsPercent: number } => typeof price.savingsPercent === 'number')
 
   if (!regionalPricesWithSavings.length) {
     return null
@@ -224,16 +253,16 @@ export function getProductPsPlusSavingsPercent(
 
   for (const preferredRegion of preferredRegions) {
     const matchedPrice = regionalPricesWithSavings.find(
-      (price) => normalizeRegionCode(price.region) === preferredRegion,
+      (price) => price.region === preferredRegion,
     )
 
-    if (matchedPrice?.psPlusDiscountPercent) {
-      return matchedPrice.psPlusDiscountPercent
+    if (matchedPrice?.savingsPercent) {
+      return matchedPrice.savingsPercent
     }
   }
 
   return regionalPricesWithSavings.reduce<number | null>((bestSavings, price) => {
-    const currentSavings = price.psPlusDiscountPercent ?? null
+    const currentSavings = price.savingsPercent ?? null
 
     if (currentSavings === null) {
       return bestSavings

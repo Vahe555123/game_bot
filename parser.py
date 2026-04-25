@@ -4670,6 +4670,39 @@ INSERT_PRODUCTS_SQL = """
               ?, ?, ?, ?, ?)
 """
 
+# UPSERT для обновления СКИДОК/ЦЕН без перезаписи мета-полей
+# (localization, name, main_name, description, search_names, image, publisher, info,
+# tags, edition, players_*, name_localized, release_date, type, category, compound,
+# platforms, plus_types — НЕ трогаем).
+# Новые товары (которых нет в БД) вставляются полностью.
+# Существующие (по PK id+region) — обновляются только в части прайсинга.
+_DISCOUNT_UPDATE_FIELDS = (
+    "price", "old_price", "ps_price",
+    "price_uah", "old_price_uah", "ps_plus_price_uah",
+    "price_try", "old_price_try", "ps_plus_price_try",
+    "price_inr", "old_price_inr", "ps_plus_price_inr",
+    "price_rub", "price_rub_region",
+    "discount", "discount_percent", "discount_end",
+    "ps_plus", "ea_access", "ps_plus_collection",
+    "updated_at",
+)
+INSERT_PRODUCTS_DISCOUNT_ONLY_SQL = f"""
+    INSERT INTO products (
+        id, category, region, type, name, main_name, image, compound,
+        platforms, publisher, localization, rating, info, price, old_price,
+        ps_price, plus_types, ea_price, ps_plus, ea_access, discount,
+        discount_end, release_date, tags, edition, description, price_uah, old_price_uah,
+        price_try, old_price_try, price_inr, old_price_inr, price_rub,
+        price_rub_region, ps_plus_price_uah, ps_plus_price_try, ps_plus_price_inr,
+        players_min, players_max, players_online, name_localized, search_names,
+        discount_percent, ps_plus_collection, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+              ?, ?, ?, ?, ?)
+    ON CONFLICT(id, region) DO UPDATE SET
+        {', '.join(f'{f} = excluded.{f}' for f in _DISCOUNT_UPDATE_FIELDS)}
+"""
+
 
 def _resolve_promo_sets(promo) -> Tuple[set, set, set]:
     if isinstance(promo, dict):
@@ -4801,6 +4834,32 @@ async def save_batch_to_db(result: list, promo, clear_db: bool = False):
             await db.execute("DELETE FROM products")
             await db.commit()
         await db.executemany(INSERT_PRODUCTS_SQL, products_to_insert)
+        await db.commit()
+
+    return len(products_to_insert)
+
+
+async def save_discount_batch_to_db(result: list, promo) -> int:
+    """
+    Сохранение результатов ОБНОВЛЕНИЯ СКИДОК.
+
+    Отличие от save_batch_to_db:
+    - НОВЫЕ товары (по PK id+region) — вставляются полностью.
+    - СУЩЕСТВУЮЩИЕ — обновляются ТОЛЬКО в части цен/скидок.
+      Поля localization, name, main_name, description, search_names, image,
+      publisher, info, players, edition, type, category, и т.д. — не трогаются.
+
+    Это нужно потому что страницы регионов (en-tr/en-in) часто не отдают
+    локализацию и т.п., и обычный UPSERT ломал данные основного парсинга.
+    """
+    products_to_insert = _prepare_products_for_db(result, promo)
+    if not products_to_insert:
+        return 0
+
+    await ensure_database_schema()
+    async with aiosqlite.connect(SQLITE_DB_PATH) as db:
+        await prepare_sqlite_connection(db)
+        await db.executemany(INSERT_PRODUCTS_DISCOUNT_ONLY_SQL, products_to_insert)
         await db.commit()
 
     return len(products_to_insert)
@@ -6064,23 +6123,39 @@ async def run_discount_update(
         ),
     )
 
-    clear_stats = await _clear_discount_fields_in_db(progress_callback)
-    existing_result = _load_manual_result_cache()
-    result_cache_cleared = _clear_discount_fields_in_records(existing_result)
-    if result_cache_cleared:
-        _save_manual_result_cache(existing_result)
+    # В тестовом режиме НЕ чистим скидки в БД — иначе пользователь теряет
+    # реальные скидки всего каталога ради прогона на 10 товарах.
+    # Тестовый режим только парсит первые N URL и точечно обновляет их.
+    if test_mode:
+        clear_stats = {"products_cleared": 0, "product_cards_cleared": 0, "skipped": "test_mode"}
+        existing_result = _load_manual_result_cache()
+        result_cache_cleared = 0
         await _emit_discount_progress(
             progress_callback,
             _discount_progress_payload(
                 phase="clear",
-                message=f"Скидки очищены в result.pkl: {result_cache_cleared} записей.",
-                total=0,
-                processed=0,
-                saved=0,
-                failed=0,
-                logs=[f"Скидки очищены в result.pkl: {result_cache_cleared} записей."],
+                message="Тестовый режим: пропускаем массовую очистку старых скидок.",
+                logs=["Тестовый режим: пропускаем массовую очистку старых скидок."],
             ),
         )
+    else:
+        clear_stats = await _clear_discount_fields_in_db(progress_callback)
+        existing_result = _load_manual_result_cache()
+        result_cache_cleared = _clear_discount_fields_in_records(existing_result)
+        if result_cache_cleared:
+            _save_manual_result_cache(existing_result)
+            await _emit_discount_progress(
+                progress_callback,
+                _discount_progress_payload(
+                    phase="clear",
+                    message=f"Скидки очищены в result.pkl: {result_cache_cleared} записей.",
+                    total=0,
+                    processed=0,
+                    saved=0,
+                    failed=0,
+                    logs=[f"Скидки очищены в result.pkl: {result_cache_cleared} записей."],
+                ),
+            )
 
     url_result = await collect_discount_product_urls(
         category_url=category_url,
@@ -6193,7 +6268,10 @@ async def run_discount_update(
             if should_flush:
                 records_to_save = pending_save_records
                 pending_save_records = []
-                saved = await save_batch_to_db(records_to_save, promo, clear_db=False)
+                # discount-only UPSERT: новые товары вставляем целиком,
+                # существующие обновляем ТОЛЬКО в части цен/скидок (не трогаем
+                # localization, name, description и т.д.).
+                saved = await save_discount_batch_to_db(records_to_save, promo)
                 product_ids = [record.get("id") for record in records_to_save if record.get("id")]
                 await refresh_product_cards_after_save(product_ids, full_rebuild=False)
                 _update_manual_result_cache(existing_result, records_to_save)
@@ -6223,7 +6301,7 @@ async def run_discount_update(
 
         # Если cancel прилетел во время цикла — flush того, что накопилось.
         if cancelled_early and pending_save_records:
-            saved = await save_batch_to_db(pending_save_records, promo, clear_db=False)
+            saved = await save_discount_batch_to_db(pending_save_records, promo)
             product_ids = [r.get("id") for r in pending_save_records if r.get("id")]
             await refresh_product_cards_after_save(product_ids, full_rebuild=False)
             _update_manual_result_cache(existing_result, pending_save_records)
@@ -6515,7 +6593,9 @@ async def run_price_update(
             if should_flush:
                 records_to_save = pending_save_records
                 pending_save_records = []
-                saved = await save_batch_to_db(records_to_save, promo, clear_db=False)
+                # Та же защита что и в discount-update: не перезаписываем
+                # мета-поля (localization, name, ...) — только цены/скидки.
+                saved = await save_discount_batch_to_db(records_to_save, promo)
                 product_ids = [r.get("id") for r in records_to_save if r.get("id")]
                 await refresh_product_cards_after_save(product_ids, full_rebuild=False)
                 _update_manual_result_cache(existing_result, records_to_save)
@@ -6542,9 +6622,10 @@ async def run_price_update(
             )
             await asyncio.sleep(sleep_seconds)
 
-        # cancel в середине — flush остатка буфера
+        # cancel в середине — flush остатка буфера (price_update, как и discount_update,
+        # обновляет ТОЛЬКО цены, не трогая localization/name/etc.)
         if cancelled_early and pending_save_records:
-            saved = await save_batch_to_db(pending_save_records, promo, clear_db=False)
+            saved = await save_discount_batch_to_db(pending_save_records, promo)
             product_ids = [r.get("id") for r in pending_save_records if r.get("id")]
             await refresh_product_cards_after_save(product_ids, full_rebuild=False)
             _update_manual_result_cache(existing_result, pending_save_records)
@@ -7034,10 +7115,11 @@ def merge_region_data(ua_item: Dict, other_item: Dict, region: str) -> Dict:
         merged["old_price_try"] = 0.0
         merged["ps_plus_price_try"] = None
 
-    # Обновляем локализацию из другого региона (если есть)
-    other_localization = other_item.get("localization")
-    if other_localization:
-        merged["localization"] = other_localization
+    # Локализация всегда берётся из записи целевого региона.
+    # Раньше: `if other_localization: ...` — при None остаётся UA-локализация
+    # из ua_item.copy() выше → баг "TR/IN показывают русский язык как у UA".
+    # Если для региона PS Store не отдал страницу → локализация должна быть None.
+    merged["localization"] = other_item.get("localization")
 
     # Обновляем ps_plus_collection из другого региона (если есть и если в UA не определен)
     other_ps_plus_collection = other_item.get("ps_plus_collection")

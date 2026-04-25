@@ -2,13 +2,16 @@
   AlertCircle,
   ArrowLeft,
   BadgePercent,
+  BellRing,
+  CheckCircle2,
   CreditCard,
   ExternalLink,
   Gamepad2,
   LoaderCircle,
   Star,
+  X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { buildAuthModalPath, buildBaseAuthPath } from '../components/auth/authModalState'
 import { FavoriteButton } from '../components/catalog/FavoriteButton'
@@ -718,6 +721,32 @@ export function ProductPage() {
   const [checkoutMissingFields, setCheckoutMissingFields] = useState<CheckoutFieldName[]>([])
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null)
   const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [isFavoriteToastVisible, setIsFavoriteToastVisible] = useState(false)
+  const favoriteToastTimerRef = useRef<number | null>(null)
+
+  function showFavoriteAddedToast() {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (favoriteToastTimerRef.current !== null) {
+      window.clearTimeout(favoriteToastTimerRef.current)
+    }
+
+    setIsFavoriteToastVisible(true)
+    favoriteToastTimerRef.current = window.setTimeout(() => {
+      setIsFavoriteToastVisible(false)
+      favoriteToastTimerRef.current = null
+    }, 2400)
+  }
+
+  function hideFavoriteAddedToast() {
+    if (typeof window !== 'undefined' && favoriteToastTimerRef.current !== null) {
+      window.clearTimeout(favoriteToastTimerRef.current)
+      favoriteToastTimerRef.current = null
+    }
+    setIsFavoriteToastVisible(false)
+  }
 
   function applyCheckoutProfile(profileResponse: SiteProfileResponse | null) {
     setCheckoutProfile(profileResponse)
@@ -809,14 +838,44 @@ export function ProductPage() {
     }
   }, [canUsePsPlus, usePsPlusCheckout])
 
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && favoriteToastTimerRef.current !== null) {
+        window.clearTimeout(favoriteToastTimerRef.current)
+      }
+    }
+  }, [])
+
   function handleFavoriteClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
     if (product) {
+      const shouldAddToFavorites = !isFavorite(product.id)
       toggleFavorite({
         productId: product.id,
         region: product.region,
       })
+      if (shouldAddToFavorites) {
+        showFavoriteAddedToast()
+      }
     }
+  }
+
+  function handleWatchDiscountClick() {
+    if (!product) {
+      return
+    }
+
+    const shouldAddToFavorites = !isFavorite(product.id)
+    if (!shouldAddToFavorites) {
+      showFavoriteAddedToast()
+      return
+    }
+
+    toggleFavorite({
+      productId: product.id,
+      region: product.region,
+    })
+    showFavoriteAddedToast()
   }
 
   function handleCheckoutFormChange<K extends keyof CheckoutFormState>(field: K, value: CheckoutFormState[K]) {
@@ -1029,7 +1088,7 @@ export function ProductPage() {
                       -{regularDiscountPercent}%
                     </span>
                   ) : null}
-                  {psPlusSavingsPercent ? (
+                  {product.hasPsPlus ? (
                     <PsPlusSavingsBadge percent={psPlusSavingsPercent} className="px-3 py-1.5 text-[13px]" />
                   ) : null}
                 </div>
@@ -1041,12 +1100,6 @@ export function ProductPage() {
                   className="absolute right-5 top-5 z-10"
                 />
 
-                {product.rating ? (
-                  <div className="absolute bottom-5 right-5 flex items-center gap-1 rounded-full border border-white/10 bg-slate-950/75 px-4 py-2 text-white shadow-lg">
-                    <Star size={15} className="fill-amber-300 text-amber-300" />
-                    {formatRating(product.rating)}
-                  </div>
-                ) : null}
               </div>
             </div>
 
@@ -1061,6 +1114,12 @@ export function ProductPage() {
                   {playersLabel ? (
                     <span className="pill border-white/10 bg-white/5 text-slate-200">Игроки: {playersLabel}</span>
                   ) : null}
+                  {product.rating ? (
+                    <span className="pill border-white/10 bg-white/5 text-slate-200">
+                      <Star size={14} className="fill-amber-300 text-amber-300" />
+                      {formatRating(product.rating)}
+                    </span>
+                  ) : null}
                   {product.hasEaAccess ? (
                     <span className="pill border-sky-300/20 bg-sky-500/15 text-sky-50">EA Access</span>
                   ) : null}
@@ -1073,15 +1132,16 @@ export function ProductPage() {
                 {formatDiscountEndDate(product.discountEnd) ? (
                   <p className="mt-5 text-sm text-amber-100/90">Скидка действует до {formatDiscountEndDate(product.discountEnd)}.</p>
                 ) : null}
-                <button
-                  type="button"
-                  className="btn-primary mt-6 w-full sm:w-auto"
-                  onClick={openCheckout}
-                  disabled={!checkoutPrices.length}
-                >
-                  <CreditCard size={16} />
-                  {isAuthenticated ? 'Купить' : 'Войти и купить'}
-                </button>
+                <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                  <button type="button" className="btn-secondary w-full sm:w-auto" onClick={handleWatchDiscountClick}>
+                    <BellRing size={16} />
+                    {favoriteActive ? 'В избранном' : 'Следить за скидкой'}
+                  </button>
+                  <button type="button" className="btn-primary w-full sm:w-auto" onClick={openCheckout} disabled={!checkoutPrices.length}>
+                    <CreditCard size={16} />
+                    {isAuthenticated ? 'Купить' : 'Войти и купить'}
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -1162,6 +1222,21 @@ export function ProductPage() {
         onCreateOrder={handleCreateCheckout}
         onOpenPayment={handleOpenPayment}
       />
+
+      {isFavoriteToastVisible ? (
+        <button
+          type="button"
+          onClick={hideFavoriteAddedToast}
+          className="fixed right-4 top-40 z-[260] flex max-w-[min(92vw,420px)] items-center gap-3 rounded-2xl border border-emerald-300/35 bg-gradient-to-br from-slate-900/95 via-slate-900/92 to-emerald-900/45 px-4 py-3 text-left shadow-[0_20px_50px_rgba(5,12,24,0.5)] ring-1 ring-emerald-300/20 backdrop-blur-xl transition hover:border-emerald-300/55 md:right-6 md:top-[10.5rem]"
+          aria-label="Закрыть уведомление о добавлении в избранное"
+        >
+          <CheckCircle2 size={18} className="shrink-0 text-emerald-300" />
+          <span className="min-w-0 flex-1 text-sm text-emerald-50">Игра добавлена в Избранное</span>
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-200">
+            <X size={14} />
+          </span>
+        </button>
+      ) : null}
     </div>
   )
 }

@@ -19,9 +19,10 @@ import { RegionalPriceList } from './RegionalPriceList'
 
 type ProductCardProps = {
   product: CatalogProduct
+  onAddedToFavorites?: () => void
 }
 
-export function ProductCard({ product }: ProductCardProps) {
+export function ProductCard({ product, onAddedToFavorites }: ProductCardProps) {
   const { isFavorite, toggleFavorite } = useFavorites()
   const location = useLocation()
 
@@ -43,10 +44,14 @@ export function ProductCard({ product }: ProductCardProps) {
   function handleFavoriteClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
     event.stopPropagation()
+    const shouldAddToFavorites = !isFavorite(product.id)
     toggleFavorite({
       productId: product.id,
       region: product.region,
     })
+    if (shouldAddToFavorites) {
+      onAddedToFavorites?.()
+    }
   }
 
   return (
@@ -84,7 +89,7 @@ export function ProductCard({ product }: ProductCardProps) {
               -{regularDiscountPercent}%
             </span>
           ) : null}
-          {psPlusSavingsPercent ? (
+          {product.hasPsPlus ? (
             <PsPlusSavingsBadge percent={psPlusSavingsPercent} className="px-2.5 py-1 text-[13px]" />
           ) : null}
           {product.hasEaAccess ? (

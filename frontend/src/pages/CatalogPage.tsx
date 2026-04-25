@@ -1,4 +1,4 @@
-import { ArrowUpWideNarrow, Search, SlidersHorizontal } from 'lucide-react'
+import { ArrowUpWideNarrow, CheckCircle2, Search, SlidersHorizontal, X } from 'lucide-react'
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
@@ -193,7 +193,33 @@ export function CatalogPage() {
   const previousFiltersKeyRef = useRef(filtersKey)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const lastScrollYRef = useRef(0)
+  const favoriteToastTimerRef = useRef<number | null>(null)
+  const [isFavoriteToastVisible, setIsFavoriteToastVisible] = useState(false)
   const activeFiltersCount = countActiveFilters(filters)
+
+  function showFavoriteAddedToast() {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    if (favoriteToastTimerRef.current !== null) {
+      window.clearTimeout(favoriteToastTimerRef.current)
+    }
+
+    setIsFavoriteToastVisible(true)
+    favoriteToastTimerRef.current = window.setTimeout(() => {
+      setIsFavoriteToastVisible(false)
+      favoriteToastTimerRef.current = null
+    }, 2400)
+  }
+
+  function hideFavoriteAddedToast() {
+    if (typeof window !== 'undefined' && favoriteToastTimerRef.current !== null) {
+      window.clearTimeout(favoriteToastTimerRef.current)
+      favoriteToastTimerRef.current = null
+    }
+    setIsFavoriteToastVisible(false)
+  }
 
   useEffect(() => {
     setDraftSearch(filters.search)
@@ -261,6 +287,14 @@ export function CatalogPage() {
       window.removeEventListener('scroll', handleScroll)
     }
   }, [isFiltersOpen, isMainPage])
+
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && favoriteToastTimerRef.current !== null) {
+        window.clearTimeout(favoriteToastTimerRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     let ignore = false
@@ -570,7 +604,13 @@ export function CatalogPage() {
       <div className="mt-5 grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 md:mt-6 md:gap-4 xl:grid-cols-4 2xl:grid-cols-5">
         {isLoading
           ? Array.from({ length: filters.limit }).map((_, index) => <ProductSkeleton key={index} />)
-          : products.map((product) => <ProductCard key={`${product.id}-${product.region || 'all'}`} product={product} />)}
+          : products.map((product) => (
+              <ProductCard
+                key={`${product.id}-${product.region || 'all'}`}
+                product={product}
+                onAddedToFavorites={showFavoriteAddedToast}
+              />
+            ))}
       </div>
 
       {!isLoading && products.length === 0 ? (
@@ -600,6 +640,21 @@ export function CatalogPage() {
             <div className="text-sm text-slate-500">Каталог загружен полностью</div>
           )}
         </div>
+      ) : null}
+
+      {isFavoriteToastVisible ? (
+        <button
+          type="button"
+          onClick={hideFavoriteAddedToast}
+          className="fixed right-4 top-24 z-[220] flex max-w-[min(92vw,420px)] items-center gap-3 rounded-2xl border border-emerald-300/35 bg-gradient-to-br from-slate-900/95 via-slate-900/92 to-emerald-900/45 px-4 py-3 text-left shadow-[0_20px_50px_rgba(5,12,24,0.5)] ring-1 ring-emerald-300/20 backdrop-blur-xl transition hover:border-emerald-300/55 md:right-6 md:top-28"
+          aria-label="Закрыть уведомление о добавлении в избранное"
+        >
+          <CheckCircle2 size={18} className="shrink-0 text-emerald-300" />
+          <span className="min-w-0 flex-1 text-sm text-emerald-50">Игра добавлена в Избранное</span>
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-200">
+            <X size={14} />
+          </span>
+        </button>
       ) : null}
     </div>
   )
