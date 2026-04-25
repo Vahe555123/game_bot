@@ -3274,7 +3274,11 @@ def _extract_product_image(product: dict) -> str:
     return ""
 
 
-async def _extract_product_image_from_page(session: aiohttp.ClientSession, url: str) -> str:
+async def _extract_product_image_from_page(
+    session: aiohttp.ClientSession,
+    url: str,
+    product_id: Optional[str] = None,
+) -> str:
     """
     Fallback для TR/IN ручного парсинга, когда GraphQL не вернул `media`.
     Пытаемся вытащить картинку из og:image / twitter:image / встроенного JSON страницы.
@@ -3286,32 +3290,53 @@ async def _extract_product_image_from_page(session: aiohttp.ClientSession, url: 
         return ""
 
     try:
-        meta_match = search(
-            r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
-            text,
-            IGNORECASE,
-        )
-        if meta_match and meta_match.group(1):
-            return meta_match.group(1).strip()
+        soup = bs(text, "html.parser")
+        for meta in soup.find_all("meta"):
+            candidate = (
+                meta.get("content")
+                if meta.get("property") == "og:image" or meta.get("name") == "twitter:image"
+                else None
+            )
+            if candidate:
+                return candidate.strip()
 
-        twitter_match = search(
-            r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
-            text,
-            IGNORECASE,
-        )
-        if twitter_match and twitter_match.group(1):
-            return twitter_match.group(1).strip()
+        resolved_product_id = product_id or url.rstrip("/").split("/")[-1]
+        if resolved_product_id:
+            product_media_match = re.search(
+                rf'Product:{re.escape(resolved_product_id)}.*?"media":(\[.*?\])',
+                text,
+                re.S,
+            )
+            if product_media_match:
+                try:
+                    media_items = loads(product_media_match.group(1))
+                    image = _extract_product_image({"media": media_items})
+                    if image:
+                        return image
+                except Exception:
+                    pass
 
-        background_match = search(
-            r'"background-image"\s*:\s*\{"text":"([^"]+)"\}',
+        concept_media_match = re.search(
+            r'"personalizedMeta"\s*:\s*\{.*?"media":(\[.*?\])',
             text,
-            IGNORECASE,
+            re.S,
         )
-        if background_match and background_match.group(1):
-            payload = loads(background_match.group(1))
-            meta_match = search(r'"url":"([^"]+)"', dumps(payload))
-            if meta_match and meta_match.group(1):
-                return meta_match.group(1).replace("\\/", "/")
+        if concept_media_match:
+            try:
+                media_items = loads(concept_media_match.group(1))
+                image = _extract_product_image({"media": media_items})
+                if image:
+                    return image
+            except Exception:
+                pass
+
+        direct_image_match = re.search(
+            r'https://image\.api\.playstation\.com[^"\\< ]+\.(?:png|jpg|jpeg|webp)',
+            text,
+            re.I,
+        )
+        if direct_image_match:
+            return direct_image_match.group(0).replace("\\/", "/")
     except Exception:
         return ""
 
@@ -3540,7 +3565,7 @@ async def parse_tr(
                     # Image из API; у части TR товаров media пустой, поэтому добираем из HTML страницы.
                     image = _extract_product_image(product)
                     if not image:
-                        image = await _extract_product_image_from_page(session, url)
+                        image = await _extract_product_image_from_page(session, url, product.get("id"))
 
                     # Tags - собираем все уникальные названия для двуязычного поиска
                     tags = [main_name, name]
@@ -3950,7 +3975,7 @@ async def parse_in(
                     # Image; у части IN товаров media пустой, поэтому добираем из HTML страницы.
                     image = _extract_product_image(product)
                     if not image:
-                        image = await _extract_product_image_from_page(session, url)
+                        image = await _extract_product_image_from_page(session, url, product.get("id"))
 
                     # Tags - собираем все уникальные названия для двуязычного поиска
                     tags = [main_name, name]
