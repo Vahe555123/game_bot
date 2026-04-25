@@ -32,10 +32,11 @@ const GAME_LANGUAGE_OPTION_VALUES = new Set(GAME_LANGUAGE_OPTIONS.map((option) =
 
 export const SORT_OPTIONS = [
   { value: 'popular', label: 'Популярность' },
+  { value: 'discount_desc', label: 'Размер скидки' },
   { value: 'rating_desc', label: 'Рейтинг: высокий' },
   { value: 'added_desc', label: 'Сначала добавленные' },
   { value: 'release_desc', label: 'Дата выхода: новые' },
-  { value: 'alphabet', label: 'По алфавиту ' },
+  { value: 'alphabet', label: 'По алфавиту' },
   { value: 'price_asc', label: 'Цена: по возрастанию' },
   { value: 'price_desc', label: 'Цена: по убыванию' },
 ] as const
@@ -54,7 +55,7 @@ const PRICE_CURRENCY_OPTION_VALUES = new Set(PRICE_CURRENCY_OPTIONS.map((option)
 export const PRODUCT_KIND_OPTIONS = [
   { value: 'all', label: 'Игры и DLC' },
   { value: 'games', label: 'Игры' },
-  { value: 'dlc', label: 'Только DLC / Дополнения' },
+  { value: 'dlc', label: 'Только DLC / дополнения' },
 ] as const
 
 const PRODUCT_KIND_OPTION_VALUES = new Set(PRODUCT_KIND_OPTIONS.map((option) => option.value))
@@ -174,6 +175,34 @@ export function matchesPlatformFilter(product: CatalogProduct, platformFilter: s
   }
 }
 
+export function getLocalPlayersRangeFromInfo(info: string[] = []) {
+  for (const item of info) {
+    const source = item.trim()
+    if (!source || /в сети/i.test(source) || /PS Plus/i.test(source)) {
+      continue
+    }
+
+    const rangeMatch = source.match(/^Игроки\s*:\s*(\d+)(?:\s*-\s*(\d+))?/i)
+    if (rangeMatch) {
+      const min = Number(rangeMatch[1])
+      const max = Number(rangeMatch[2] ?? rangeMatch[1])
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        return { min, max }
+      }
+    }
+
+    const singlePlayerMatch = source.match(/^(\d+)\s+игрок/i)
+    if (singlePlayerMatch) {
+      const value = Number(singlePlayerMatch[1])
+      if (Number.isFinite(value)) {
+        return { min: value, max: value }
+      }
+    }
+  }
+
+  return null
+}
+
 export function matchesPlayersFilter(product: CatalogProduct, playersFilter: string) {
   if (!playersFilter) {
     return true
@@ -181,13 +210,26 @@ export function matchesPlayersFilter(product: CatalogProduct, playersFilter: str
 
   const minPlayers = product.playersMin ?? null
   const maxPlayers = product.playersMax ?? null
+  const localPlayersRange = getLocalPlayersRangeFromInfo(product.info)
 
   if (playersFilter === 'singleplayer') {
-    return minPlayers === 1 && (maxPlayers === null || maxPlayers === 1)
+    if (minPlayers === 1 && (maxPlayers === null || maxPlayers === 1)) {
+      return true
+    }
+
+    if (localPlayersRange) {
+      return localPlayersRange.min === 1 && localPlayersRange.max === 1
+    }
+
+    return false
   }
 
   if (playersFilter === 'coop') {
-    return typeof maxPlayers === 'number' ? maxPlayers > 1 : Boolean(product.playersOnline)
+    if (typeof maxPlayers === 'number') {
+      return maxPlayers > 1
+    }
+
+    return localPlayersRange ? localPlayersRange.max > 1 : false
   }
 
   return true

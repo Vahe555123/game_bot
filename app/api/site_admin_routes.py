@@ -148,6 +148,7 @@ def list_site_admin_products(
     category: str | None = Query(None),
     sort: str | None = Query("popular"),
     missing_region: str | None = Query(None),
+    missing_localization: bool | None = Query(None),
     db: Session = Depends(get_db),
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
 ):
@@ -162,6 +163,7 @@ def list_site_admin_products(
             category=category,
             sort=sort,
             missing_region=missing_region,
+            missing_localization=missing_localization,
         )
     except AuthServiceError as error:
         _raise_http_auth_error(error)
@@ -208,6 +210,96 @@ async def get_site_admin_discount_update_status(
     service = get_site_admin_service()
     try:
         return await service.get_discount_update_status()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/discounts/update/pause", summary="Pause discount update parser")
+async def pause_site_admin_discount_update(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.pause_discount_update()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/discounts/update/resume", summary="Resume discount update parser")
+async def resume_site_admin_discount_update(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.resume_discount_update()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/discounts/update/cancel", summary="Cancel discount update parser")
+async def cancel_site_admin_discount_update(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.cancel_discount_update()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+# ── Обновление цен (по products.pkl) ──────────────────────────────────────────
+@router.post("/prices/update", summary="Start price update parser")
+async def start_site_admin_price_update(
+    test: bool = Query(False),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.start_price_update(test=test)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.get("/prices/update/status", summary="Price update parser status")
+async def get_site_admin_price_update_status(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.get_price_update_status()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/prices/update/pause", summary="Pause price update parser")
+async def pause_site_admin_price_update(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.pause_price_update()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/prices/update/resume", summary="Resume price update parser")
+async def resume_site_admin_price_update(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.resume_price_update()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/prices/update/cancel", summary="Cancel price update parser")
+async def cancel_site_admin_price_update(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.cancel_price_update()
     except AuthServiceError as error:
         _raise_http_auth_error(error)
 

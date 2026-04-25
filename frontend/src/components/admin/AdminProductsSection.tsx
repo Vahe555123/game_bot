@@ -332,6 +332,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   const [regionFilter, setRegionFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [missingRegionFilter, setMissingRegionFilter] = useState('')
+  const [missingLocalizationFilter, setMissingLocalizationFilter] = useState(false)
   const [sort, setSort] = useState<AdminProductSortMode>('popular')
   const [isLoading, setIsLoading] = useState(true)
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
@@ -359,6 +360,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
         category: categoryFilter.trim() || undefined,
         sort,
         missing_region: missingRegionFilter || undefined,
+        missing_localization: missingLocalizationFilter || undefined,
       })
       setProducts(response.products)
       setTotal(response.total)
@@ -374,7 +376,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
 
   useEffect(() => {
     loadProducts()
-  }, [page, limit, search, regionFilter, categoryFilter, sort, missingRegionFilter])
+  }, [page, limit, search, regionFilter, categoryFilter, sort, missingRegionFilter, missingLocalizationFilter])
 
   function applyProductToList(product: AdminProductDetails) {
     setProducts((current) => {
@@ -717,6 +719,19 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
               <option value="UA">Нет UA</option>
               <option value="TR">Нет TR</option>
               <option value="IN">Нет IN</option>
+            </select>
+
+            <select
+              value={missingLocalizationFilter ? 'missing' : ''}
+              onChange={(event) => {
+                setPage(1)
+                setMissingLocalizationFilter(event.target.value === 'missing')
+              }}
+              className="auth-input"
+              title="Показать товары, у которых локализация не указана"
+            >
+              <option value="">Язык: все</option>
+              <option value="missing">Язык не указан</option>
             </select>
           </div>
 

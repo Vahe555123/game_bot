@@ -1,8 +1,11 @@
-import { BadgePercent, ExternalLink, Play, RefreshCw } from 'lucide-react'
+import { BadgePercent, ExternalLink, Pause, Play, PlayCircle, RefreshCw, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
+  cancelAdminDiscountUpdate,
   fetchAdminDiscountProducts,
   fetchAdminDiscountUpdateStatus,
+  pauseAdminDiscountUpdate,
+  resumeAdminDiscountUpdate,
   startAdminDiscountUpdate,
 } from '../../services/admin'
 import type { AdminDiscountUpdateStatus, AdminProduct } from '../../types/admin'
@@ -37,6 +40,8 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
 
   const isRunning = status?.status === 'pending' || status?.status === 'running'
+  const isPaused = status?.status === 'paused'
+  const isActiveTask = isRunning || isPaused
 
   async function loadProducts() {
     setIsLoading(true)
@@ -77,7 +82,7 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
   }, [])
 
   useEffect(() => {
-    if (!isRunning) {
+    if (!isActiveTask) {
       return
     }
 
@@ -85,7 +90,7 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
       try {
         const nextStatus = await fetchAdminDiscountUpdateStatus()
         setStatus(nextStatus)
-        if (nextStatus.status === 'completed') {
+        if (nextStatus.status === 'completed' || nextStatus.status === 'cancelled') {
           await loadProducts()
           await onDataChanged()
         }
@@ -96,7 +101,7 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
 
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isRunning])
+  }, [isActiveTask])
 
   async function handleStart(test: boolean) {
     const mode = test ? 'test' : 'full'
@@ -136,24 +141,61 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
       description="Товары, у которых сейчас есть скидка в базе, и запуск отдельного процесса обновления скидок из PlayStation Store."
       action={
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            className="btn-secondary"
-            disabled={Boolean(isStarting) || isRunning}
-            onClick={() => handleStart(true)}
-          >
-            <Play size={16} className={isStarting === 'test' ? 'animate-spin' : ''} />
-            Тест 10 товаров
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={Boolean(isStarting) || isRunning}
-            onClick={() => handleStart(false)}
-          >
-            <RefreshCw size={16} className={isStarting === 'full' || isRunning ? 'animate-spin' : ''} />
-            Обновить скидки
-          </button>
+          {isActiveTask ? (
+            <>
+              {isPaused ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={async () => setStatus(await resumeAdminDiscountUpdate())}
+                >
+                  <PlayCircle size={16} />
+                  Продолжить
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={async () => setStatus(await pauseAdminDiscountUpdate())}
+                >
+                  <Pause size={16} />
+                  Пауза
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={async () => {
+                  if (!window.confirm('Отменить обновление скидок? Парсер допишет текущий батч и остановится.')) return
+                  setStatus(await cancelAdminDiscountUpdate())
+                }}
+              >
+                <X size={16} />
+                Отменить
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn-secondary"
+                disabled={Boolean(isStarting)}
+                onClick={() => handleStart(true)}
+              >
+                <Play size={16} className={isStarting === 'test' ? 'animate-spin' : ''} />
+                Тест 10 товаров
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={Boolean(isStarting)}
+                onClick={() => handleStart(false)}
+              >
+                <RefreshCw size={16} className={isStarting === 'full' ? 'animate-spin' : ''} />
+                Обновить скидки
+              </button>
+            </>
+          )}
         </div>
       }
     >
@@ -398,6 +440,8 @@ function statusLabel(status: AdminDiscountUpdateStatus | null) {
   if (!status || status.status === 'idle') return 'Не запущено'
   if (status.status === 'pending') return 'В очереди'
   if (status.status === 'running') return status.mode === 'test' ? 'Тестовый парсинг идёт' : 'Обновление идёт'
+  if (status.status === 'paused') return 'На паузе'
+  if (status.status === 'cancelled') return 'Отменено'
   if (status.status === 'completed') return 'Завершено'
   return 'Ошибка'
 }

@@ -3,6 +3,7 @@ import type {
   AdminDiscountUpdateStatus,
   AdminHelpContent,
   AdminHelpContentPayload,
+  AdminPriceUpdateStatus,
   AdminProductDetails,
   AdminProductListResponse,
   AdminProductManualParsePayload,
@@ -68,6 +69,7 @@ export async function fetchAdminProducts(params: {
   category?: string
   sort?: string
   missing_region?: string
+  missing_localization?: boolean
 }) {
   const response = await apiClient.get<AdminProductListResponse>('/site/admin/products', { params })
   return response.data
@@ -97,6 +99,51 @@ export async function startAdminDiscountUpdate(test: boolean) {
 
 export async function fetchAdminDiscountUpdateStatus() {
   const response = await apiClient.get<AdminDiscountUpdateStatus>('/site/admin/discounts/update/status')
+  return response.data
+}
+
+export async function pauseAdminDiscountUpdate() {
+  const response = await apiClient.post<AdminDiscountUpdateStatus>('/site/admin/discounts/update/pause')
+  return response.data
+}
+
+export async function resumeAdminDiscountUpdate() {
+  const response = await apiClient.post<AdminDiscountUpdateStatus>('/site/admin/discounts/update/resume')
+  return response.data
+}
+
+export async function cancelAdminDiscountUpdate() {
+  const response = await apiClient.post<AdminDiscountUpdateStatus>('/site/admin/discounts/update/cancel')
+  return response.data
+}
+
+// ── Обновление цен ──────────────────────────────────────────────────────────
+export async function startAdminPriceUpdate(test: boolean) {
+  const response = await apiClient.post<AdminPriceUpdateStatus>(
+    '/site/admin/prices/update',
+    undefined,
+    { params: { test }, timeout: 0 },
+  )
+  return response.data
+}
+
+export async function fetchAdminPriceUpdateStatus() {
+  const response = await apiClient.get<AdminPriceUpdateStatus>('/site/admin/prices/update/status')
+  return response.data
+}
+
+export async function pauseAdminPriceUpdate() {
+  const response = await apiClient.post<AdminPriceUpdateStatus>('/site/admin/prices/update/pause')
+  return response.data
+}
+
+export async function resumeAdminPriceUpdate() {
+  const response = await apiClient.post<AdminPriceUpdateStatus>('/site/admin/prices/update/resume')
+  return response.data
+}
+
+export async function cancelAdminPriceUpdate() {
+  const response = await apiClient.post<AdminPriceUpdateStatus>('/site/admin/prices/update/cancel')
   return response.data
 }
 

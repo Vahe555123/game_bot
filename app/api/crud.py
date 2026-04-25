@@ -125,6 +125,9 @@ class ProductCRUD:
         if normalized in {'rating', 'rating_desc', 'top_rated', 'score', 'score_desc'}:
             return 'rating_desc'
 
+        if normalized in {'discount', 'discount_desc', 'sale', 'sale_desc', 'best_discount'}:
+            return 'discount_desc'
+
         return 'popular'
 
     @staticmethod
@@ -177,6 +180,107 @@ class ProductCRUD:
             )
 
         return query
+
+    @staticmethod
+    def _build_product_priority_expression(type_expr, category_expr):
+        normalized_type = func.lower(func.coalesce(type_expr, ''))
+        normalized_category = func.lower(func.coalesce(category_expr, ''))
+
+        return case(
+            (
+                or_(
+                    normalized_type.like('%дополн%'),
+                    normalized_type.like('%dlc%'),
+                    normalized_type.like('%add-on%'),
+                    normalized_type.like('%addon%'),
+                    normalized_type.like('%валют%'),
+                    normalized_type.like('%currency%'),
+                    normalized_type.like('%виртуальн%'),
+                    normalized_category.like('%дополн%'),
+                    normalized_category.like('%доп. материал%'),
+                    normalized_category.like('%виртуальн%'),
+                    normalized_category.like('%валют%'),
+                ),
+                2,
+            ),
+            (
+                or_(
+                    normalized_type.like('%игра%'),
+                    normalized_type.like('%game%'),
+                    normalized_type.like('%bundle%'),
+                    normalized_type.like('%набор%'),
+                    normalized_type.like('%предзаказ%'),
+                ),
+                0,
+            ),
+            else_=1,
+        )
+
+    @staticmethod
+    def _should_prioritize_games_first(filters: ProductFilter, sort_mode: str) -> bool:
+        product_kind = (getattr(filters, 'product_kind', None) or '').strip().lower()
+        if product_kind == 'dlc':
+            return False
+
+        has_search = bool((getattr(filters, 'search', None) or '').strip())
+        return has_search or sort_mode == 'rating_desc'
+
+    @staticmethod
+    def _build_local_players_info_filter(info_expr, patterns: List[str]):
+        return or_(*(info_expr.ilike(pattern) for pattern in patterns))
+
+    @staticmethod
+    def _build_players_filter(info_expr, players_min_expr, players_max_expr, players_filter: str):
+        coop_patterns = [
+            r'%\u0418\u0433\u0440\u043e\u043a\u0438: 1 - 2%',
+            r'%\u0418\u0433\u0440\u043e\u043a\u0438: 2 - 4%',
+            r'%\u0418\u0433\u0440\u043e\u043a\u0438: 1 - 4%',
+            r'%\u0418\u0433\u0440\u043e\u043a\u0438: 2 - 8%',
+            '%Игроки: 1 - 2%',
+            '%Игроки: 2 - 4%',
+            '%Игроки: 1 - 4%',
+            '%Игроки: 2 - 8%',
+        ]
+        coop_info_filter = ProductCRUD._build_local_players_info_filter(info_expr, coop_patterns)
+
+        if players_filter == 'singleplayer':
+            singleplayer_patterns = [
+                r'%1 \u0438\u0433\u0440\u043e\u043a%',
+                '%1 игрок%',
+                r'%\u0418\u0433\u0440\u043e\u043a\u0438: 1%',
+                '%Игроки: 1%',
+            ]
+            singleplayer_info_filter = ProductCRUD._build_local_players_info_filter(info_expr, singleplayer_patterns)
+            return or_(
+                and_(
+                    players_min_expr == 1,
+                    or_(
+                        players_max_expr.is_(None),
+                        players_max_expr <= 1,
+                    ),
+                ),
+                and_(
+                    singleplayer_info_filter,
+                    ~coop_info_filter,
+                ),
+            )
+
+        if players_filter == 'coop':
+            return or_(
+                and_(
+                    players_max_expr.isnot(None),
+                    players_max_expr > 1,
+                ),
+                coop_info_filter,
+            )
+
+        return None
+
+    @staticmethod
+    def _prepend_product_priority_sort(order_columns, filters: ProductFilter, sort_mode: str, priority_column):
+        if ProductCRUD._should_prioritize_games_first(filters, sort_mode):
+            return [priority_column.asc(), *order_columns]
+        return list(order_columns)
 
     @staticmethod
     def _apply_search_filter(query, search: Optional[str]):
@@ -907,6 +1011,68 @@ class ProductCRUD:
         )
 
     @staticmethod
+    def _build_row_discount_expression():
+        def _build_discount_case(region_code, current_price_column, old_price_column, ps_plus_price_column):
+            regular_discount = case(
+                (
+                    and_(
+                        Product.region == region_code,
+                        current_price_column.isnot(None),
+                        old_price_column.isnot(None),
+                        current_price_column > 0,
+                        old_price_column > 0,
+                        old_price_column > current_price_column,
+                    ),
+                    ((old_price_column - current_price_column) * 100.0) / old_price_column,
+                ),
+                else_=None,
+            )
+            ps_plus_discount = case(
+                (
+                    and_(
+                        Product.region == region_code,
+                        ps_plus_price_column.isnot(None),
+                        old_price_column.isnot(None),
+                        ps_plus_price_column > 0,
+                        old_price_column > 0,
+                        old_price_column > ps_plus_price_column,
+                    ),
+                    ((old_price_column - ps_plus_price_column) * 100.0) / old_price_column,
+                ),
+                else_=None,
+            )
+
+            return case(
+                (
+                    or_(
+                        regular_discount.isnot(None),
+                        ps_plus_discount.isnot(None),
+                    ),
+                    func.max(
+                        func.coalesce(regular_discount, 0.0),
+                        func.coalesce(ps_plus_discount, 0.0),
+                    ),
+                ),
+                else_=None,
+            )
+
+        return case(
+            (
+                Product.region == 'TR',
+                _build_discount_case('TR', Product.price_try, Product.old_price_try, Product.ps_plus_price_try),
+            ),
+            (
+                Product.region == 'IN',
+                _build_discount_case('IN', Product.price_inr, Product.old_price_inr, Product.ps_plus_price_inr),
+            ),
+            (
+                Product.region == 'UA',
+                _build_discount_case('UA', Product.price_uah, Product.old_price_uah, Product.ps_plus_price_uah),
+            ),
+            else_=None,
+        )
+
+    @staticmethod
     def _select_product_variant(
         candidates: List[Product],
         requested_region: Optional[str] = None,
@@ -1264,10 +1430,13 @@ class ProductCRUD:
             'min_price_rub': min_price,
             'price_try': product.price_try,
             'old_price_try': product.old_price_try,
+            'ps_plus_price_try': product.ps_plus_price_try,
             'price_inr': product.price_inr,
             'old_price_inr': product.old_price_inr,
+            'ps_plus_price_inr': product.ps_plus_price_inr,
             'price_uah': product.price_uah,
             'old_price_uah': product.old_price_uah,
+            'ps_plus_price_uah': product.ps_plus_price_uah,
             'rub_price': min_price,
             'rub_price_old': min_price_old,
         }
@@ -1421,10 +1590,13 @@ class ProductCRUD:
             # Оригинальные цены в валютах регионов
             'price_try': product.price_try,
             'old_price_try': product.old_price_try,
+            'ps_plus_price_try': product.ps_plus_price_try,
             'price_inr': product.price_inr,
             'old_price_inr': product.old_price_inr,
+            'ps_plus_price_inr': product.ps_plus_price_inr,
             'price_uah': product.price_uah,
             'old_price_uah': product.old_price_uah,
+            'ps_plus_price_uah': product.ps_plus_price_uah,
             # Цена в рублях (минимальная)
             'rub_price': min_price,
             'rub_price_old': min_price_old
@@ -1734,7 +1906,29 @@ class ProductCRUD:
                 )
 
         if filters.players:
-            players_filter = filters.players.lower()
+            players_condition = ProductCRUD._build_players_filter(
+                ProductCard.info,
+                ProductCard.players_min,
+                ProductCard.players_max,
+                filters.players.lower(),
+            )
+            if players_condition is not None:
+                query = query.filter(players_condition)
+                filters.players = None
+
+        if filters.players:
+            players_condition = ProductCRUD._build_players_filter(
+                Product.info,
+                Product.players_min,
+                Product.players_max,
+                filters.players.lower(),
+            )
+            if players_condition is not None:
+                query = query.filter(players_condition)
+                filters.players = None
+                players_filter = ''
+            else:
+                players_filter = filters.players.lower()
             if players_filter == 'singleplayer':
                 query = query.filter(
                     and_(
@@ -1846,56 +2040,67 @@ class ProductCRUD:
         total = query.with_entities(func.count(ProductCard.card_id)).scalar() or 0
 
         sort_mode = ProductCRUD._normalize_sort_mode(getattr(filters, 'sort', None))
+        product_priority_column = ProductCRUD._build_product_priority_expression(ProductCard.type, ProductCard.category)
         null_prices_last = case((price_column.is_(None), 1), else_=0)
         null_added_last = case((ProductCard.added_at.is_(None), 1), else_=0)
         null_release_last = case((ProductCard.release_date.is_(None), 1), else_=0)
         null_rating_last = case((ProductCard.rating.is_(None), 1), else_=0)
+        null_discount_last = case((ProductCard.max_discount_percent.is_(None), 1), else_=0)
         if sort_mode == 'price_desc':
-            query = query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_prices_last.asc(),
                 price_column.desc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'price_asc':
-            query = query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_prices_last.asc(),
                 price_column.asc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'alphabet':
-            query = query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'added_desc':
-            query = query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_added_last.asc(),
                 ProductCard.added_at.desc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'release_desc':
-            query = query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_release_last.asc(),
                 ProductCard.release_date.desc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'rating_desc':
-            query = query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_rating_last.asc(),
                 ProductCard.rating.desc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
+        elif sort_mode == 'discount_desc':
+            order_columns = ProductCRUD._prepend_product_priority_sort([
+                null_discount_last.asc(),
+                ProductCard.max_discount_percent.desc(),
+                ProductCard.sort_name.asc(),
+                ProductCard.card_id.asc(),
+            ], filters, sort_mode, product_priority_column)
         else:  # popular
-            query = query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 func.coalesce(ProductCard.favorites_count, 0).desc(),
                 ProductCard.sort_name.asc(),
                 ProductCard.card_id.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
+
+        query = query.order_by(*order_columns)
 
         offset = max(pagination.page - 1, 0) * pagination.limit
         page_cards = query.offset(offset).limit(pagination.limit).all()
@@ -2009,10 +2214,13 @@ class ProductCRUD:
             'min_price_rub': card.min_price_rub,
             'price_try': card.tr_price_try,
             'old_price_try': card.tr_old_price_try,
+            'ps_plus_price_try': card.tr_ps_plus_price_try,
             'price_inr': card.in_price_inr,
             'old_price_inr': card.in_old_price_inr,
+            'ps_plus_price_inr': card.in_ps_plus_price_inr,
             'price_uah': card.ua_price_uah,
             'old_price_uah': card.ua_old_price_uah,
+            'ps_plus_price_uah': card.ua_ps_plus_price_uah,
             'rub_price': card.min_price_rub,
             'rub_price_old': card.min_old_price_rub,
         }
@@ -2104,7 +2312,18 @@ class ProductCRUD:
         if filters.players:
             # Фильтр по количеству игроков - ищем в поле info (дополнительная информация)
             # В базе формат: "Игроки: 1 - 2" в Unicode escape
-            players_filter = filters.players.lower()
+            players_condition = ProductCRUD._build_players_filter(
+                Product.info,
+                Product.players_min,
+                Product.players_max,
+                filters.players.lower(),
+            )
+            if players_condition is not None:
+                query = query.filter(players_condition)
+                filters.players = None
+                players_filter = ''
+            else:
+                players_filter = filters.players.lower()
             if players_filter == 'singleplayer':
                 # Одиночные игры - ищем "1 игрок" НО исключаем "Игроки: 1 - 2" (это кооп)
                 query = query.filter(
@@ -2225,10 +2444,14 @@ class ProductCRUD:
         sort_name_column = func.min(
             func.lower(func.coalesce(Product.main_name, Product.name, Product.id))
         ).label('sort_name')
+        product_priority_column = func.min(
+            ProductCRUD._build_product_priority_expression(Product.type, Product.category)
+        ).label('product_priority')
         favorites_count_column = func.coalesce(favorites_subquery.c.favorites_count, 0).label('favorites_count')
         added_at_column = func.max(Product.created_at).label('added_at')
         release_date_column = func.max(Product.release_date).label('release_date')
         rating_column = func.max(Product.rating).label('rating')
+        max_discount_column = func.max(ProductCRUD._build_row_discount_expression()).label('max_discount')
         price_filter_currency = (getattr(filters, 'price_currency', None) or 'RUB').upper()
         row_price_column = ProductCRUD._build_row_price_expression(db, price_filter_currency)
         min_price_filter_column = func.min(row_price_column).label('min_price_filter')
@@ -2236,16 +2459,19 @@ class ProductCRUD:
         null_added_last_column = case((added_at_column.is_(None), 1), else_=0)
         null_release_last_column = case((release_date_column.is_(None), 1), else_=0)
         null_rating_last_column = case((rating_column.is_(None), 1), else_=0)
+        null_discount_last_column = case((max_discount_column.is_(None), 1), else_=0)
 
         grouped_query = (
             query.outerjoin(favorites_subquery, favorites_subquery.c.product_id == Product.id)
             .with_entities(
                 product_id_column,
                 sort_name_column,
+                product_priority_column,
                 favorites_count_column,
                 added_at_column,
                 release_date_column,
                 rating_column,
+                max_discount_column,
                 min_price_filter_column,
                 min_localization_rank_column,
             )
@@ -2264,48 +2490,60 @@ class ProductCRUD:
         total = db.query(func.count()).select_from(grouped_query.order_by(None).subquery()).scalar() or 0
 
         if sort_mode == 'price_desc':
-            grouped_query = grouped_query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_prices_last_column.asc(),
                 min_price_filter_column.desc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'price_asc':
-            grouped_query = grouped_query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_prices_last_column.asc(),
                 min_price_filter_column.asc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'alphabet':
-            grouped_query = grouped_query.order_by(sort_name_column.asc(), product_id_column.asc())
+            order_columns = ProductCRUD._prepend_product_priority_sort([
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'added_desc':
-            grouped_query = grouped_query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_added_last_column.asc(),
                 added_at_column.desc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'release_desc':
-            grouped_query = grouped_query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_release_last_column.asc(),
                 release_date_column.desc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
         elif sort_mode == 'rating_desc':
-            grouped_query = grouped_query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 null_rating_last_column.asc(),
                 rating_column.desc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
+        elif sort_mode == 'discount_desc':
+            order_columns = ProductCRUD._prepend_product_priority_sort([
+                null_discount_last_column.asc(),
+                max_discount_column.desc(),
+                sort_name_column.asc(),
+                product_id_column.asc(),
+            ], filters, sort_mode, product_priority_column)
         else:
-            grouped_query = grouped_query.order_by(
+            order_columns = ProductCRUD._prepend_product_priority_sort([
                 favorites_count_column.desc(),
                 sort_name_column.asc(),
                 product_id_column.asc(),
-            )
+            ], filters, sort_mode, product_priority_column)
+
+        grouped_query = grouped_query.order_by(*order_columns)
 
         page_rows = (
             grouped_query

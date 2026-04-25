@@ -52,6 +52,15 @@ export type RawCatalogProduct = {
   rub_price?: number | null
   rub_price_old?: number | null
   min_price_rub?: number | null
+  price_try?: number | null
+  old_price_try?: number | null
+  ps_plus_price_try?: number | null
+  price_inr?: number | null
+  old_price_inr?: number | null
+  ps_plus_price_inr?: number | null
+  price_uah?: number | null
+  old_price_uah?: number | null
+  ps_plus_price_uah?: number | null
   favorites_count?: number | null
   regional_prices?: RawRegionalPrice[] | null
   tags?: string[] | null
@@ -116,6 +125,15 @@ export type CatalogProduct = {
   displayPrice: string | null
   displayOldPrice: string | null
   regionalPrices: ProductRegionPrice[]
+  priceTry?: number | null
+  oldPriceTry?: number | null
+  psPlusPriceTry?: number | null
+  priceInr?: number | null
+  oldPriceInr?: number | null
+  psPlusPriceInr?: number | null
+  priceUah?: number | null
+  oldPriceUah?: number | null
+  psPlusPriceUah?: number | null
   tags: string[]
   compound: string[]
   info: string[]

@@ -7,7 +7,6 @@ import {
   PLATFORM_OPTIONS,
   PRICE_CURRENCY_OPTIONS,
   PRODUCT_KIND_OPTIONS,
-  SORT_OPTIONS,
   hasActiveCatalogFilters,
 } from '../../utils/catalogFilters'
 
@@ -61,9 +60,7 @@ export function CatalogFilters({
 
   return (
     <div className={clsx('space-y-3', className)}>
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        <SelectField value={draftFilters.sort} options={SORT_OPTIONS} onChange={(sort) => onDraftChange({ sort })} />
-
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <SelectField
           value={draftFilters.productKind}
           options={PRODUCT_KIND_OPTIONS}

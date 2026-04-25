@@ -5587,6 +5587,13 @@ DISCOUNT_UPDATE_SLEEP_SECONDS = float(os.getenv("DISCOUNT_UPDATE_SLEEP_SECONDS",
 DISCOUNT_CLEAR_BATCH_SIZE = int(os.getenv("DISCOUNT_CLEAR_BATCH_SIZE", "200") or "200")
 DISCOUNT_DB_WRITE_PAUSE_SECONDS = float(os.getenv("DISCOUNT_DB_WRITE_PAUSE_SECONDS", "0.2") or "0.2")
 
+# Обновление цен для всех товаров из products.pkl (run_price_update).
+PRICE_UPDATE_TEST_LIMIT = 10
+PRICE_UPDATE_BATCH_SIZE = int(os.getenv("PRICE_UPDATE_BATCH_SIZE", "5") or "5")
+PRICE_UPDATE_SAVE_INTERVAL = int(os.getenv("PRICE_UPDATE_SAVE_INTERVAL", "100") or "100")
+PRICE_UPDATE_SLEEP_SECONDS = float(os.getenv("PRICE_UPDATE_SLEEP_SECONDS", "1.5") or "1.5")
+PRICE_UPDATE_PRODUCTS_PATH = os.getenv("PRICE_UPDATE_PRODUCTS_PATH", "products.pkl")
+
 
 def _normalize_discount_category_url(url: str = DISCOUNT_CATEGORY_URL) -> str:
     cleaned = (url or DISCOUNT_CATEGORY_URL).strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
@@ -5594,6 +5601,68 @@ def _normalize_discount_category_url(url: str = DISCOUNT_CATEGORY_URL) -> str:
     if parts and parts[-1].isdigit():
         cleaned = "/".join(parts[:-1])
     return cleaned
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  УПРАВЛЕНИЕ ФОНОВЫМИ ЗАДАЧАМИ (пауза/продолжить/отмена)
+#  Используется и для discount_update, и для price_update.
+# ──────────────────────────────────────────────────────────────────────────────
+class UpdateControl:
+    """
+    Простой control-state для паузы/возобновления/отмены фоновой задачи парсера.
+
+    Использование (со стороны парсера, между батчами):
+        if await control.should_cancel():
+            break  # парсер выходит из цикла, делает финальный flush
+
+    Состояния:
+      - 'running'           — обычная работа
+      - 'paused'            — парсер ждёт на _resumed.wait()
+      - 'cancel_requested'  — парсер должен корректно завершиться
+    """
+
+    def __init__(self) -> None:
+        self.state: str = "running"
+        # Event "разрешает" продолжать. set() = бежим, clear() = ждём (paused).
+        self._resumed: asyncio.Event = asyncio.Event()
+        self._resumed.set()
+
+    @property
+    def is_paused(self) -> bool:
+        return self.state == "paused"
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.state == "cancel_requested"
+
+    def pause(self) -> bool:
+        if self.state == "cancel_requested":
+            return False
+        self.state = "paused"
+        self._resumed.clear()
+        return True
+
+    def resume(self) -> bool:
+        if self.state == "cancel_requested":
+            return False
+        self.state = "running"
+        self._resumed.set()
+        return True
+
+    def cancel(self) -> None:
+        self.state = "cancel_requested"
+        # Разблокируем любую паузу, чтобы парсер увидел отмену.
+        self._resumed.set()
+
+    async def wait_if_paused(self) -> None:
+        """Блокируется пока state == 'paused'. Возвращается сразу при cancel или running."""
+        if self.state == "paused":
+            await self._resumed.wait()
+
+    async def should_cancel(self) -> bool:
+        """Удобный one-call для парсера: подождать паузу и сказать, надо ли отменить."""
+        await self.wait_if_paused()
+        return self.is_cancelled
 
 
 def _discount_progress_payload(
@@ -5988,8 +6057,13 @@ async def run_discount_update(
     limit: Optional[int] = None,
     category_url: str = DISCOUNT_CATEGORY_URL,
     progress_callback=None,
+    control: Optional[UpdateControl] = None,
 ) -> dict[str, Any]:
-    """Очищает старые скидки и обновляет их из sale-раздела PlayStation Store."""
+    """Очищает старые скидки и обновляет их из sale-раздела PlayStation Store.
+
+    control (UpdateControl) — опциональная пауза/возобновление/отмена. Парсер
+    проверяет состояние перед каждым батчем и корректно завершается при cancel.
+    """
     started = perf_counter()
     test_mode = bool(limit)
     normalized_limit = int(limit) if limit else None
@@ -6063,6 +6137,7 @@ async def run_discount_update(
         return {
             "message": message,
             "mode": "test" if test_mode else "full",
+            "cancelled": False,
             "total_products": 0,
             "processed": 0,
             "saved": 0,
@@ -6098,7 +6173,14 @@ async def run_discount_update(
         timeout=aiohttp.ClientTimeout(total=180, connect=30),
         connector=connector,
     ) as session:
+        cancelled_early = False
         for i in range(0, total_products, batch_size):
+            # Проверка пауза/отмена перед каждым батчем.
+            if control is not None:
+                if await control.should_cancel():
+                    cancelled_early = True
+                    break
+
             batch_urls = product_urls[i : min(total_products, i + batch_size)]
 
             async def _parse_discount_url(url: str) -> list[dict]:
@@ -6168,6 +6250,15 @@ async def run_discount_update(
             )
             await asyncio.sleep(sleep_seconds)
 
+        # Если cancel прилетел во время цикла — flush того, что накопилось.
+        if cancelled_early and pending_save_records:
+            saved = await save_batch_to_db(pending_save_records, promo, clear_db=False)
+            product_ids = [r.get("id") for r in pending_save_records if r.get("id")]
+            await refresh_product_cards_after_save(product_ids, full_rebuild=False)
+            _update_manual_result_cache(existing_result, pending_save_records)
+            saved_total += saved
+            pending_save_records = []
+
     notification_summary: dict[str, int] = {}
     discounted_product_ids = sorted(
         {
@@ -6221,16 +6312,24 @@ async def run_discount_update(
         )
 
     elapsed = perf_counter() - started
-    message = (
-        f"Обновление скидок завершено: обработано {processed}/{total_products}, "
-        f"сохранено {saved_total} строк за {elapsed / 60:.1f} мин."
-    )
+    if cancelled_early:
+        message = (
+            f"Обновление скидок отменено пользователем: обработано {processed}/{total_products}, "
+            f"сохранено {saved_total} строк за {elapsed / 60:.1f} мин."
+        )
+        final_status = "cancelled"
+    else:
+        message = (
+            f"Обновление скидок завершено: обработано {processed}/{total_products}, "
+            f"сохранено {saved_total} строк за {elapsed / 60:.1f} мин."
+        )
+        final_status = "completed"
     parse_logger.log_summary(total_products=total_products, parsed_count=len(all_final_records))
     await _emit_discount_progress(
         progress_callback,
         _discount_progress_payload(
-            status="completed",
-            phase="completed",
+            status=final_status,
+            phase=final_status,
             message=message,
             total=total_products,
             processed=processed,
@@ -6246,6 +6345,7 @@ async def run_discount_update(
     return {
         "message": message,
         "mode": "test" if test_mode else "full",
+        "cancelled": cancelled_early,
         "total_products": total_products,
         "processed": processed,
         "saved": saved_total,
@@ -6258,6 +6358,265 @@ async def run_discount_update(
             for key, value in url_result.items()
             if key != "product_urls"
         },
+        "elapsed_seconds": elapsed,
+    }
+
+
+async def run_price_update(
+    *,
+    limit: Optional[int] = None,
+    products_path: str = PRICE_UPDATE_PRODUCTS_PATH,
+    progress_callback=None,
+    control: Optional[UpdateControl] = None,
+) -> dict[str, Any]:
+    """
+    Обновление цен по всем товарам из products.pkl.
+
+    В отличие от run_discount_update:
+      - источник URL — products.pkl (а не sale-категория PS Store)
+      - не чистит discount-поля
+      - чекпоинт result.pkl каждые PRICE_UPDATE_SAVE_INTERVAL товаров
+      - поддерживает пауза/возобновление/отмена через UpdateControl
+
+    Лог-формат и payload идентичны discount_update — фронт уже умеет с этим жить.
+    """
+    started = perf_counter()
+    test_mode = bool(limit)
+    normalized_limit = int(limit) if limit else None
+    if normalized_limit is not None and normalized_limit <= 0:
+        normalized_limit = None
+        test_mode = False
+
+    await ensure_database_schema()
+    await currency_converter.load_rates()
+
+    # 1. Загрузка списка URL.
+    abs_products_path = products_path if os.path.isabs(products_path) else str(PROJECT_ROOT / products_path)
+    if not os.path.exists(abs_products_path):
+        message = f"Файл {products_path} не найден — нечего обновлять."
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                status="failed",
+                phase="failed",
+                message=message,
+                logs=[message],
+                mode="test" if test_mode else "full",
+            ),
+        )
+        return {
+            "message": message,
+            "mode": "test" if test_mode else "full",
+            "cancelled": False,
+            "total_products": 0,
+            "processed": 0,
+            "saved": 0,
+            "failed": 0,
+            "elapsed_seconds": perf_counter() - started,
+        }
+
+    with open(abs_products_path, "rb") as f:
+        all_urls = pickle.load(f)
+    if not isinstance(all_urls, (list, tuple)):
+        message = f"{products_path}: неожиданный формат (не list)."
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                status="failed",
+                phase="failed",
+                message=message,
+                logs=[message],
+            ),
+        )
+        return {"message": message, "cancelled": False, "elapsed_seconds": perf_counter() - started}
+
+    # Берём только ru-ua URL — parse() сам построит TR/IN записи.
+    product_urls: list[str] = [u for u in all_urls if isinstance(u, str) and "/ru-ua/" in u]
+    if normalized_limit is not None:
+        product_urls = product_urls[:normalized_limit]
+    total_products = len(product_urls)
+
+    start_message = (
+        f"Запущено тестовое обновление цен: первые {total_products} товаров."
+        if test_mode
+        else f"Запущено полное обновление цен: {total_products} товаров из {products_path}."
+    )
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            phase="starting",
+            message=start_message,
+            total=total_products,
+            processed=0,
+            saved=0,
+            failed=0,
+            mode="test" if test_mode else "full",
+            logs=[start_message],
+        ),
+    )
+
+    if total_products == 0:
+        message = "Список товаров пуст — нечего обновлять."
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                status="completed",
+                phase="completed",
+                message=message,
+                total=0, processed=0, saved=0, failed=0,
+                percent=100,
+                logs=[message],
+            ),
+        )
+        return {
+            "message": message, "cancelled": False, "total_products": 0,
+            "processed": 0, "saved": 0, "failed": 0,
+            "elapsed_seconds": perf_counter() - started,
+        }
+
+    promo = await _load_manual_promo_cache()
+    existing_result = _load_manual_result_cache()
+    parse_logger = ParseLogger()
+
+    batch_size = max(1, PRICE_UPDATE_BATCH_SIZE)
+    save_interval = max(PRICE_UPDATE_SAVE_INTERVAL, batch_size)
+    sleep_seconds = max(PRICE_UPDATE_SLEEP_SECONDS, 0.5)
+
+    processed = 0
+    saved_total = 0
+    failed_total = 0
+    pending_save_records: list[dict] = []
+    cancelled_early = False
+
+    connector = aiohttp.TCPConnector(
+        limit=max(batch_size * 2, 6),
+        limit_per_host=max(batch_size, 4),
+        keepalive_timeout=15,
+        enable_cleanup_closed=True,
+        ttl_dns_cache=300,
+    )
+    async with aiohttp.ClientSession(
+        trust_env=True,
+        timeout=aiohttp.ClientTimeout(total=180, connect=30),
+        connector=connector,
+    ) as session:
+        for i in range(0, total_products, batch_size):
+            if control is not None:
+                if await control.should_cancel():
+                    cancelled_early = True
+                    break
+
+            batch_urls = product_urls[i : min(total_products, i + batch_size)]
+
+            async def _parse_price_url(url: str) -> list[dict]:
+                try:
+                    return await asyncio.wait_for(
+                        parse(session, url, regions=["UA", "TR", "IN"], logger=parse_logger),
+                        timeout=240.0,
+                    )
+                except asyncio.TimeoutError:
+                    parse_logger.log_product_error(url, "PRICE_TASK_TIMEOUT_240s")
+                    return []
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    raise
+                except Exception as exc:
+                    parse_logger.log_product_error(
+                        url,
+                        f"PRICE_TASK_EXCEPTION | {type(exc).__name__}: {str(exc)[:150]}",
+                    )
+                    return []
+
+            parsed_batches = await asyncio.gather(*[_parse_price_url(u) for u in batch_urls])
+            parsed_records = sum(parsed_batches, [])
+            final_records = _build_manual_final_records(parsed_records) if parsed_records else []
+
+            if final_records:
+                pending_save_records.extend(final_records)
+
+            empty_count = sum(1 for parsed in parsed_batches if not parsed)
+            failed_total += empty_count
+            processed += len(batch_urls)
+
+            should_flush = bool(pending_save_records) and (
+                processed >= total_products
+                or len(pending_save_records) >= save_interval
+            )
+            if should_flush:
+                records_to_save = pending_save_records
+                pending_save_records = []
+                saved = await save_batch_to_db(records_to_save, promo, clear_db=False)
+                product_ids = [r.get("id") for r in records_to_save if r.get("id")]
+                await refresh_product_cards_after_save(product_ids, full_rebuild=False)
+                _update_manual_result_cache(existing_result, records_to_save)
+                saved_total += saved
+
+            log_line = (
+                f"Цены: обработано {processed}/{total_products}; "
+                f"сохранено строк: {saved_total}; "
+                f"осталось: {max(total_products - processed, 0)}."
+            )
+            await _emit_discount_progress(
+                progress_callback,
+                _discount_progress_payload(
+                    phase="parse",
+                    message=log_line,
+                    total=total_products,
+                    processed=processed,
+                    saved=saved_total,
+                    failed=failed_total,
+                    logs=[log_line],
+                    batch_size=len(batch_urls),
+                    mode="test" if test_mode else "full",
+                ),
+            )
+            await asyncio.sleep(sleep_seconds)
+
+        # cancel в середине — flush остатка буфера
+        if cancelled_early and pending_save_records:
+            saved = await save_batch_to_db(pending_save_records, promo, clear_db=False)
+            product_ids = [r.get("id") for r in pending_save_records if r.get("id")]
+            await refresh_product_cards_after_save(product_ids, full_rebuild=False)
+            _update_manual_result_cache(existing_result, pending_save_records)
+            saved_total += saved
+            pending_save_records = []
+
+    elapsed = perf_counter() - started
+    if cancelled_early:
+        message = (
+            f"Обновление цен отменено пользователем: обработано {processed}/{total_products}, "
+            f"сохранено {saved_total} строк за {elapsed / 60:.1f} мин."
+        )
+        final_status = "cancelled"
+    else:
+        message = (
+            f"Обновление цен завершено: обработано {processed}/{total_products}, "
+            f"сохранено {saved_total} строк за {elapsed / 60:.1f} мин."
+        )
+        final_status = "completed"
+    parse_logger.log_summary(total_products=total_products, parsed_count=processed)
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            status=final_status,
+            phase=final_status,
+            message=message,
+            total=total_products,
+            processed=processed,
+            saved=saved_total,
+            failed=failed_total,
+            logs=[message],
+            mode="test" if test_mode else "full",
+        ),
+    )
+
+    return {
+        "message": message,
+        "mode": "test" if test_mode else "full",
+        "cancelled": cancelled_early,
+        "total_products": total_products,
+        "processed": processed,
+        "saved": saved_total,
+        "failed": failed_total,
         "elapsed_seconds": elapsed,
     }
 

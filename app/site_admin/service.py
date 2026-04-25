@@ -79,6 +79,15 @@ _discount_update_lock = asyncio.Lock()
 _discount_update_tasks: dict[str, dict[str, Any]] = {}
 _discount_update_current_task_id: Optional[str] = None
 _discount_update_tasks_lock = asyncio.Lock()
+# Control-state объект для текущей задачи обновления скидок (UpdateControl из parser).
+_discount_update_control: Any = None
+
+# То же для обновления цен.
+_price_update_lock = asyncio.Lock()
+_price_update_tasks: dict[str, dict[str, Any]] = {}
+_price_update_current_task_id: Optional[str] = None
+_price_update_tasks_lock = asyncio.Lock()
+_price_update_control: Any = None
 
 
 def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
@@ -582,6 +591,7 @@ class SiteAdminService:
         category: Optional[str] = None,
         sort: Optional[str] = None,
         missing_region: Optional[str] = None,
+        missing_localization: Optional[bool] = None,
     ) -> AdminProductListResponse:
         favorites_subquery = (
             db.query(
@@ -611,6 +621,13 @@ class SiteAdminService:
             query = query.filter(Product.region == region.strip().upper())
         if category:
             query = query.filter(Product.category == category.strip())
+        if missing_localization:
+            query = query.filter(
+                or_(
+                    Product.localization.is_(None),
+                    func.trim(Product.localization) == "",
+                )
+            )
 
         # Фильтр по отсутствующим регионам. Значения:
         #   "any" / "incomplete"  — у товара < 3 региональных строк;
@@ -1125,6 +1142,7 @@ class SiteAdminService:
         return _build_product_url_collection_cache_status(_load_products_pkl_urls())
 
     async def start_discount_update(self, *, test: bool = False) -> dict:
+        global _discount_update_current_task_id, _discount_update_control
         async with _discount_update_tasks_lock:
             active_task_id = _get_active_discount_update_task_id()
             if active_task_id:
@@ -1149,11 +1167,15 @@ class SiteAdminService:
                 "started_at": utcnow().isoformat(),
                 "completed_at": None,
                 "result": None,
+                "control_state": "running",
             }
             _discount_update_tasks[task_id] = status
-
-            global _discount_update_current_task_id
             _discount_update_current_task_id = task_id
+
+        # Создаём control объект (UpdateControl из parser).
+        from parser import UpdateControl  # локальный импорт чтобы не тянуть parser при импорте сервиса
+        control = UpdateControl()
+        _discount_update_control = control
 
         async def _run_discount_update() -> None:
             async with _discount_update_lock:
@@ -1174,16 +1196,19 @@ class SiteAdminService:
                     result = await run_discount_update(
                         limit=DISCOUNT_TEST_LIMIT if test else None,
                         progress_callback=_progress,
+                        control=control,
                     )
+                    final_status = "cancelled" if result.get("cancelled") else "completed"
                     await _update_discount_update_task(
                         task_id,
                         {
-                            "status": "completed",
-                            "phase": "completed",
+                            "status": final_status,
+                            "phase": final_status,
                             "message": result.get("message") or "Обновление скидок завершено.",
                             "completed_at": utcnow().isoformat(),
                             "result": result,
-                            "percent": 100,
+                            "percent": 100 if final_status == "completed" else None,
+                            "control_state": final_status,
                         },
                     )
                 except Exception as error:
@@ -1196,10 +1221,52 @@ class SiteAdminService:
                             "message": f"Обновление скидок не удалось: {type(error).__name__}: {error}",
                             "completed_at": utcnow().isoformat(),
                             "logs": [f"Ошибка: {type(error).__name__}: {error}"],
+                            "control_state": "failed",
                         },
                     )
+                finally:
+                    # control больше не нужен — позволим GC.
+                    global _discount_update_control
+                    _discount_update_control = None
 
         asyncio.create_task(_run_discount_update())
+        return await self.get_discount_update_status()
+
+    async def pause_discount_update(self) -> dict:
+        global _discount_update_control
+        if _discount_update_control is None or not _discount_update_control.pause():
+            return await self.get_discount_update_status()
+        async with _discount_update_tasks_lock:
+            tid = _discount_update_current_task_id
+            if tid and tid in _discount_update_tasks:
+                _discount_update_tasks[tid]["status"] = "paused"
+                _discount_update_tasks[tid]["control_state"] = "paused"
+                _discount_update_tasks[tid]["message"] = "Обновление скидок поставлено на паузу."
+        return await self.get_discount_update_status()
+
+    async def resume_discount_update(self) -> dict:
+        global _discount_update_control
+        if _discount_update_control is None or not _discount_update_control.resume():
+            return await self.get_discount_update_status()
+        async with _discount_update_tasks_lock:
+            tid = _discount_update_current_task_id
+            if tid and tid in _discount_update_tasks:
+                _discount_update_tasks[tid]["status"] = "running"
+                _discount_update_tasks[tid]["control_state"] = "running"
+                _discount_update_tasks[tid]["message"] = "Обновление скидок продолжено."
+        return await self.get_discount_update_status()
+
+    async def cancel_discount_update(self) -> dict:
+        global _discount_update_control
+        if _discount_update_control is not None:
+            _discount_update_control.cancel()
+        async with _discount_update_tasks_lock:
+            tid = _discount_update_current_task_id
+            if tid and tid in _discount_update_tasks:
+                _discount_update_tasks[tid]["control_state"] = "cancel_requested"
+                _discount_update_tasks[tid]["message"] = (
+                    "Запрошена отмена обновления скидок — парсер завершит текущий батч и сохранит прогресс."
+                )
         return await self.get_discount_update_status()
 
     async def get_discount_update_status(self) -> dict:
@@ -1209,6 +1276,138 @@ class SiteAdminService:
                 return dict(_discount_update_tasks[active_task_id])
 
         return _build_idle_discount_update_status()
+
+    # ── Обновление цен (по products.pkl) ──────────────────────────────────────
+    async def start_price_update(self, *, test: bool = False) -> dict:
+        global _price_update_current_task_id, _price_update_control
+        async with _price_update_tasks_lock:
+            active_task_id = _get_active_price_update_task_id()
+            if active_task_id:
+                return dict(_price_update_tasks[active_task_id])
+
+            task_id = uuid4().hex
+            status = {
+                "task_id": task_id,
+                "status": "pending",
+                "phase": "queued",
+                "message": "Обновление цен поставлено в очередь.",
+                "mode": "test" if test else "full",
+                "total": 10 if test else None,
+                "processed": 0,
+                "saved": 0,
+                "failed": 0,
+                "remaining": 10 if test else None,
+                "percent": 0,
+                "logs": [],
+                "started_at": utcnow().isoformat(),
+                "completed_at": None,
+                "result": None,
+                "control_state": "running",
+            }
+            _price_update_tasks[task_id] = status
+            _price_update_current_task_id = task_id
+
+        from parser import UpdateControl
+        control = UpdateControl()
+        _price_update_control = control
+
+        async def _run_price_update() -> None:
+            async with _price_update_lock:
+                try:
+                    from parser import PRICE_UPDATE_TEST_LIMIT, run_price_update
+
+                    async def _progress(payload: dict[str, Any]) -> None:
+                        await _update_price_update_task(task_id, payload)
+
+                    await _update_price_update_task(
+                        task_id,
+                        {
+                            "status": "running",
+                            "phase": "starting",
+                            "message": "Запускаем обновление цен PlayStation Store.",
+                        },
+                    )
+                    result = await run_price_update(
+                        limit=PRICE_UPDATE_TEST_LIMIT if test else None,
+                        progress_callback=_progress,
+                        control=control,
+                    )
+                    final_status = "cancelled" if result.get("cancelled") else "completed"
+                    await _update_price_update_task(
+                        task_id,
+                        {
+                            "status": final_status,
+                            "phase": final_status,
+                            "message": result.get("message") or "Обновление цен завершено.",
+                            "completed_at": utcnow().isoformat(),
+                            "result": result,
+                            "percent": 100 if final_status == "completed" else None,
+                            "control_state": final_status,
+                        },
+                    )
+                except Exception as error:
+                    logger.exception("Price update failed")
+                    await _update_price_update_task(
+                        task_id,
+                        {
+                            "status": "failed",
+                            "phase": "failed",
+                            "message": f"Обновление цен не удалось: {type(error).__name__}: {error}",
+                            "completed_at": utcnow().isoformat(),
+                            "logs": [f"Ошибка: {type(error).__name__}: {error}"],
+                            "control_state": "failed",
+                        },
+                    )
+                finally:
+                    global _price_update_control
+                    _price_update_control = None
+
+        asyncio.create_task(_run_price_update())
+        return await self.get_price_update_status()
+
+    async def pause_price_update(self) -> dict:
+        global _price_update_control
+        if _price_update_control is None or not _price_update_control.pause():
+            return await self.get_price_update_status()
+        async with _price_update_tasks_lock:
+            tid = _price_update_current_task_id
+            if tid and tid in _price_update_tasks:
+                _price_update_tasks[tid]["status"] = "paused"
+                _price_update_tasks[tid]["control_state"] = "paused"
+                _price_update_tasks[tid]["message"] = "Обновление цен поставлено на паузу."
+        return await self.get_price_update_status()
+
+    async def resume_price_update(self) -> dict:
+        global _price_update_control
+        if _price_update_control is None or not _price_update_control.resume():
+            return await self.get_price_update_status()
+        async with _price_update_tasks_lock:
+            tid = _price_update_current_task_id
+            if tid and tid in _price_update_tasks:
+                _price_update_tasks[tid]["status"] = "running"
+                _price_update_tasks[tid]["control_state"] = "running"
+                _price_update_tasks[tid]["message"] = "Обновление цен продолжено."
+        return await self.get_price_update_status()
+
+    async def cancel_price_update(self) -> dict:
+        global _price_update_control
+        if _price_update_control is not None:
+            _price_update_control.cancel()
+        async with _price_update_tasks_lock:
+            tid = _price_update_current_task_id
+            if tid and tid in _price_update_tasks:
+                _price_update_tasks[tid]["control_state"] = "cancel_requested"
+                _price_update_tasks[tid]["message"] = (
+                    "Запрошена отмена обновления цен — парсер завершит текущий батч и сохранит прогресс."
+                )
+        return await self.get_price_update_status()
+
+    async def get_price_update_status(self) -> dict:
+        async with _price_update_tasks_lock:
+            active_task_id = _price_update_current_task_id
+            if active_task_id and active_task_id in _price_update_tasks:
+                return dict(_price_update_tasks[active_task_id])
+        return _build_idle_price_update_status()
 
     def list_purchases(
         self,
@@ -1779,5 +1978,78 @@ def _build_idle_discount_update_status() -> dict[str, Any]:
         "started_at": None,
         "completed_at": None,
         "result": None,
+        "control_state": "idle",
+    }
+
+
+def _get_active_price_update_task_id() -> Optional[str]:
+    task_id = _price_update_current_task_id
+    if not task_id:
+        return None
+    task = _price_update_tasks.get(task_id)
+    if not task:
+        return None
+    if task.get("status") in {"pending", "running", "paused"}:
+        return task_id
+    return None
+
+
+async def _update_price_update_task(task_id: str, payload: dict[str, Any]) -> None:
+    async with _price_update_tasks_lock:
+        task = _price_update_tasks.get(task_id)
+        if task is None:
+            return
+
+        new_logs = payload.pop("logs", None)
+        if new_logs:
+            logs = list(task.get("logs") or [])
+            for entry in new_logs:
+                if isinstance(entry, dict):
+                    message = str(entry.get("message") or "")
+                    time_value = str(entry.get("time") or utcnow().isoformat())
+                else:
+                    message = str(entry)
+                    time_value = utcnow().isoformat()
+                if message:
+                    logs.append({"time": time_value, "message": message})
+            task["logs"] = logs[-200:]
+
+        task.update(payload)
+        task["task_id"] = task_id
+
+        total = task.get("total")
+        processed = task.get("processed")
+        if total is not None and processed is not None:
+            try:
+                total_int = int(total)
+                processed_int = int(processed)
+            except (TypeError, ValueError):
+                total_int = 0
+                processed_int = 0
+            task["remaining"] = max(total_int - processed_int, 0)
+            if total_int > 0:
+                task["percent"] = min(round(processed_int / total_int * 100), 100)
+            elif task.get("status") == "completed":
+                task["percent"] = 100
+
+
+def _build_idle_price_update_status() -> dict[str, Any]:
+    return {
+        "task_id": None,
+        "status": "idle",
+        "phase": "idle",
+        "message": "Обновление цен не запущено.",
+        "mode": None,
+        "total": None,
+        "processed": 0,
+        "saved": 0,
+        "failed": 0,
+        "remaining": None,
+        "percent": 0,
+        "logs": [],
+        "started_at": None,
+        "completed_at": None,
+        "result": None,
+        "control_state": "idle",
     }
 

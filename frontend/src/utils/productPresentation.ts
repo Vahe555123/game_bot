@@ -44,6 +44,16 @@ export function getVisibleRegionalPrices(product: CatalogProduct) {
     return sortedPrices
   }
 
+  const fallbackRegionalPrices: ProductRegionPrice[] = [
+    buildRegionalPriceFromProduct('TR', 'Турция', 'TRY', product.priceTry, product.oldPriceTry, product.psPlusPriceTry, product),
+    buildRegionalPriceFromProduct('IN', 'Индия', 'INR', product.priceInr, product.oldPriceInr, product.psPlusPriceInr, product),
+    buildRegionalPriceFromProduct('UA', 'Украина', 'UAH', product.priceUah, product.oldPriceUah, product.psPlusPriceUah, product),
+  ].filter((price): price is ProductRegionPrice => Boolean(price))
+
+  if (fallbackRegionalPrices.length > 0) {
+    return sortRegionalPrices(fallbackRegionalPrices)
+  }
+
   if (product.priceRub === null && product.oldPriceRub === null) {
     return []
   }
@@ -70,6 +80,59 @@ export function getVisibleRegionalPrices(product: CatalogProduct) {
       localizationName: product.localizationName,
     },
   ]
+}
+
+function buildRegionalPriceFromProduct(
+  region: string,
+  name: string,
+  currencyCode: string,
+  priceLocal: number | null | undefined,
+  oldPriceLocal: number | null | undefined,
+  psPlusPriceLocal: number | null | undefined,
+  product: Pick<CatalogProduct, 'localizationName' | 'hasDiscount' | 'discountPercent'>,
+): ProductRegionPrice | null {
+  const currentPrice = priceLocal ?? null
+  const oldPrice = oldPriceLocal ?? null
+  const psPlusPrice = psPlusPriceLocal ?? null
+
+  if (currentPrice === null && oldPrice === null && psPlusPrice === null) {
+    return null
+  }
+
+  const discountPercent =
+    typeof currentPrice === 'number' &&
+    typeof oldPrice === 'number' &&
+    oldPrice > currentPrice &&
+    oldPrice > 0
+      ? Math.round(((oldPrice - currentPrice) / oldPrice) * 100)
+      : null
+
+  const psPlusDiscountPercent =
+    typeof psPlusPrice === 'number' &&
+    typeof oldPrice === 'number' &&
+    oldPrice > psPlusPrice &&
+    oldPrice > 0
+      ? Math.round(((oldPrice - psPlusPrice) / oldPrice) * 100)
+      : null
+
+  return {
+    region,
+    label: region,
+    name,
+    currencyCode,
+    flag: null,
+    available: true,
+    priceLocal: currentPrice,
+    oldPriceLocal: oldPrice,
+    psPlusPriceLocal: psPlusPrice,
+    priceRub: null,
+    oldPriceRub: null,
+    psPlusPriceRub: null,
+    hasDiscount: Boolean(discountPercent || psPlusDiscountPercent || product.hasDiscount),
+    discountPercent: discountPercent ?? product.discountPercent ?? null,
+    psPlusDiscountPercent,
+    localizationName: product.localizationName ?? null,
+  }
 }
 
 function normalizeRegionCode(value?: string | null) {
@@ -222,6 +285,28 @@ export function getProductTitle(product: Pick<CatalogProduct, 'name' | 'mainName
   }
 
   return mainName || 'Без названия'
+}
+
+export function getProductVrLabel(product: Pick<CatalogProduct, 'info'>) {
+  const info = (product.info || []).join(' ').toUpperCase()
+  if (!info) {
+    return null
+  }
+
+  if (info.includes('VR2')) {
+    return 'VR2'
+  }
+
+  if (
+    info.includes('PS VR') ||
+    info.includes('PSVR') ||
+    info.includes('PLAYSTATION VR') ||
+    info.includes('PS CAMERA')
+  ) {
+    return 'VR1'
+  }
+
+  return null
 }
 
 export function getLocalizationPresentation(localizationName?: string | null): LocalizationPresentation {

@@ -121,7 +121,7 @@ export type AdminDiscountUpdateLogEntry = {
 
 export type AdminDiscountUpdateStatus = {
   task_id?: string | null
-  status: 'idle' | 'pending' | 'running' | 'completed' | 'failed'
+  status: 'idle' | 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed'
   phase?: string | null
   message: string
   mode?: 'test' | 'full' | string | null
@@ -137,6 +137,28 @@ export type AdminDiscountUpdateStatus = {
   started_at?: string | null
   completed_at?: string | null
   result?: Record<string, unknown> | null
+  control_state?: 'idle' | 'running' | 'paused' | 'cancel_requested' | 'cancelled' | 'completed' | 'failed' | string | null
+}
+
+// Обновление цен — структурно совместимо с discount-update,
+// без discount-специфичных полей (discount_records, notification_summary).
+export type AdminPriceUpdateStatus = {
+  task_id?: string | null
+  status: 'idle' | 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed'
+  phase?: string | null
+  message: string
+  mode?: 'test' | 'full' | string | null
+  total?: number | null
+  processed?: number | null
+  saved?: number | null
+  failed?: number | null
+  remaining?: number | null
+  percent?: number | null
+  logs?: AdminDiscountUpdateLogEntry[]
+  started_at?: string | null
+  completed_at?: string | null
+  result?: Record<string, unknown> | null
+  control_state?: 'idle' | 'running' | 'paused' | 'cancel_requested' | 'cancelled' | 'completed' | 'failed' | string | null
 }
 
 export type AdminProductManualParsePayload = {

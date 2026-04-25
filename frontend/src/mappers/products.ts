@@ -59,6 +59,122 @@ function normalizeRegionalPrice(price: RawRegionalPrice): ProductRegionPrice {
   }
 }
 
+function buildFallbackRegionalPrice(
+  region: 'TR' | 'IN' | 'UA',
+  raw: RawCatalogProduct,
+): ProductRegionPrice | null {
+  const meta = regionMeta[region]
+  if (!meta) {
+    return null
+  }
+
+  const priceFieldMap = {
+    TR: {
+      price: raw.price_try ?? null,
+      oldPrice: raw.old_price_try ?? null,
+      psPlusPrice: raw.ps_plus_price_try ?? null,
+    },
+    IN: {
+      price: raw.price_inr ?? null,
+      oldPrice: raw.old_price_inr ?? null,
+      psPlusPrice: raw.ps_plus_price_inr ?? null,
+    },
+    UA: {
+      price: raw.price_uah ?? null,
+      oldPrice: raw.old_price_uah ?? null,
+      psPlusPrice: raw.ps_plus_price_uah ?? null,
+    },
+  } as const
+
+  const priceData = priceFieldMap[region]
+  const priceLocal = priceData.price
+  const oldPriceLocal = priceData.oldPrice
+  const psPlusPriceLocal = priceData.psPlusPrice
+
+  if (
+    priceLocal === null &&
+    oldPriceLocal === null &&
+    psPlusPriceLocal === null
+  ) {
+    return null
+  }
+
+  const discountPercent =
+    typeof priceLocal === 'number' &&
+    typeof oldPriceLocal === 'number' &&
+    oldPriceLocal > priceLocal &&
+    oldPriceLocal > 0
+      ? Math.round(((oldPriceLocal - priceLocal) / oldPriceLocal) * 100)
+      : null
+
+  const psPlusDiscountPercent =
+    typeof psPlusPriceLocal === 'number' &&
+    typeof oldPriceLocal === 'number' &&
+    oldPriceLocal > psPlusPriceLocal &&
+    oldPriceLocal > 0
+      ? Math.round(((oldPriceLocal - psPlusPriceLocal) / oldPriceLocal) * 100)
+      : null
+
+  return {
+    region,
+    label: region,
+    name: meta.name,
+    currencyCode: meta.code,
+    flag: null,
+    available: true,
+    priceLocal,
+    oldPriceLocal,
+    psPlusPriceLocal,
+    priceRub: null,
+    oldPriceRub: null,
+    psPlusPriceRub: null,
+    hasDiscount: Boolean(discountPercent || psPlusDiscountPercent),
+    discountPercent,
+    psPlusDiscountPercent,
+    localizationName: raw.localization_name ?? null,
+  }
+}
+
+function mergeRegionalPrice(
+  existing: ProductRegionPrice,
+  fallback: ProductRegionPrice,
+): ProductRegionPrice {
+  return {
+    ...fallback,
+    ...existing,
+    flag: existing.flag ?? fallback.flag,
+    currencyCode: existing.currencyCode ?? fallback.currencyCode,
+    available: existing.available || fallback.available,
+    priceLocal: existing.priceLocal ?? fallback.priceLocal,
+    oldPriceLocal: existing.oldPriceLocal ?? fallback.oldPriceLocal,
+    psPlusPriceLocal: existing.psPlusPriceLocal ?? fallback.psPlusPriceLocal,
+    priceRub: existing.priceRub ?? fallback.priceRub,
+    oldPriceRub: existing.oldPriceRub ?? fallback.oldPriceRub,
+    psPlusPriceRub: existing.psPlusPriceRub ?? fallback.psPlusPriceRub,
+    hasDiscount: existing.hasDiscount || fallback.hasDiscount,
+    discountPercent: existing.discountPercent ?? fallback.discountPercent,
+    psPlusDiscountPercent: existing.psPlusDiscountPercent ?? fallback.psPlusDiscountPercent,
+    localizationName: existing.localizationName ?? fallback.localizationName,
+  }
+}
+
+function resolveRegionalPrices(raw: RawCatalogProduct) {
+  const mappedPrices = (raw.regional_prices || []).map(normalizeRegionalPrice)
+  const priceMap = new Map(mappedPrices.map((price) => [price.region, price]))
+
+  ;(['TR', 'IN', 'UA'] as const).forEach((region) => {
+    const fallbackPrice = buildFallbackRegionalPrice(region, raw)
+    if (!fallbackPrice) {
+      return
+    }
+
+    const existingPrice = priceMap.get(region)
+    priceMap.set(region, existingPrice ? mergeRegionalPrice(existingPrice, fallbackPrice) : fallbackPrice)
+  })
+
+  return Array.from(priceMap.values())
+}
+
 function pickPrimaryRegionalPrice(regionalPrices: ProductRegionPrice[]) {
   return regionalPrices
     .filter((price) => price.available && (typeof price.priceRub === 'number' || typeof price.psPlusPriceRub === 'number'))
@@ -120,7 +236,7 @@ function resolveDisplayPrice(raw: RawCatalogProduct, regionInfo: RegionInfo | nu
 }
 
 export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct {
-  const regionalPrices = (raw.regional_prices || []).map(normalizeRegionalPrice)
+  const regionalPrices = resolveRegionalPrices(raw)
   const primaryRegionalPrice = pickPrimaryRegionalPrice(regionalPrices)
   const regionInfo = normalizeRegionInfo(raw.region, raw.region_info)
   const price = resolveDisplayPrice(raw, regionInfo, primaryRegionalPrice)
@@ -157,6 +273,15 @@ export function normalizeCatalogProduct(raw: RawCatalogProduct): CatalogProduct 
     displayPrice: price.displayPrice,
     displayOldPrice: price.displayOldPrice,
     regionalPrices,
+    priceTry: raw.price_try ?? null,
+    oldPriceTry: raw.old_price_try ?? null,
+    psPlusPriceTry: raw.ps_plus_price_try ?? null,
+    priceInr: raw.price_inr ?? null,
+    oldPriceInr: raw.old_price_inr ?? null,
+    psPlusPriceInr: raw.ps_plus_price_inr ?? null,
+    priceUah: raw.price_uah ?? null,
+    oldPriceUah: raw.old_price_uah ?? null,
+    psPlusPriceUah: raw.ps_plus_price_uah ?? null,
     tags: ensureStringArray(raw.tags),
     compound: ensureStringArray(raw.compound),
     info: ensureStringArray(raw.info),
