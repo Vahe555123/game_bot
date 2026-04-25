@@ -1,4 +1,4 @@
-import { Search, SlidersHorizontal } from 'lucide-react'
+import { ArrowUpWideNarrow, Search, SlidersHorizontal } from 'lucide-react'
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -8,7 +8,7 @@ import { ProductSkeleton } from '../components/catalog/ProductSkeleton'
 import { useAuth } from '../context/AuthContext'
 import { fetchCatalog, fetchCategories } from '../services/catalog'
 import type { CatalogFilterState, CatalogProduct } from '../types/catalog'
-import { sanitizeCatalogFilters } from '../utils/catalogFilters'
+import { SORT_OPTIONS, sanitizeCatalogFilters } from '../utils/catalogFilters'
 
 const DEFAULT_FILTERS: CatalogFilterState = {
   page: 1,
@@ -357,6 +357,23 @@ export function CatalogPage() {
     }))
   }
 
+  function updateSort(sort: string) {
+    const nextFilters = {
+      ...filters,
+      sort,
+      search: draftSearch.trim(),
+      page: 1,
+      limit: DEFAULT_FILTERS.limit,
+    }
+
+    setDraftFilters((current) => ({
+      ...current,
+      sort,
+    }))
+    persistProductKind(nextFilters.productKind)
+    setSearchParams(buildSearchParams(nextFilters, { filtersOpen: isFiltersOpen }), { replace: true })
+  }
+
   function persistProductKind(productKind: string) {
     if (typeof window === 'undefined') {
       return
@@ -402,7 +419,7 @@ export function CatalogPage() {
   }
 
   return (
-    <div className="container pb-4 pt-3 md:pb-6 md:pt-4">
+    <div className="container pb-4 pt-[5px] md:pb-6 md:pt-[5px]">
       <section className="sticky top-[5.75rem] z-30 rounded-[26px] border border-white/10 bg-gradient-to-br from-slate-950/95 via-slate-900/92 to-sky-950/76 p-3 shadow-[0_24px_80px_rgba(8,18,34,0.38)] ring-1 ring-brand-300/10 backdrop-blur-xl md:top-28 md:rounded-[32px] md:p-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <label className={clsx('input-shell flex-1 shadow-[0_18px_50px_rgba(8,18,34,0.2)] sm:flex', isMobileSearchOpen ? 'flex' : 'hidden')}>
@@ -415,7 +432,7 @@ export function CatalogPage() {
             />
           </label>
 
-          <div className="flex w-full items-center justify-end gap-2 sm:w-auto md:gap-3">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 xl:w-auto xl:flex-nowrap md:gap-3">
             <button
               type="button"
               onClick={() => setIsMobileSearchOpen((value) => !value)}
@@ -433,6 +450,21 @@ export function CatalogPage() {
               <span className="font-semibold text-white">{total}</span> товаров
               {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
             </div>
+
+            <label className="hidden min-h-[44px] items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-sm text-white shadow-[0_18px_45px_rgba(8,18,34,0.18)] transition focus-within:border-brand-300/50 focus-within:bg-white/[0.07] md:flex">
+              <ArrowUpWideNarrow size={16} className="text-brand-200" />
+              <select
+                value={draftFilters.sort}
+                onChange={(event) => updateSort(event.target.value)}
+                className="min-h-[42px] min-w-[160px] bg-transparent text-sm text-white outline-none"
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value} className="bg-slate-950 text-white">
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
 
             <button type="button" onClick={() => setIsFiltersOpen((value) => !value)} className="btn-secondary">
               <SlidersHorizontal size={16} />

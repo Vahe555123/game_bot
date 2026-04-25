@@ -9,6 +9,7 @@ import {
   getProductPsPlusSavingsPercent,
   getProductRegularDiscountPercent,
   getProductTitle,
+  getProductVrLabel,
   getVisibleRegionalPrices,
 } from '../../utils/productPresentation'
 import { FavoriteButton } from './FavoriteButton'
@@ -26,13 +27,17 @@ export function ProductCard({ product }: ProductCardProps) {
 
   const imageUrl = normalizeImageUrl(product.image)
   const productUrl = `/catalog/${product.id}`
-  const catalogPath = location.pathname === '/catalog' ? `${location.pathname}${location.search}${location.hash}` : null
+  const catalogPath =
+    location.pathname === '/' || location.pathname === '/catalog'
+      ? `${location.pathname}${location.search}${location.hash}`
+      : null
   const regionalPrices = getVisibleRegionalPrices(product).slice(0, 3)
   const favoriteActive = isFavorite(product.id)
   const productTitle = getProductTitle(product)
   const psPlusSavingsPercent = getProductPsPlusSavingsPercent(product)
   const regularDiscountPercent = getProductRegularDiscountPercent(product)
   const localization = getProductLocalizationPresentation(product)
+  const vrLabel = getProductVrLabel(product)
 
   function handleFavoriteClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -94,6 +99,11 @@ export function ProductCard({ product }: ProductCardProps) {
           {product.platforms ? (
             <span className="pill border-white/10 bg-slate-950/85 px-2.5 py-1 text-[11px] text-slate-100 shadow-lg">
               {product.platforms}
+            </span>
+          ) : null}
+          {vrLabel ? (
+            <span className="pill border-white/10 bg-slate-950/85 px-2.5 py-1 text-[11px] text-slate-100 shadow-lg">
+              {vrLabel}
             </span>
           ) : null}
           <LocalizationBadge

@@ -60,7 +60,7 @@ export function CatalogFilters({
 
   return (
     <div className={clsx('space-y-3', className)}>
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-5">
         <SelectField
           value={draftFilters.productKind}
           options={PRODUCT_KIND_OPTIONS}
@@ -88,8 +88,8 @@ export function CatalogFilters({
         />
       </div>
 
-      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-12">
-        <label className="block lg:col-span-2 xl:col-span-2">
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-8">
+        <label className="block lg:col-span-2 xl:col-span-1">
           <input
             type="number"
             min="0"
@@ -101,7 +101,7 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="block lg:col-span-2 xl:col-span-2">
+        <label className="block lg:col-span-2 xl:col-span-1">
           <input
             type="number"
             min="0"
@@ -117,10 +117,10 @@ export function CatalogFilters({
           value={draftFilters.priceCurrency}
           options={PRICE_CURRENCY_OPTIONS}
           onChange={(priceCurrency) => onDraftChange({ priceCurrency })}
-          className="lg:col-span-2 xl:col-span-2"
+          className="lg:col-span-2 xl:col-span-1"
         />
 
-        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-2">
+        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-1">
           <span className="whitespace-nowrap">Только со скидкой</span>
           <input
             type="checkbox"
@@ -130,7 +130,7 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-2">
+        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-1">
           <span className="whitespace-nowrap">Доступно в PS Plus</span>
           <input
             type="checkbox"
@@ -140,7 +140,7 @@ export function CatalogFilters({
           />
         </label>
 
-        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-2">
+        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-1">
           <span className="whitespace-nowrap">Доступно в EA PLAY</span>
           <input
             type="checkbox"
@@ -150,12 +150,12 @@ export function CatalogFilters({
           />
         </label>
 
-        <div className="flex flex-col gap-2 sm:col-span-2 sm:flex-row sm:justify-end lg:col-span-6 xl:col-span-12">
+        <div className="grid gap-2 sm:col-span-2 lg:col-span-6 xl:col-span-2 xl:grid-cols-2">
           <button
             type="button"
             onClick={onReset}
             className={clsx(
-              'btn-secondary min-h-[46px] w-full justify-center px-4 text-sm sm:w-auto sm:min-w-[132px]',
+              'btn-secondary min-h-[46px] w-full justify-center px-4 text-sm',
               !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
             )}
           >
@@ -166,7 +166,7 @@ export function CatalogFilters({
           <button
             type="button"
             onClick={onApply}
-            className="btn-primary min-h-[46px] w-full justify-center px-5 text-sm sm:w-auto sm:min-w-[150px]"
+            className="btn-primary min-h-[46px] w-full justify-center px-5 text-sm"
           >
             <Check size={16} />
             Применить

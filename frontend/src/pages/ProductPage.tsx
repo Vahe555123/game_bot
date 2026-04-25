@@ -25,6 +25,7 @@ import type { CatalogProduct, ProductRegionPrice } from '../types/catalog'
 import type { SiteProfileResponse } from '../types/auth'
 import type { PurchaseOrder } from '../types/purchase'
 import { getApiErrorDetail, getApiErrorMessage } from '../utils/apiErrors'
+import { getLocalPlayersRangeFromInfo } from '../utils/catalogFilters'
 import {
   formatDualCurrencyInline,
   formatRating,
@@ -132,42 +133,26 @@ function getMissingCheckoutFields(
   return missingFields
 }
 
-function getPlayerWord(value: number) {
-  const absoluteValue = Math.abs(value) % 100
-  const lastDigit = absoluteValue % 10
-
-  if (absoluteValue >= 11 && absoluteValue <= 14) {
-    return 'игроков'
-  }
-
-  if (lastDigit === 1) {
-    return 'игрок'
-  }
-
-  if (lastDigit >= 2 && lastDigit <= 4) {
-    return 'игрока'
-  }
-
-  return 'игроков'
-}
-
 function resolvePlayersLabel(product: CatalogProduct) {
   const minPlayers = typeof product.playersMin === 'number' ? product.playersMin : null
   const maxPlayers = typeof product.playersMax === 'number' ? product.playersMax : null
 
   if (minPlayers !== null && maxPlayers !== null) {
-    if (minPlayers === maxPlayers) {
-      return `${minPlayers} ${getPlayerWord(minPlayers)}${product.playersOnline ? ' + онлайн' : ''}`
-    }
-
-    return `${minPlayers}-${maxPlayers} игроков${product.playersOnline ? ' + онлайн' : ''}`
+    return minPlayers === maxPlayers ? `${minPlayers}` : `${minPlayers} - ${maxPlayers}`
   }
 
   if (minPlayers !== null) {
-    return `${minPlayers} ${getPlayerWord(minPlayers)}${product.playersOnline ? ' + онлайн' : ''}`
+    return `${minPlayers}`
   }
 
-  const infoPlayers = product.info.find((item) => /игрок/i.test(item))
+  const localPlayersRange = getLocalPlayersRangeFromInfo(product.info)
+  if (localPlayersRange) {
+    return localPlayersRange.min === localPlayersRange.max
+      ? `${localPlayersRange.min}`
+      : `${localPlayersRange.min} - ${localPlayersRange.max}`
+  }
+
+  const infoPlayers = product.info.find((item) => /^\s*Игроки\s*:/i.test(item) && !/в\s+сети|PS\s*Plus/i.test(item))
   if (!infoPlayers) {
     return null
   }
@@ -708,10 +693,13 @@ export function ProductPage() {
   const location = useLocation()
   const navigate = useNavigate()
   const requestedRegion = searchParams.get('region') || undefined
-  const catalogPath =
-    typeof (location.state as { catalogPath?: string } | null)?.catalogPath === 'string' &&
-    (location.state as { catalogPath?: string } | null)?.catalogPath?.startsWith('/catalog')
+  const rawCatalogPath =
+    typeof (location.state as { catalogPath?: string } | null)?.catalogPath === 'string'
       ? (location.state as { catalogPath?: string }).catalogPath
+      : null
+  const catalogPath =
+    rawCatalogPath && (rawCatalogPath === '/' || rawCatalogPath.startsWith('/?') || rawCatalogPath.startsWith('/catalog'))
+      ? rawCatalogPath
       : null
 
   const { user, isAuthenticated, refreshUser } = useAuth()
@@ -1107,18 +1095,7 @@ export function ProductPage() {
             </div>
 
             <div className="space-y-6">
-              <div className="panel-soft rounded-[28px] p-6">
-                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Инфо</p>
-                <ul className="mt-4 space-y-3 text-sm text-slate-300">
-                  {(infoItems.length
-                    ? infoItems
-                    : ['Подробная информация из Telegram появится здесь, как только товар вернёт расширенные данные.']).map((item) => (
-                    <li key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              
 
               <div className="panel-soft rounded-[28px] p-6">
                 <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Комплект</p>
@@ -1126,6 +1103,18 @@ export function ProductPage() {
                   {(product.compound.length
                     ? product.compound
                     : ['Состав издания и бонусов появится здесь, как только API отдаст подробности.']).map((item) => (
+                    <li key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div className="panel-soft rounded-[28px] p-6">
+                <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Инфо</p>
+                <ul className="mt-4 space-y-3 text-sm text-slate-300">
+                  {(infoItems.length
+                    ? infoItems
+                    : ['Подробная информация из Telegram появится здесь, как только товар вернёт расширенные данные.']).map((item) => (
                     <li key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                       {item}
                     </li>

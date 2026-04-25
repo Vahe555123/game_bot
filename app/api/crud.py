@@ -2116,12 +2116,66 @@ class ProductCRUD:
         return result, int(total)
 
     @staticmethod
+    def _card_region_price_count(card: ProductCard) -> int:
+        region_sequence = (
+            (card.tr_product_id, card.tr_price_try),
+            (card.in_product_id, card.in_price_inr),
+            (card.ua_product_id, card.ua_price_uah),
+        )
+        return sum(1 for product_id, price_local in region_sequence if product_id and price_local and price_local > 0)
+
+    @staticmethod
+    def _build_catalog_dict_from_card_equivalents(
+        card: ProductCard,
+        db: Session,
+        localization_cache: Dict[str, Optional[str]],
+    ) -> Optional[Dict[str, Any]]:
+        if ProductCRUD._card_region_price_count(card) >= 3:
+            return None
+
+        lookup_ids = [card.card_id, card.tr_product_id, card.in_product_id, card.ua_product_id]
+        seen_ids: set[str] = set()
+        base_product: Optional[Product] = None
+
+        for lookup_id in lookup_ids:
+            normalized_lookup_id = ProductCRUD._normalize_product_id_token(lookup_id)
+            if not normalized_lookup_id or normalized_lookup_id in seen_ids:
+                continue
+
+            seen_ids.add(normalized_lookup_id)
+            base_product = ProductCRUD.get_by_id_with_fallback(db, normalized_lookup_id)
+            if base_product is not None:
+                break
+
+        if base_product is None:
+            return None
+
+        regional_products = db.query(Product).filter(Product.id == base_product.id).all()
+        enriched_product = ProductCRUD.prepare_product_with_multi_region_prices(
+            base_product,
+            db,
+            regional_products=regional_products or [base_product],
+            localization_cache=localization_cache,
+            favorites_count=int(card.favorites_count or 0),
+        )
+
+        if len(enriched_product.get('regional_prices') or []) <= ProductCRUD._card_region_price_count(card):
+            return None
+
+        enriched_product['id'] = card.card_id or enriched_product.get('id')
+        return enriched_product
+
+    @staticmethod
     def _card_to_catalog_dict(
         card: ProductCard,
         db: Session,
         localization_cache: Dict[str, Optional[str]],
     ) -> Dict[str, Any]:
         """Сформировать ответ карточки совместимо с prepare_product_with_multi_region_prices."""
+        enriched_product = ProductCRUD._build_catalog_dict_from_card_equivalents(card, db, localization_cache)
+        if enriched_product is not None:
+            return enriched_product
+
         regional_prices: List[Dict[str, Any]] = []
         # Порядок показа регионов — как в старой реализации: TR, IN, UA.
         region_sequence = (
