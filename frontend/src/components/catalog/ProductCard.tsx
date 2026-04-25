@@ -38,7 +38,7 @@ export function ProductCard({ product }: ProductCardProps) {
   const regularDiscountPercent = getProductRegularDiscountPercent(product)
   const localization = getProductLocalizationPresentation(product)
   const vrLabel = getProductVrLabel(product)
-  const platformLabel = [product.platforms, vrLabel].filter(Boolean).join(' • ')
+  const platformLabel = [product.platforms, vrLabel].filter(Boolean).join(', ')
 
   function handleFavoriteClick(event: MouseEvent<HTMLButtonElement>) {
     event.preventDefault()
