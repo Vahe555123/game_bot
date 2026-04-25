@@ -1,7 +1,7 @@
 import { ArrowUpWideNarrow, Search, SlidersHorizontal } from 'lucide-react'
 import clsx from 'clsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { CatalogFilters } from '../components/catalog/CatalogFilters'
 import { ProductCard } from '../components/catalog/ProductCard'
 import { ProductSkeleton } from '../components/catalog/ProductSkeleton'
@@ -160,7 +160,9 @@ function dedupeCatalogProducts(products: CatalogProduct[]) {
 
 export function CatalogPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const { user } = useAuth()
+  const isMainPage = location.pathname === '/'
   const productKindStorageKey = useMemo(() => getProductKindStorageKey(user?.id), [user?.id])
   const storedProductKind = useMemo(() => readStoredProductKind(productKindStorageKey), [productKindStorageKey])
   const filters = useMemo(() => parseFilters(searchParams, storedProductKind), [searchParams, storedProductKind])
@@ -171,7 +173,17 @@ export function CatalogPage() {
   const [page, setPage] = useState(1)
   const [isLoading, setIsLoading] = useState(true)
   const [isLoadingMore, setIsLoadingMore] = useState(false)
-  const [isFiltersOpen, setIsFiltersOpen] = useState(searchParams.get('filters') === 'open')
+  const [isFiltersOpen, setIsFiltersOpen] = useState(() => {
+    const filtersState = searchParams.get('filters')
+    if (filtersState === 'open') {
+      return true
+    }
+    if (filtersState === 'closed') {
+      return false
+    }
+
+    return typeof window !== 'undefined' && location.pathname === '/' && window.innerWidth >= 1024
+  })
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false)
   const [products, setProducts] = useState<CatalogProduct[]>([])
   const [categories, setCategories] = useState<string[]>([])
@@ -180,6 +192,7 @@ export function CatalogPage() {
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null)
   const previousFiltersKeyRef = useRef(filtersKey)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const hasAutoCollapsedFiltersRef = useRef(false)
   const activeFiltersCount = countActiveFilters(filters)
 
   useEffect(() => {
@@ -188,8 +201,46 @@ export function CatalogPage() {
   }, [filters])
 
   useEffect(() => {
-    setIsFiltersOpen(searchParams.get('filters') === 'open')
-  }, [searchParams])
+    const filtersState = searchParams.get('filters')
+    if (filtersState === 'open') {
+      setIsFiltersOpen(true)
+      return
+    }
+    if (filtersState === 'closed') {
+      setIsFiltersOpen(false)
+      return
+    }
+
+    if (typeof window !== 'undefined' && isMainPage && window.innerWidth >= 1024 && !hasAutoCollapsedFiltersRef.current) {
+      setIsFiltersOpen(true)
+    }
+  }, [isMainPage, searchParams])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isMainPage) {
+      return undefined
+    }
+
+    const handleScroll = () => {
+      if (window.innerWidth < 1024 || hasAutoCollapsedFiltersRef.current || !isFiltersOpen) {
+        return
+      }
+
+      if (window.scrollY >= window.innerHeight / 2) {
+        hasAutoCollapsedFiltersRef.current = true
+        setIsFiltersOpen(false)
+      }
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    window.addEventListener('resize', handleScroll)
+    handleScroll()
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('resize', handleScroll)
+    }
+  }, [isFiltersOpen, isMainPage])
 
   useEffect(() => {
     let ignore = false
@@ -419,8 +470,8 @@ export function CatalogPage() {
   }
 
   return (
-    <div className="container -mt-px pb-4 pt-0 md:pb-6 md:pt-0">
-      <section className="sticky top-[5.75rem] z-30 rounded-[26px] border border-white/10 bg-gradient-to-br from-slate-950/95 via-slate-900/92 to-sky-950/76 p-3 shadow-[0_24px_80px_rgba(8,18,34,0.38)] ring-1 ring-brand-300/10 backdrop-blur-xl md:top-28 md:rounded-[32px] md:p-5">
+    <div className="container pb-4 pt-0 md:pb-6 md:pt-0">
+      <section className="sticky top-[4.55rem] z-30 rounded-[26px] border border-white/10 bg-gradient-to-br from-slate-950/95 via-slate-900/92 to-sky-950/76 p-3 shadow-[0_24px_80px_rgba(8,18,34,0.38)] ring-1 ring-brand-300/10 backdrop-blur-xl md:top-[5rem] md:rounded-[32px] md:p-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <label className={clsx('input-shell flex-1 shadow-[0_18px_50px_rgba(8,18,34,0.2)] sm:flex', isMobileSearchOpen ? 'flex' : 'hidden')}>
             <Search size={18} className="text-brand-300" />
@@ -448,7 +499,7 @@ export function CatalogPage() {
 
             <div className="mr-auto rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:mr-0 sm:w-auto md:px-4 md:text-sm">
               <span className="font-semibold text-white">{total}</span>
-              {activeFiltersCount > 0 ? ` • ${activeFiltersCount}` : ''}
+              {activeFiltersCount > 0 ? ` | ${activeFiltersCount}` : ''}
             </div>
 
             <label className="hidden min-h-[44px] items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-sm text-white shadow-[0_18px_45px_rgba(8,18,34,0.18)] transition focus-within:border-brand-300/50 focus-within:bg-white/[0.07] md:flex">
@@ -483,7 +534,7 @@ export function CatalogPage() {
             onDraftChange={updateDraftFilters}
             onReset={resetDraftFilters}
             onApply={() => applyDraftFilters({ close: true })}
-            className="mt-4"
+            className="mt-3"
           />
         ) : null}
       </section>

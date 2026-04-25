@@ -88,97 +88,89 @@ export function CatalogFilters({
         />
       </div>
 
-      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6 xl:grid-cols-8">
-        <label className="block lg:col-span-2 xl:col-span-1">
-          <input
-            type="number"
-            min="0"
-            inputMode="numeric"
-            value={draftFilters.minPrice}
-            onChange={(event) => onDraftChange({ minPrice: event.target.value })}
-            placeholder="Мин. цена"
-            className="min-h-[46px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl md:text-sm"
-          />
-        </label>
+<div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+  <label className="block min-w-0">
+    <input
+      type="number"
+      min="0"
+      inputMode="numeric"
+      value={draftFilters.minPrice}
+      onChange={(event) => onDraftChange({ minPrice: event.target.value })}
+      placeholder="Мин. цена"
+      className="min-h-[46px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl md:text-sm"
+    />
+  </label>
 
-        <label className="block lg:col-span-2 xl:col-span-1">
-          <input
-            type="number"
-            min="0"
-            inputMode="numeric"
-            value={draftFilters.maxPrice}
-            onChange={(event) => onDraftChange({ maxPrice: event.target.value })}
-            placeholder="Макс. цена"
-            className="min-h-[46px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl md:text-sm"
-          />
-        </label>
+  <label className="block min-w-0">
+    <input
+      type="number"
+      min="0"
+      inputMode="numeric"
+      value={draftFilters.maxPrice}
+      onChange={(event) => onDraftChange({ maxPrice: event.target.value })}
+      placeholder="Макс. цена"
+      className="min-h-[46px] w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-xs text-white outline-none transition placeholder:text-slate-500 focus:border-brand-300/60 md:rounded-2xl md:text-sm"
+    />
+  </label>
 
-        <SelectField
-          value={draftFilters.priceCurrency}
-          options={PRICE_CURRENCY_OPTIONS}
-          onChange={(priceCurrency) => onDraftChange({ priceCurrency })}
-          className="min-w-[128px] lg:col-span-2 xl:col-span-1"
-        />
+  <SelectField
+    value={draftFilters.priceCurrency}
+    options={PRICE_CURRENCY_OPTIONS}
+    onChange={(priceCurrency) => onDraftChange({ priceCurrency })}
+    className="min-w-0"
+  />
 
-        <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-1">
-          <span className="whitespace-nowrap">Только со скидкой</span>
-          <input
-            type="checkbox"
-            checked={draftFilters.hasDiscount}
-            onChange={(event) => onDraftChange({ hasDiscount: event.target.checked })}
-            className="h-4 w-4 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
-          />
-        </label>
+  <label className="flex min-h-[46px] min-w-0 cursor-pointer items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
+    <span className="truncate">Только со скидкой</span>
+    <input
+      type="checkbox"
+      checked={draftFilters.hasDiscount}
+      onChange={(event) => onDraftChange({ hasDiscount: event.target.checked })}
+      className="h-4 w-4 shrink-0 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
+    />
+  </label>
 
-        <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-slate-100 md:rounded-2xl lg:col-span-2 xl:col-span-2">
-          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Доступны в подписке</p>
+  <label className="flex min-h-[46px] min-w-0 cursor-pointer items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
+    <span className="truncate">PS Plus Extra</span>
+    <input
+      type="checkbox"
+      checked={draftFilters.hasPsPlus}
+      onChange={(event) => onDraftChange({ hasPsPlus: event.target.checked })}
+      className="h-4 w-4 shrink-0 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
+    />
+  </label>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2.5 text-sm transition hover:border-brand-400/40">
-              <span className="whitespace-nowrap">PS Plus Extra</span>
-              <input
-                type="checkbox"
-                checked={draftFilters.hasPsPlus}
-                onChange={(event) => onDraftChange({ hasPsPlus: event.target.checked })}
-                className="h-4 w-4 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
-              />
-            </label>
+  <label className="flex min-h-[46px] min-w-0 cursor-pointer items-center justify-between gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl">
+    <span className="truncate">EA Play</span>
+    <input
+      type="checkbox"
+      checked={draftFilters.hasEaAccess}
+      onChange={(event) => onDraftChange({ hasEaAccess: event.target.checked })}
+      className="h-4 w-4 shrink-0 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
+    />
+  </label>
 
-            <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2.5 text-sm transition hover:border-brand-400/40">
-              <span className="whitespace-nowrap">EA Play</span>
-              <input
-                type="checkbox"
-                checked={draftFilters.hasEaAccess}
-                onChange={(event) => onDraftChange({ hasEaAccess: event.target.checked })}
-                className="h-4 w-4 rounded border-white/20 bg-white/10 text-brand-400 focus:ring-brand-400"
-              />
-            </label>
-          </div>
-        </div>
+  <button
+    type="button"
+    onClick={onReset}
+    className={clsx(
+      'btn-secondary min-h-[46px] w-full justify-center px-3 text-sm',
+      !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
+    )}
+  >
+    <RotateCcw size={16} />
+    Сбросить
+  </button>
 
-        <div className="grid gap-2 sm:col-span-2 lg:col-span-6 xl:col-span-2 xl:grid-cols-2">
-          <button
-            type="button"
-            onClick={onReset}
-            className={clsx(
-              'btn-secondary min-h-[46px] w-full justify-center px-4 text-sm',
-              !hasActiveFilters && draftFilters.sort === 'popular' && 'opacity-70',
-            )}
-          >
-            <RotateCcw size={16} />
-            Сбросить
-          </button>
-
-          <button
-            type="button"
-            onClick={onApply}
-            className="btn-primary min-h-[46px] w-full justify-center px-5 text-sm"
-          >
-            <Check size={16} />
-            Применить
-          </button>
-        </div>
-      </div>
+  <button
+    type="button"
+    onClick={onApply}
+    className="btn-primary min-h-[46px] w-full justify-center px-4 text-sm"
+  >
+    <Check size={16} />
+    Применить
+  </button>
+</div>
     </div>
   )
 }

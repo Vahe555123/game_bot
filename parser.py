@@ -4814,8 +4814,12 @@ def _parser_sqlalchemy_url() -> str:
 
 def _refresh_product_cards_sync(product_ids: list[str], *, full_rebuild: bool) -> None:
     try:
-        from sqlalchemy import create_engine, event
-
+        from app.database.connection import (
+            engine as _app_engine,
+            init_database,
+            _ensure_product_cards_search_index,
+        )
+        from app.database.product_cache_importer import _ensure_import_state_table
         from app.database.product_card_rebuilder import (
             rebuild_product_cards,
             rebuild_product_cards_for_ids,
@@ -4825,40 +4829,24 @@ def _refresh_product_cards_sync(product_ids: list[str], *, full_rebuild: bool) -
         if not settings.PRODUCTS_USE_CARDS_TABLE:
             return
 
-        engine = create_engine(
-            _parser_sqlalchemy_url(),
-            connect_args={"check_same_thread": False, "timeout": 30},
-        )
+        # Идемпотентно создаём ВСЕ таблицы приложения (products, product_cards,
+        # user_favorite_products, product_cache_import_state, product_search_fts и т.д.).
+        # Без этого парсер, запущенный отдельно от backend-а, ловит "no such table".
+        init_database()
 
-        @event.listens_for(engine, "connect")
-        def _set_sqlite_connection_options(dbapi_connection, _connection_record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.execute("PRAGMA busy_timeout=30000")
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-            try:
-                dbapi_connection.create_function(
-                    "normalize_search",
-                    1,
-                    normalize_search_text,
-                    deterministic=True,
-                )
-            except TypeError:
-                dbapi_connection.create_function("normalize_search", 1, normalize_search_text)
-
-        try:
-            with engine.begin() as connection:
-                if full_rebuild:
-                    rebuild_product_cards(connection)
-                else:
-                    rebuild_product_cards_for_ids(connection, product_ids)
-        finally:
-            engine.dispose()
+        with _app_engine.begin() as connection:
+            _ensure_import_state_table(connection)
+            if full_rebuild:
+                rebuild_product_cards(connection)
+            else:
+                rebuild_product_cards_for_ids(connection, product_ids)
+            # Перестраиваем FTS5-индекс каталога (если кол-во карточек поменялось,
+            # триггеры уже подтянули изменения построчно — но на всякий случай).
+            _ensure_product_cards_search_index(connection)
     except Exception as exc:
         print(f"[!] Не удалось обновить product_cards: {type(exc).__name__}: {exc}")
+        print(f"    -> Каталог сайта может показать пусто/устаревшее. Запустите backend (main.py)")
+        print(f"       либо `python -c \"from app.database.connection import init_database; init_database()\"`")
 
 
 async def refresh_product_cards_after_save(product_ids: list[str], *, full_rebuild: bool = False) -> None:
@@ -4874,31 +4862,14 @@ def _notify_favorite_discounts_after_save_sync(product_ids: list[str]) -> dict[s
         return {}
 
     try:
-        from sqlalchemy import create_engine, event
-        from sqlalchemy.orm import sessionmaker
-
+        # init_database() гарантирует наличие user_favorite_products / users / etc.
+        from app.database.connection import init_database, SessionLocal
         from app.notifications.favorite_discounts import notify_favorite_discounts_for_product_ids_sync
 
-        engine = create_engine(
-            _parser_sqlalchemy_url(),
-            connect_args={"check_same_thread": False, "timeout": 30},
-        )
+        init_database()
 
-        @event.listens_for(engine, "connect")
-        def _set_sqlite_connection_options(dbapi_connection, _connection_record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.execute("PRAGMA busy_timeout=30000")
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-        Session = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        try:
-            with Session() as db:
-                summary = notify_favorite_discounts_for_product_ids_sync(db, unique_ids)
-        finally:
-            engine.dispose()
+        with SessionLocal() as db:
+            summary = notify_favorite_discounts_for_product_ids_sync(db, unique_ids)
 
         if summary.get("sent") or summary.get("failed"):
             print(
