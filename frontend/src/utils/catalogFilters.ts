@@ -44,10 +44,10 @@ export const SORT_OPTIONS = [
 const SORT_OPTION_VALUES = new Set(SORT_OPTIONS.map((option) => option.value))
 
 export const PRICE_CURRENCY_OPTIONS = [
-  { value: 'RUB', label: 'Рубли' },
-  { value: 'TRY', label: 'Лиры' },
-  { value: 'INR', label: 'Рупии' },
-  { value: 'UAH', label: 'Гривны' },
+  { value: 'RUB', label: '₽' },
+  { value: 'TRY', label: '₺' },
+  { value: 'INR', label: '₹' },
+  { value: 'UAH', label: '₴' },
 ] as const
 
 const PRICE_CURRENCY_OPTION_VALUES = new Set(PRICE_CURRENCY_OPTIONS.map((option) => option.value))

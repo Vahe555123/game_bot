@@ -419,7 +419,7 @@ export function CatalogPage() {
   }
 
   return (
-    <div className="container pb-4 pt-[5px] md:pb-6 md:pt-[5px]">
+    <div className="container pb-4 pt-1 md:pb-6 md:pt-1">
       <section className="sticky top-[5.75rem] z-30 rounded-[26px] border border-white/10 bg-gradient-to-br from-slate-950/95 via-slate-900/92 to-sky-950/76 p-3 shadow-[0_24px_80px_rgba(8,18,34,0.38)] ring-1 ring-brand-300/10 backdrop-blur-xl md:top-28 md:rounded-[32px] md:p-5">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <label className={clsx('input-shell flex-1 shadow-[0_18px_50px_rgba(8,18,34,0.2)] sm:flex', isMobileSearchOpen ? 'flex' : 'hidden')}>
@@ -447,8 +447,8 @@ export function CatalogPage() {
             </button>
 
             <div className="mr-auto rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300 sm:mr-0 sm:w-auto md:px-4 md:text-sm">
-              <span className="font-semibold text-white">{total}</span> товаров
-              {activeFiltersCount > 0 ? `, фильтров: ${activeFiltersCount}` : ''}
+              <span className="font-semibold text-white">{total}</span>
+              {activeFiltersCount > 0 ? ` • ${activeFiltersCount}` : ''}
             </div>
 
             <label className="hidden min-h-[44px] items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-sm text-white shadow-[0_18px_45px_rgba(8,18,34,0.18)] transition focus-within:border-brand-300/50 focus-within:bg-white/[0.07] md:flex">
