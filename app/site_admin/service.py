@@ -89,6 +89,13 @@ _price_update_current_task_id: Optional[str] = None
 _price_update_tasks_lock = asyncio.Lock()
 _price_update_control: Any = None
 
+# Полный парсинг (mode 1 в админке).
+_full_parse_lock = asyncio.Lock()
+_full_parse_tasks: dict[str, dict[str, Any]] = {}
+_full_parse_current_task_id: Optional[str] = None
+_full_parse_tasks_lock = asyncio.Lock()
+_full_parse_control: Any = None
+
 
 def build_default_help_content(*, updated_at: Any = None) -> dict[str, Any]:
     return {
@@ -1423,6 +1430,296 @@ class SiteAdminService:
                 return dict(_price_update_tasks[active_task_id])
         return _build_idle_price_update_status()
 
+    # ── Полный парсинг (mode 1 в админке) ─────────────────────────────────────
+    async def start_full_parse(self, *, test: bool = False) -> dict:
+        global _full_parse_current_task_id, _full_parse_control
+        async with _full_parse_tasks_lock:
+            active_task_id = _get_active_full_parse_task_id()
+            if active_task_id:
+                return dict(_full_parse_tasks[active_task_id])
+
+            task_id = uuid4().hex
+            status = {
+                "task_id": task_id,
+                "status": "pending",
+                "phase": "queued",
+                "message": "Полный парсинг поставлен в очередь.",
+                "mode": "test" if test else "full",
+                "total": 100 if test else None,
+                "processed": 0,
+                "saved": 0,
+                "failed": 0,
+                "empty_returns": 0,
+                "ban_count_403": 0,
+                "missing_ua": 0,
+                "missing_tr": 0,
+                "missing_in": 0,
+                "remaining": 100 if test else None,
+                "percent": 0,
+                "logs": [],
+                "started_at": utcnow().isoformat(),
+                "completed_at": None,
+                "result": None,
+                "control_state": "running",
+            }
+            _full_parse_tasks[task_id] = status
+            _full_parse_current_task_id = task_id
+
+        from parser import UpdateControl
+        control = UpdateControl()
+        _full_parse_control = control
+
+        async def _run_full_parse() -> None:
+            async with _full_parse_lock:
+                try:
+                    from parser import FULL_PARSE_TEST_LIMIT, run_full_parse
+
+                    async def _progress(payload: dict[str, Any]) -> None:
+                        await _update_full_parse_task(task_id, payload)
+
+                    await _update_full_parse_task(
+                        task_id,
+                        {
+                            "status": "running",
+                            "phase": "starting",
+                            "message": "Запускаем полный парсинг PlayStation Store.",
+                        },
+                    )
+                    result = await run_full_parse(
+                        test_limit=FULL_PARSE_TEST_LIMIT if test else None,
+                        progress_callback=_progress,
+                        control=control,
+                        task_id=task_id,
+                    )
+                    final_status = "cancelled" if result.get("cancelled") else "completed"
+                    await _update_full_parse_task(
+                        task_id,
+                        {
+                            "status": final_status,
+                            "phase": final_status,
+                            "message": result.get("message") or "Полный парсинг завершён.",
+                            "completed_at": utcnow().isoformat(),
+                            "result": result,
+                            "percent": 100 if final_status == "completed" else None,
+                            "control_state": final_status,
+                        },
+                    )
+                except Exception as error:
+                    logger.exception("Full parse failed")
+                    await _update_full_parse_task(
+                        task_id,
+                        {
+                            "status": "failed",
+                            "phase": "failed",
+                            "message": f"Полный парсинг не удался: {type(error).__name__}: {error}",
+                            "completed_at": utcnow().isoformat(),
+                            "logs": [f"Ошибка: {type(error).__name__}: {error}"],
+                            "control_state": "failed",
+                        },
+                    )
+                finally:
+                    global _full_parse_control
+                    _full_parse_control = None
+
+        asyncio.create_task(_run_full_parse())
+        return await self.get_full_parse_status()
+
+    async def pause_full_parse(self) -> dict:
+        global _full_parse_control
+        if _full_parse_control is None or not _full_parse_control.pause():
+            return await self.get_full_parse_status()
+        async with _full_parse_tasks_lock:
+            tid = _full_parse_current_task_id
+            if tid and tid in _full_parse_tasks:
+                _full_parse_tasks[tid]["status"] = "paused"
+                _full_parse_tasks[tid]["control_state"] = "paused"
+                _full_parse_tasks[tid]["message"] = "Полный парсинг поставлен на паузу."
+        return await self.get_full_parse_status()
+
+    async def resume_full_parse(self) -> dict:
+        global _full_parse_control
+        if _full_parse_control is None or not _full_parse_control.resume():
+            return await self.get_full_parse_status()
+        async with _full_parse_tasks_lock:
+            tid = _full_parse_current_task_id
+            if tid and tid in _full_parse_tasks:
+                _full_parse_tasks[tid]["status"] = "running"
+                _full_parse_tasks[tid]["control_state"] = "running"
+                _full_parse_tasks[tid]["message"] = "Полный парсинг продолжен."
+        return await self.get_full_parse_status()
+
+    async def cancel_full_parse(self) -> dict:
+        global _full_parse_control
+        if _full_parse_control is not None:
+            _full_parse_control.cancel()
+        async with _full_parse_tasks_lock:
+            tid = _full_parse_current_task_id
+            if tid and tid in _full_parse_tasks:
+                _full_parse_tasks[tid]["control_state"] = "cancel_requested"
+                _full_parse_tasks[tid]["message"] = (
+                    "Запрошена отмена полного парсинга — текущий батч завершится и сохранит прогресс."
+                )
+        return await self.get_full_parse_status()
+
+    async def get_full_parse_status(self) -> dict:
+        async with _full_parse_tasks_lock:
+            active_task_id = _full_parse_current_task_id
+            if active_task_id and active_task_id in _full_parse_tasks:
+                base = dict(_full_parse_tasks[active_task_id])
+                base["orphans"] = []
+                return base
+        # idle — добавляем список незавершённых задач для UI "Продолжить?"
+        from parser import list_orphan_full_parse_tasks
+        base = _build_idle_full_parse_status()
+        base["orphans"] = list_orphan_full_parse_tasks()
+        return base
+
+    async def resume_full_parse_task(self, *, resume_task_id: str) -> dict:
+        """Продолжить незавершённую задачу (после рестарта или crash)."""
+        global _full_parse_current_task_id, _full_parse_control
+        from parser import load_full_parse_state
+        saved = load_full_parse_state(resume_task_id)
+        if not saved:
+            return _build_idle_full_parse_status()
+
+        async with _full_parse_tasks_lock:
+            active_task_id = _get_active_full_parse_task_id()
+            if active_task_id:
+                return dict(_full_parse_tasks[active_task_id])
+
+            # Воссоздаём task-state в in-memory dict, переиспользуя task_id
+            mode = saved.get("mode") or "full"
+            status = {
+                "task_id": resume_task_id,
+                "status": "pending",
+                "phase": "queued",
+                "message": f"Продолжаем задачу {resume_task_id[:8]}…",
+                "mode": mode,
+                "total": saved.get("total"),
+                "processed": saved.get("url_index", 0),
+                "saved": saved.get("saved_total", 0),
+                "failed": saved.get("failed_total", 0),
+                "empty_returns": saved.get("empty_returns", 0),
+                "ban_count_403": saved.get("ban_count_403", 0),
+                "missing_ua": saved.get("missing_ua", 0),
+                "missing_tr": saved.get("missing_tr", 0),
+                "missing_in": saved.get("missing_in", 0),
+                "remaining": max(int(saved.get("total") or 0) - int(saved.get("url_index", 0)), 0),
+                "percent": 0,
+                "logs": [],
+                "started_at": utcnow().isoformat(),
+                "completed_at": None,
+                "result": None,
+                "control_state": "running",
+            }
+            _full_parse_tasks[resume_task_id] = status
+            _full_parse_current_task_id = resume_task_id
+
+        from parser import UpdateControl
+        control = UpdateControl()
+        _full_parse_control = control
+
+        async def _run_resume() -> None:
+            async with _full_parse_lock:
+                try:
+                    from parser import run_full_parse
+
+                    async def _progress(payload: dict[str, Any]) -> None:
+                        await _update_full_parse_task(resume_task_id, payload)
+
+                    await _update_full_parse_task(
+                        resume_task_id,
+                        {
+                            "status": "running",
+                            "phase": "starting",
+                            "message": "Возобновляем полный парсинг…",
+                        },
+                    )
+                    result = await run_full_parse(
+                        progress_callback=_progress,
+                        control=control,
+                        resume_task_id=resume_task_id,
+                    )
+                    final_status = "cancelled" if result.get("cancelled") else "completed"
+                    await _update_full_parse_task(
+                        resume_task_id,
+                        {
+                            "status": final_status,
+                            "phase": final_status,
+                            "message": result.get("message") or "Полный парсинг завершён.",
+                            "completed_at": utcnow().isoformat(),
+                            "result": result,
+                            "percent": 100 if final_status == "completed" else None,
+                            "control_state": final_status,
+                        },
+                    )
+                except Exception as error:
+                    logger.exception("Full parse resume failed")
+                    await _update_full_parse_task(
+                        resume_task_id,
+                        {
+                            "status": "failed",
+                            "phase": "failed",
+                            "message": f"Resume не удался: {type(error).__name__}: {error}",
+                            "completed_at": utcnow().isoformat(),
+                            "logs": [f"Ошибка: {type(error).__name__}: {error}"],
+                            "control_state": "failed",
+                        },
+                    )
+                finally:
+                    global _full_parse_control
+                    _full_parse_control = None
+
+        asyncio.create_task(_run_resume())
+        return await self.get_full_parse_status()
+
+    # ── Прокси ────────────────────────────────────────────────────────────────
+    def get_proxy_status(self) -> dict:
+        from proxy_pool import get_proxy_pool
+        return get_proxy_pool().to_public_status()
+
+    def reload_proxy_pool(self) -> dict:
+        """Перечитать .env (после редактирования) и применить новый список прокси."""
+        from dotenv import load_dotenv as _load
+        _load(override=True)
+        from proxy_pool import get_proxy_pool
+        from parser import apply_active_proxy_env
+        pool = get_proxy_pool()
+        pool.reload_from_env()
+        apply_active_proxy_env()
+        return pool.to_public_status()
+
+    def rotate_proxy(self) -> dict:
+        """Принудительная ротация на следующий прокси."""
+        from proxy_pool import get_proxy_pool
+        from parser import apply_active_proxy_env
+        pool = get_proxy_pool()
+        pool.rotate(reason="manual")
+        apply_active_proxy_env()
+        return pool.to_public_status()
+
+    def reset_proxy(self, label: Optional[str] = None) -> dict:
+        """Снять cooldown/banned (одного прокси по label или всех)."""
+        from proxy_pool import get_proxy_pool
+        get_proxy_pool().force_reset(label_or_url=label)
+        return get_proxy_pool().to_public_status()
+
+    def select_proxy(self, label: str) -> dict:
+        """Сделать активным прокси по host:port."""
+        from proxy_pool import get_proxy_pool
+        from parser import apply_active_proxy_env
+        pool = get_proxy_pool()
+        if pool.select_by_label(label):
+            apply_active_proxy_env()
+        return pool.to_public_status()
+
+    async def health_check_proxies(self) -> dict:
+        """Параллельно пингуем все прокси к PS Store, возвращаем обновлённый статус."""
+        from proxy_pool import get_proxy_pool
+        pool = get_proxy_pool()
+        await pool.health_check_all()
+        return pool.to_public_status()
+
     def list_purchases(
         self,
         db: Session,
@@ -2058,6 +2355,83 @@ def _build_idle_price_update_status() -> dict[str, Any]:
         "processed": 0,
         "saved": 0,
         "failed": 0,
+        "remaining": None,
+        "percent": 0,
+        "logs": [],
+        "started_at": None,
+        "completed_at": None,
+        "result": None,
+        "control_state": "idle",
+    }
+
+
+def _get_active_full_parse_task_id() -> Optional[str]:
+    task_id = _full_parse_current_task_id
+    if not task_id:
+        return None
+    task = _full_parse_tasks.get(task_id)
+    if not task:
+        return None
+    if task.get("status") in {"pending", "running", "paused"}:
+        return task_id
+    return None
+
+
+async def _update_full_parse_task(task_id: str, payload: dict[str, Any]) -> None:
+    async with _full_parse_tasks_lock:
+        task = _full_parse_tasks.get(task_id)
+        if task is None:
+            return
+
+        new_logs = payload.pop("logs", None)
+        if new_logs:
+            logs = list(task.get("logs") or [])
+            for entry in new_logs:
+                if isinstance(entry, dict):
+                    message = str(entry.get("message") or "")
+                    time_value = str(entry.get("time") or utcnow().isoformat())
+                else:
+                    message = str(entry)
+                    time_value = utcnow().isoformat()
+                if message:
+                    logs.append({"time": time_value, "message": message})
+            task["logs"] = logs[-200:]
+
+        task.update(payload)
+        task["task_id"] = task_id
+
+        total = task.get("total")
+        processed = task.get("processed")
+        if total is not None and processed is not None:
+            try:
+                total_int = int(total)
+                processed_int = int(processed)
+            except (TypeError, ValueError):
+                total_int = 0
+                processed_int = 0
+            task["remaining"] = max(total_int - processed_int, 0)
+            if total_int > 0:
+                task["percent"] = min(round(processed_int / total_int * 100), 100)
+            elif task.get("status") == "completed":
+                task["percent"] = 100
+
+
+def _build_idle_full_parse_status() -> dict[str, Any]:
+    return {
+        "task_id": None,
+        "status": "idle",
+        "phase": "idle",
+        "message": "Полный парсинг не запущен.",
+        "mode": None,
+        "total": None,
+        "processed": 0,
+        "saved": 0,
+        "failed": 0,
+        "empty_returns": 0,
+        "ban_count_403": 0,
+        "missing_ua": 0,
+        "missing_tr": 0,
+        "missing_in": 0,
         "remaining": None,
         "percent": 0,
         "logs": [],

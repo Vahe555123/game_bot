@@ -1,10 +1,12 @@
-import { BadgePercent, FileText, LayoutDashboard, LinkIcon, Package2, PanelLeftClose, PanelLeftOpen, RefreshCw, Shield, ShoppingBag, Users } from 'lucide-react'
+import { BadgePercent, Database, FileText, Globe, LayoutDashboard, LinkIcon, Package2, PanelLeftClose, PanelLeftOpen, RefreshCw, Shield, ShoppingBag, Users } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { AdminContentSection } from '../components/admin/AdminContentSection'
 import { AdminDashboardSection } from '../components/admin/AdminDashboardSection'
 import { AdminDiscountsSection } from '../components/admin/AdminDiscountsSection'
+import { AdminFullParseSection } from '../components/admin/AdminFullParseSection'
 import { AdminPricesSection } from '../components/admin/AdminPricesSection'
 import { AdminProductsSection } from '../components/admin/AdminProductsSection'
+import { AdminProxiesSection } from '../components/admin/AdminProxiesSection'
 import { AdminPurchasesSection } from '../components/admin/AdminPurchasesSection'
 import { AdminUnparsedSection } from '../components/admin/AdminUnparsedSection'
 import { AdminUsersSection } from '../components/admin/AdminUsersSection'
@@ -18,6 +20,8 @@ const SECTIONS = [
   { id: 'admin-products', label: 'Товары', icon: Package2 },
   { id: 'admin-discounts', label: 'Скидки', icon: BadgePercent },
   { id: 'admin-prices', label: 'Обновление цен', icon: RefreshCw },
+  { id: 'admin-full-parse', label: 'Полный парсинг', icon: Database },
+  { id: 'admin-proxies', label: 'Прокси', icon: Globe },
   { id: 'admin-unparsed', label: 'Не спарсенные URL', icon: LinkIcon },
   { id: 'admin-purchases', label: 'Покупки', icon: ShoppingBag },
   { id: 'admin-content', label: 'Помощь', icon: FileText },
@@ -152,6 +156,8 @@ export function AdminPage() {
           <AdminProductsSection onDataChanged={loadDashboard} />
           <AdminDiscountsSection onDataChanged={loadDashboard} />
           <AdminPricesSection onDataChanged={loadDashboard} />
+          <AdminFullParseSection onDataChanged={loadDashboard} />
+          <AdminProxiesSection />
           <AdminUnparsedSection />
           <AdminPurchasesSection onDataChanged={loadDashboard} />
           <AdminContentSection />

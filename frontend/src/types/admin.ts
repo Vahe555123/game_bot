@@ -161,6 +161,73 @@ export type AdminPriceUpdateStatus = {
   control_state?: 'idle' | 'running' | 'paused' | 'cancel_requested' | 'cancelled' | 'completed' | 'failed' | string | null
 }
 
+// Прокси-пул для парсера: статус каждого прокси и активный.
+export type AdminProxyEntry = {
+  label: string                 // host:port (без логин:пароль)
+  status: 'ok' | 'cooldown' | 'banned' | 'unknown' | 'failed_check' | string
+  fail_count: number
+  success_count: number
+  last_check_at: number         // epoch seconds; 0 если ещё не проверяли
+  last_used_at: number
+  last_error: string | null
+  cooldown_seconds_left: number
+  is_active: boolean
+}
+
+export type AdminProxyStatus = {
+  enabled: boolean
+  size: number
+  active_label: string | null
+  active_status: string | null
+  ban_threshold: number
+  cooldown_seconds: number
+  proxies: AdminProxyEntry[]
+}
+
+// Полный парсинг (mode 1) — расширенный набор метрик:
+//   empty_returns — товары которые parse() вернул пустыми (ничего не сохранилось)
+//   ban_count_403 — сколько 403/Akamai-banned ответов получили
+//   missing_ua/tr/in — в скольких товарах не получилось спарсить регион
+//   consecutive_bans — текущая длина серии 403'ок (для индикации "прокси умер")
+export type AdminFullParseStatus = {
+  task_id?: string | null
+  status: 'idle' | 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed'
+  phase?: string | null
+  message: string
+  mode?: 'test' | 'full' | string | null
+  total?: number | null
+  processed?: number | null
+  saved?: number | null
+  failed?: number | null
+  empty_returns?: number | null
+  ban_count_403?: number | null
+  missing_ua?: number | null
+  missing_tr?: number | null
+  missing_in?: number | null
+  avg_per_product_seconds?: number | null
+  consecutive_bans?: number | null
+  remaining?: number | null
+  percent?: number | null
+  logs?: AdminDiscountUpdateLogEntry[]
+  started_at?: string | null
+  completed_at?: string | null
+  result?: Record<string, unknown> | null
+  control_state?: 'idle' | 'running' | 'paused' | 'cancel_requested' | 'cancelled' | 'completed' | 'failed' | string | null
+  orphans?: AdminFullParseOrphanTask[]
+}
+
+export type AdminFullParseOrphanTask = {
+  task_id: string
+  mode?: 'test' | 'full' | string | null
+  status?: string | null
+  total?: number | null
+  processed?: number | null
+  saved_total?: number | null
+  failed_total?: number | null
+  products_path?: string | null
+  updated_at?: string | null
+}
+
 export type AdminProductManualParsePayload = {
   ua_url?: string | null
   tr_url?: string | null

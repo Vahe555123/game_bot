@@ -1,10 +1,12 @@
 import type {
   AdminDashboard,
   AdminDiscountUpdateStatus,
+  AdminFullParseStatus,
   AdminHelpContent,
   AdminHelpContentPayload,
   AdminPriceUpdateStatus,
   AdminProductDetails,
+  AdminProxyStatus,
   AdminProductListResponse,
   AdminProductManualParsePayload,
   AdminProductManualParseStartResponse,
@@ -145,6 +147,81 @@ export async function resumeAdminPriceUpdate() {
 
 export async function cancelAdminPriceUpdate() {
   const response = await apiClient.post<AdminPriceUpdateStatus>('/site/admin/prices/update/cancel')
+  return response.data
+}
+
+// ── Полный парсинг ──────────────────────────────────────────────────────────
+export async function startAdminFullParse(test: boolean) {
+  const response = await apiClient.post<AdminFullParseStatus>(
+    '/site/admin/full-parse',
+    undefined,
+    { params: { test }, timeout: 0 },
+  )
+  return response.data
+}
+
+export async function fetchAdminFullParseStatus() {
+  const response = await apiClient.get<AdminFullParseStatus>('/site/admin/full-parse/status')
+  return response.data
+}
+
+export async function pauseAdminFullParse() {
+  const response = await apiClient.post<AdminFullParseStatus>('/site/admin/full-parse/pause')
+  return response.data
+}
+
+export async function resumeAdminFullParse() {
+  const response = await apiClient.post<AdminFullParseStatus>('/site/admin/full-parse/resume')
+  return response.data
+}
+
+export async function cancelAdminFullParse() {
+  const response = await apiClient.post<AdminFullParseStatus>('/site/admin/full-parse/cancel')
+  return response.data
+}
+
+export async function resumeAdminFullParseTask(taskId: string) {
+  const response = await apiClient.post<AdminFullParseStatus>('/site/admin/full-parse/resume-task', undefined, {
+    params: { task_id: taskId },
+    timeout: 0,
+  })
+  return response.data
+}
+
+// ── Прокси-пул ──────────────────────────────────────────────────────────────
+export async function fetchAdminProxies() {
+  const response = await apiClient.get<AdminProxyStatus>('/site/admin/proxies')
+  return response.data
+}
+
+export async function reloadAdminProxies() {
+  const response = await apiClient.post<AdminProxyStatus>('/site/admin/proxies/reload')
+  return response.data
+}
+
+export async function rotateAdminProxy() {
+  const response = await apiClient.post<AdminProxyStatus>('/site/admin/proxies/rotate')
+  return response.data
+}
+
+export async function resetAdminProxy(label?: string) {
+  const response = await apiClient.post<AdminProxyStatus>('/site/admin/proxies/reset', undefined, {
+    params: label ? { label } : undefined,
+  })
+  return response.data
+}
+
+export async function selectAdminProxy(label: string) {
+  const response = await apiClient.post<AdminProxyStatus>('/site/admin/proxies/select', undefined, {
+    params: { label },
+  })
+  return response.data
+}
+
+export async function checkAdminProxies() {
+  const response = await apiClient.post<AdminProxyStatus>('/site/admin/proxies/check', undefined, {
+    timeout: 60_000,
+  })
   return response.data
 }
 

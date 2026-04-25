@@ -74,44 +74,62 @@ def _bool_env(key: str, default: bool = False) -> bool:
 
 def _setup_parser_proxy() -> Optional[str]:
     """
-    Настраивает HTTP-прокси для всех aiohttp.ClientSession в парсере.
+    Активирует прокси через ProxyPool (поддерживает один прокси через
+    PARSER_PROXY_URL ИЛИ список через PARSER_PROXY_LIST).
 
-    Если PARSER_USE_PROXY=true и PARSER_PROXY_URL непустой — выставляет
-    HTTPS_PROXY/HTTP_PROXY env-переменные. Все aiohttp-сессии с trust_env=True
-    автоматически отправят запросы через прокси (без правки каждого вызова).
+    Выставляет HTTPS_PROXY/HTTP_PROXY env-переменные на ТЕКУЩИЙ активный
+    прокси. Все aiohttp-сессии с trust_env=True автоматически подхватят его.
 
-    Формат PARSER_PROXY_URL:  http://user:pass@host:port
+    При смене активного прокси (через rotate / ban) надо перезвать
+    apply_active_proxy_env() — это сделает сам run_full_parse().
 
-    Возвращает URL прокси (для логирования) или None.
+    Возвращает URL текущего прокси (для логирования) или None.
     """
     if not _bool_env("PARSER_USE_PROXY", False):
         return None
-    proxy_url = (os.getenv("PARSER_PROXY_URL") or "").strip()
-    if not proxy_url:
-        print("[PROXY] PARSER_USE_PROXY=true, но PARSER_PROXY_URL пуст — прокси НЕ используется")
+    from proxy_pool import get_proxy_pool
+    pool = get_proxy_pool()
+    pool.reload_from_env()
+    if not pool.enabled:
+        print("[PROXY] PARSER_USE_PROXY=true, но список прокси пуст — прокси НЕ используется")
         return None
-    if not proxy_url.startswith(("http://", "https://")):
-        print(f"[PROXY] PARSER_PROXY_URL должен начинаться с http:// (SOCKS5 не поддерживается aiohttp напрямую)")
-        return None
+    apply_active_proxy_env()
+    e = pool.current()
+    return e.url if e else None
 
-    os.environ["HTTPS_PROXY"] = proxy_url
-    os.environ["HTTP_PROXY"] = proxy_url
-    os.environ["https_proxy"] = proxy_url
-    os.environ["http_proxy"] = proxy_url
-    return proxy_url
+
+def apply_active_proxy_env() -> Optional[str]:
+    """
+    Перечитывает текущий активный прокси из ProxyPool и обновляет HTTPS_PROXY/
+    HTTP_PROXY env-переменные. Возвращает текущий URL (или None).
+
+    Внимание: aiohttp.ClientSession кэширует env-переменные при создании.
+    Чтобы новые env подхватились, надо ПЕРЕСОЗДАТЬ ClientSession.
+    """
+    from proxy_pool import get_proxy_pool
+    pool = get_proxy_pool()
+    if not pool.enabled:
+        for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+            os.environ.pop(k, None)
+        return None
+    e = pool.current()
+    if not e:
+        return None
+    for k in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+        os.environ[k] = e.url
+    return e.url
 
 
 PARSER_PROXY_URL: Optional[str] = _setup_parser_proxy()
 if PARSER_PROXY_URL:
-    try:
-        import urllib.parse as _up
-        _parsed = _up.urlparse(PARSER_PROXY_URL)
-        _safe_host = f"{_parsed.hostname}:{_parsed.port}" if _parsed.hostname else "<unknown>"
-    except Exception:
-        _safe_host = "<unparsed>"
-    print(f"[PROXY] Парсер использует HTTP-прокси: {_safe_host}")
+    from proxy_pool import get_proxy_pool as _gpp
+    _pool = _gpp()
+    _labels = ", ".join(e.label for e in _pool.all_entries())
+    _active = _pool.current()
+    print(f"[PROXY] Пул из {_pool.size()} прокси: {_labels}")
+    print(f"[PROXY] Активный: {_active.label if _active else '—'}")
 else:
-    print("[PROXY] Прокси выключен (PARSER_USE_PROXY != true или PARSER_PROXY_URL пуст)")
+    print("[PROXY] Прокси выключен (PARSER_USE_PROXY != true или список пуст)")
 
 
 def _normalize_release_date(value) -> Optional[str]:
@@ -5624,6 +5642,15 @@ PRICE_UPDATE_SAVE_INTERVAL = int(os.getenv("PRICE_UPDATE_SAVE_INTERVAL", "100") 
 PRICE_UPDATE_SLEEP_SECONDS = float(os.getenv("PRICE_UPDATE_SLEEP_SECONDS", "1.5") or "1.5")
 PRICE_UPDATE_PRODUCTS_PATH = os.getenv("PRICE_UPDATE_PRODUCTS_PATH", "products.pkl")
 
+# Полный парсинг через админку (mode 1, но с прогрессом/паузой/тестом).
+FULL_PARSE_TEST_LIMIT = 100
+FULL_PARSE_BATCH_SIZE = int(os.getenv("FULL_PARSE_BATCH_SIZE", "5") or "5")
+FULL_PARSE_SAVE_INTERVAL = int(os.getenv("FULL_PARSE_SAVE_INTERVAL", "100") or "100")
+FULL_PARSE_SLEEP_SECONDS = float(os.getenv("FULL_PARSE_SLEEP_SECONDS", "1.5") or "1.5")
+FULL_PARSE_PER_TASK_TIMEOUT = float(os.getenv("FULL_PARSE_PER_TASK_TIMEOUT", "120") or "120")
+# Пороги детекта бана (Akamai): сколько подряд 403/пустых ответов считать "забанили".
+FULL_PARSE_BAN_THRESHOLD = int(os.getenv("FULL_PARSE_BAN_THRESHOLD", "10") or "10")
+
 
 def _normalize_discount_category_url(url: str = DISCOUNT_CATEGORY_URL) -> str:
     cleaned = (url or DISCOUNT_CATEGORY_URL).strip().split("?", 1)[0].split("#", 1)[0].rstrip("/")
@@ -6669,6 +6696,492 @@ async def run_price_update(
         "processed": processed,
         "saved": saved_total,
         "failed": failed_total,
+        "elapsed_seconds": elapsed,
+    }
+
+
+FULL_PARSE_STATE_DIR = PROJECT_ROOT / "parser_state"
+
+
+def _full_parse_state_path(task_id: str) -> Path:
+    return FULL_PARSE_STATE_DIR / f"full_parse_{task_id}.json"
+
+
+def _save_full_parse_state(task_id: str, state: dict) -> None:
+    """Атомарная запись state-файла. Сохраняется на каждом checkpoint."""
+    try:
+        FULL_PARSE_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        path = _full_parse_state_path(task_id)
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json_module.dump(state, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception as exc:
+        print(f"[!] Не удалось сохранить state {task_id}: {exc}")
+
+
+def list_orphan_full_parse_tasks() -> list[dict]:
+    """
+    Возвращает state-файлы со статусом "running" — это незавершённые
+    запуски (видимо упал процесс / рестарт сервера). Для резюма.
+    """
+    out: list[dict] = []
+    if not FULL_PARSE_STATE_DIR.exists():
+        return out
+    for p in sorted(FULL_PARSE_STATE_DIR.glob("full_parse_*.json")):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json_module.load(f)
+            if data.get("status") == "running":
+                # Только публичные поля
+                out.append({
+                    "task_id": data.get("task_id"),
+                    "mode": data.get("mode"),
+                    "started_at": data.get("started_at"),
+                    "url_index": data.get("url_index", 0),
+                    "total": data.get("total", 0),
+                    "saved_total": data.get("saved_total", 0),
+                    "failed_total": data.get("failed_total", 0),
+                    "ban_count_403": data.get("ban_count_403", 0),
+                    "products_path": data.get("products_path"),
+                })
+        except Exception:
+            continue
+    return out
+
+
+def load_full_parse_state(task_id: str) -> Optional[dict]:
+    p = _full_parse_state_path(task_id)
+    if not p.exists():
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json_module.load(f)
+    except Exception:
+        return None
+
+
+async def run_full_parse(
+    *,
+    test_limit: Optional[int] = None,
+    products_path: str = PRICE_UPDATE_PRODUCTS_PATH,
+    progress_callback=None,
+    control: Optional[UpdateControl] = None,
+    resume_task_id: Optional[str] = None,
+    task_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Полный парсинг через админку.
+
+    Test mode (test_limit=100): берёт случайные 100 URL из products.pkl, парсит,
+        сохраняет ТОЛЬКО цены/скидки (не трогает name/localization), не очищает БД.
+        Безопасно гонять для проверки прокси/таймаутов/новых багов.
+
+    Full mode (test_limit=None): парсит ВСЕ ru-ua URL из products.pkl,
+        сохраняет ВСЁ (как старый mode 1), но без чистки БД на ходу
+        (БД очищается только если в конце явно сказали — здесь не очищаем,
+        потому что иначе на крэше теряем всё).
+
+    Метрики (live progress):
+      total / processed / saved / failed / empty_returns / ban_count_403 /
+      missing_ua / missing_tr / missing_in / parse_seconds / avg_per_product
+
+    Поддерживает UpdateControl: pause/resume/cancel.
+    """
+    started = perf_counter()
+
+    # === RESUME ветка: подгружаем сохранённое состояние ===
+    resume_state: Optional[dict] = None
+    if resume_task_id:
+        resume_state = load_full_parse_state(resume_task_id)
+        if not resume_state:
+            message = f"State для resume не найден: task_id={resume_task_id}."
+            await _emit_discount_progress(
+                progress_callback,
+                _discount_progress_payload(status="failed", phase="failed", message=message, logs=[message]),
+            )
+            return {"message": message, "cancelled": False, "elapsed_seconds": 0}
+        # Восстанавливаем параметры из state
+        test_mode = resume_state.get("mode") == "test"
+        normalized_limit = int(resume_state.get("test_limit") or 0) if test_mode else None
+        products_path = resume_state.get("products_path", products_path)
+        # task_id для нового запуска — тот же, продолжаем тот же state-файл
+        task_id = resume_task_id
+    else:
+        test_mode = bool(test_limit and test_limit > 0)
+        normalized_limit = int(test_limit) if test_mode else None
+
+    if not task_id:
+        from uuid import uuid4 as _uuid4
+        task_id = _uuid4().hex
+
+    await ensure_database_schema()
+    await currency_converter.load_rates()
+
+    # 1. Загрузка списка URL.
+    abs_path = products_path if os.path.isabs(products_path) else str(PROJECT_ROOT / products_path)
+    if not os.path.exists(abs_path):
+        message = f"Файл {products_path} не найден — нечего парсить."
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(status="failed", phase="failed", message=message, logs=[message]),
+        )
+        return {"message": message, "cancelled": False, "elapsed_seconds": perf_counter() - started}
+
+    with open(abs_path, "rb") as f:
+        all_urls = pickle.load(f)
+    if not isinstance(all_urls, (list, tuple)):
+        message = f"{products_path}: неожиданный формат (не list)."
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(status="failed", phase="failed", message=message, logs=[message]),
+        )
+        return {"message": message, "cancelled": False, "elapsed_seconds": perf_counter() - started}
+
+    ua_urls: list[str] = [u for u in all_urls if isinstance(u, str) and "/ru-ua/" in u]
+
+    if resume_state and resume_state.get("product_urls_subset"):
+        # Resume: используем точно тот же subset URL'ов (важно для test mode с random sample).
+        product_urls = list(resume_state["product_urls_subset"])
+    elif test_mode and normalized_limit and normalized_limit < len(ua_urls):
+        import random as _random
+        product_urls = _random.sample(ua_urls, normalized_limit)
+    else:
+        product_urls = ua_urls
+
+    total_products = len(product_urls)
+
+    if resume_state:
+        start_message = (
+            f"Resume task {task_id[:8]}…: продолжаем с {resume_state.get('url_index', 0)}/{total_products}."
+        )
+    else:
+        start_message = (
+            f"Тестовый полный парсинг: {total_products} случайных товаров (без очистки БД, обновление только цен/скидок)."
+            if test_mode
+            else f"Полный парсинг: {total_products} товаров из {products_path}."
+        )
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            phase="starting", message=start_message,
+            total=total_products, processed=0, saved=0, failed=0,
+            mode="test" if test_mode else "full",
+            empty_returns=0, ban_count_403=0,
+            missing_ua=0, missing_tr=0, missing_in=0,
+            logs=[start_message],
+        ),
+    )
+
+    if total_products == 0:
+        message = "Список товаров пуст — нечего парсить."
+        await _emit_discount_progress(
+            progress_callback,
+            _discount_progress_payload(
+                status="completed", phase="completed", message=message,
+                total=0, processed=0, saved=0, failed=0, percent=100,
+                logs=[message],
+            ),
+        )
+        return {"message": message, "cancelled": False, "total_products": 0,
+                "elapsed_seconds": perf_counter() - started}
+
+    promo = await _load_manual_promo_cache()
+    existing_result = _load_manual_result_cache()
+    parse_logger = ParseLogger()
+
+    batch_size = max(1, FULL_PARSE_BATCH_SIZE)
+    save_interval = max(FULL_PARSE_SAVE_INTERVAL, batch_size)
+    sleep_seconds = max(FULL_PARSE_SLEEP_SECONDS, 0.5)
+    per_task_timeout = max(FULL_PARSE_PER_TASK_TIMEOUT, 30.0)
+
+    # Восстановление счётчиков из state при resume
+    if resume_state:
+        url_index = int(resume_state.get("url_index", 0))
+        processed = url_index
+        saved_total = int(resume_state.get("saved_total", 0))
+        failed_total = int(resume_state.get("failed_total", 0))
+        empty_returns = int(resume_state.get("empty_returns", 0))
+        ban_count_403 = int(resume_state.get("ban_count_403", 0))
+        missing_ua = int(resume_state.get("missing_ua", 0))
+        missing_tr = int(resume_state.get("missing_tr", 0))
+        missing_in = int(resume_state.get("missing_in", 0))
+    else:
+        url_index = 0
+        processed = 0
+        saved_total = 0
+        failed_total = 0
+        empty_returns = 0
+        ban_count_403 = 0
+        missing_ua = 0
+        missing_tr = 0
+        missing_in = 0
+
+    consecutive_bans = 0  # подряд идущие баны для детекта "прокси умер"
+    pending_save_records: list[dict] = []
+    cancelled_early = False
+
+    from proxy_pool import get_proxy_pool
+    pool = get_proxy_pool()
+
+    # Сохраняем initial state-файл (статус "running" → если процесс упадёт,
+    # мы увидим этот файл при следующем старте сервиса).
+    def _checkpoint_state(status_value: str = "running") -> None:
+        _save_full_parse_state(task_id, {
+            "task_id": task_id,
+            "mode": "test" if test_mode else "full",
+            "status": status_value,
+            "started_at": datetime.now().isoformat(),
+            "products_path": products_path,
+            "test_limit": normalized_limit,
+            "product_urls_subset": product_urls if (test_mode and total_products <= 1000) else None,
+            "url_index": url_index,
+            "total": total_products,
+            "saved_total": saved_total,
+            "failed_total": failed_total,
+            "empty_returns": empty_returns,
+            "ban_count_403": ban_count_403,
+            "missing_ua": missing_ua,
+            "missing_tr": missing_tr,
+            "missing_in": missing_in,
+        })
+
+    _checkpoint_state("running")
+
+    # Outer while — переоткрывает ClientSession при ротации прокси.
+    # Inner while — обычный батч-цикл с накопленным индексом url_index.
+    rotation_signal = False  # выставляется в False; True = надо пересоздать сессию
+    while url_index < total_products and not cancelled_early:
+        if control is not None:
+            if await control.should_cancel():
+                cancelled_early = True
+                break
+
+        # Применяем активный прокси к env (sessions с trust_env=True подхватят).
+        active_proxy_url = apply_active_proxy_env() if pool.enabled else None
+        if pool.enabled:
+            pool.mark_used()
+
+        connector = aiohttp.TCPConnector(
+            limit=max(batch_size * 2, 6),
+            limit_per_host=max(batch_size, 4),
+            keepalive_timeout=15,
+            enable_cleanup_closed=True,
+            ttl_dns_cache=300,
+        )
+        async with aiohttp.ClientSession(
+            trust_env=True,
+            timeout=aiohttp.ClientTimeout(total=per_task_timeout, connect=20),
+            connector=connector,
+        ) as session:
+            rotation_signal = False
+            while url_index < total_products and not cancelled_early and not rotation_signal:
+                if control is not None:
+                    if await control.should_cancel():
+                        cancelled_early = True
+                        break
+
+                batch_end = min(total_products, url_index + batch_size)
+                batch_urls = product_urls[url_index:batch_end]
+
+                async def _parse_one(url: str) -> tuple[list[dict], str]:
+                    """Возвращает (records, status). status: 'ok' | 'empty' | 'ban' | 'error' | 'timeout'."""
+                    try:
+                        items = await asyncio.wait_for(
+                            parse(session, url, regions=["UA", "TR", "IN"], logger=parse_logger),
+                            timeout=per_task_timeout,
+                        )
+                        if items is None:
+                            return [], "error"
+                        if not items:
+                            return [], "empty"
+                        return items, "ok"
+                    except asyncio.TimeoutError:
+                        parse_logger.log_product_error(url, f"FULL_PARSE_TASK_TIMEOUT_{int(per_task_timeout)}s")
+                        return [], "timeout"
+                    except (asyncio.CancelledError, KeyboardInterrupt):
+                        raise
+                    except Exception as exc:
+                        msg = str(exc).lower()
+                        if "403" in msg or "access denied" in msg or "akamai" in msg:
+                            parse_logger.log_product_error(url, f"FULL_PARSE_BAN_403 | {type(exc).__name__}: {str(exc)[:120]}")
+                            return [], "ban"
+                        parse_logger.log_product_error(
+                            url, f"FULL_PARSE_TASK_EXCEPTION | {type(exc).__name__}: {str(exc)[:150]}"
+                        )
+                        return [], "error"
+
+                results = await asyncio.gather(*[_parse_one(u) for u in batch_urls])
+
+                batch_records: list[dict] = []
+                for url, (items, status) in zip(batch_urls, results):
+                    if status == "ok":
+                        batch_records.extend(items)
+                        consecutive_bans = 0
+                        if pool.enabled:
+                            pool.mark_success()
+                        regions_present = {(r.get("region") or "").upper() for r in items}
+                        if "UA" not in regions_present:
+                            missing_ua += 1
+                        if "TR" not in regions_present:
+                            missing_tr += 1
+                        if "IN" not in regions_present:
+                            missing_in += 1
+                    elif status == "empty":
+                        empty_returns += 1
+                        consecutive_bans = 0
+                    elif status == "ban":
+                        ban_count_403 += 1
+                        consecutive_bans += 1
+                        failed_total += 1
+                        if pool.enabled:
+                            # Сообщаем пулу о бане. Если pool ротировал — current() вернёт
+                            # уже новый url, и мы это увидим ниже.
+                            pool.mark_failure(reason=f"403 / Akamai")
+                    else:  # timeout/error
+                        failed_total += 1
+                        consecutive_bans = 0
+
+                final_records = _build_manual_final_records(batch_records) if batch_records else []
+                if final_records:
+                    pending_save_records.extend(final_records)
+
+                url_index = batch_end
+                processed = url_index
+
+                # Если пул сменил активный прокси — закрываем сессию и открываем новую.
+                if pool.enabled:
+                    new_active = pool.current_url()
+                    if new_active and new_active != active_proxy_url:
+                        rotation_signal = True
+                        await _emit_discount_progress(
+                            progress_callback,
+                            _discount_progress_payload(
+                                phase="proxy_rotated",
+                                message=f"🔄 Прокси автоматически сменён → {pool.current().label}",
+                                total=total_products, processed=processed,
+                                saved=saved_total, failed=failed_total,
+                                empty_returns=empty_returns, ban_count_403=ban_count_403,
+                                missing_ua=missing_ua, missing_tr=missing_tr, missing_in=missing_in,
+                                logs=[f"🔄 Автосмена прокси: {pool.current().label}"],
+                                consecutive_bans=consecutive_bans,
+                                active_proxy=pool.current().label,
+                            ),
+                        )
+                        consecutive_bans = 0  # после смены — отсчёт заново
+
+                # Подряд идущие 403'ки без ротации (одинокий прокси) — пауза 60с и warning.
+                if consecutive_bans >= FULL_PARSE_BAN_THRESHOLD and not rotation_signal:
+                    ban_warning = (
+                        f"⚠️ {consecutive_bans} подряд 403 — прокси забанен и нет резерва. "
+                        f"Пауза 60с и продолжаем."
+                    )
+                    await _emit_discount_progress(
+                        progress_callback,
+                        _discount_progress_payload(
+                            phase="ban_detected", message=ban_warning,
+                            total=total_products, processed=processed,
+                            saved=saved_total, failed=failed_total,
+                            empty_returns=empty_returns, ban_count_403=ban_count_403,
+                            missing_ua=missing_ua, missing_tr=missing_tr, missing_in=missing_in,
+                            logs=[ban_warning], consecutive_bans=consecutive_bans,
+                        ),
+                    )
+                    await asyncio.sleep(60)
+                    consecutive_bans = 0
+
+                should_flush = bool(pending_save_records) and (
+                    processed >= total_products or len(pending_save_records) >= save_interval
+                )
+                if should_flush:
+                    records_to_save = pending_save_records
+                    pending_save_records = []
+                    saved = await save_discount_batch_to_db(records_to_save, promo)
+                    product_ids = [r.get("id") for r in records_to_save if r.get("id")]
+                    await refresh_product_cards_after_save(product_ids, full_rebuild=False)
+                    _update_manual_result_cache(existing_result, records_to_save)
+                    saved_total += saved
+                    # Чекпоинт state (для resume на рестарте сервера)
+                    _checkpoint_state("running")
+
+                elapsed = perf_counter() - started
+                avg = (elapsed / processed) if processed else 0.0
+                proxy_label = pool.current().label if (pool.enabled and pool.current()) else "—"
+                log_line = (
+                    f"Прогресс {processed}/{total_products}: ok={saved_total}, "
+                    f"пустых={empty_returns}, ban403={ban_count_403}, ошибок={failed_total}, "
+                    f"missing UA/TR/IN={missing_ua}/{missing_tr}/{missing_in}, "
+                    f"avg={avg:.1f}с/товар, proxy={proxy_label}"
+                )
+                await _emit_discount_progress(
+                    progress_callback,
+                    _discount_progress_payload(
+                        phase="parse", message=log_line,
+                        total=total_products, processed=processed,
+                        saved=saved_total, failed=failed_total,
+                        logs=[log_line],
+                        batch_size=len(batch_urls),
+                        mode="test" if test_mode else "full",
+                        empty_returns=empty_returns, ban_count_403=ban_count_403,
+                        missing_ua=missing_ua, missing_tr=missing_tr, missing_in=missing_in,
+                        avg_per_product_seconds=round(avg, 2),
+                        consecutive_bans=consecutive_bans,
+                        active_proxy=proxy_label,
+                    ),
+                )
+                await asyncio.sleep(sleep_seconds)
+
+        # outer while: если был rotation_signal — следующая итерация откроет сессию с новым прокси
+
+    # final-flush: на отмене / окончании могут остаться накопленные записи в буфере
+    if pending_save_records:
+        saved = await save_discount_batch_to_db(pending_save_records, promo)
+        product_ids = [r.get("id") for r in pending_save_records if r.get("id")]
+        await refresh_product_cards_after_save(product_ids, full_rebuild=False)
+        _update_manual_result_cache(existing_result, pending_save_records)
+        saved_total += saved
+        pending_save_records = []
+
+    elapsed = perf_counter() - started
+    if cancelled_early:
+        message = (
+            f"Полный парсинг отменён: обработано {processed}/{total_products}, "
+            f"сохранено {saved_total} строк за {elapsed/60:.1f} мин."
+        )
+        final_status = "cancelled"
+    else:
+        message = (
+            f"Полный парсинг завершён: обработано {processed}/{total_products}, "
+            f"сохранено {saved_total} строк за {elapsed/60:.1f} мин."
+        )
+        final_status = "completed"
+    # финальный state — статус НЕ "running" (для get_orphans фильтра)
+    _checkpoint_state(final_status)
+    parse_logger.log_summary(total_products=total_products, parsed_count=processed)
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            status=final_status, phase=final_status, message=message,
+            total=total_products, processed=processed,
+            saved=saved_total, failed=failed_total,
+            logs=[message], mode="test" if test_mode else "full",
+            empty_returns=empty_returns, ban_count_403=ban_count_403,
+            missing_ua=missing_ua, missing_tr=missing_tr, missing_in=missing_in,
+        ),
+    )
+    return {
+        "message": message,
+        "mode": "test" if test_mode else "full",
+        "cancelled": cancelled_early,
+        "total_products": total_products,
+        "processed": processed,
+        "saved": saved_total,
+        "failed": failed_total,
+        "empty_returns": empty_returns,
+        "ban_count_403": ban_count_403,
+        "missing_ua": missing_ua,
+        "missing_tr": missing_tr,
+        "missing_in": missing_in,
         "elapsed_seconds": elapsed,
     }
 

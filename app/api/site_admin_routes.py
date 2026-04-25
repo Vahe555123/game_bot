@@ -307,6 +307,144 @@ async def cancel_site_admin_price_update(
         _raise_http_auth_error(error)
 
 
+# ── Полный парсинг (mode 1) ───────────────────────────────────────────────────
+@router.post("/full-parse", summary="Start full parser (mode 1)")
+async def start_site_admin_full_parse(
+    test: bool = Query(False, description="Тест на 100 случайных товарах (без очистки БД)"),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.start_full_parse(test=test)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.get("/full-parse/status", summary="Full parser status")
+async def get_site_admin_full_parse_status(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.get_full_parse_status()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/full-parse/pause", summary="Pause full parser")
+async def pause_site_admin_full_parse(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.pause_full_parse()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/full-parse/resume", summary="Resume full parser")
+async def resume_site_admin_full_parse(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.resume_full_parse()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/full-parse/cancel", summary="Cancel full parser")
+async def cancel_site_admin_full_parse(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.cancel_full_parse()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/full-parse/resume-task", summary="Resume an interrupted full parse task")
+async def resume_site_admin_full_parse_task(
+    task_id: str = Query(..., description="task_id из orphans"),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.resume_full_parse_task(resume_task_id=task_id)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+# ── Управление прокси-пулом ───────────────────────────────────────────────────
+@router.get("/proxies", summary="Proxy pool status")
+def get_site_admin_proxies(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.get_proxy_status()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/proxies/reload", summary="Reload proxy pool from .env")
+def reload_site_admin_proxies(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.reload_proxy_pool()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/proxies/rotate", summary="Rotate to next proxy")
+def rotate_site_admin_proxy(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.rotate_proxy()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/proxies/reset", summary="Reset cooldown/ban for one proxy or all")
+def reset_site_admin_proxy(
+    label: str | None = Query(None, description="host:port; пусто = все"),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.reset_proxy(label=label)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/proxies/select", summary="Set active proxy by label")
+def select_site_admin_proxy(
+    label: str = Query(..., description="host:port"),
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return service.select_proxy(label)
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post("/proxies/check", summary="Health-check all proxies (ping PS Store)")
+async def check_site_admin_proxies(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.health_check_proxies()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
 @router.get("/products/{product_id}", response_model=AdminProductDetailsResponse, summary="Product details")
 def get_site_admin_product(
     product_id: str,
