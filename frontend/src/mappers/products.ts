@@ -131,7 +131,10 @@ function buildFallbackRegionalPrice(
     hasDiscount: Boolean(discountPercent || psPlusDiscountPercent),
     discountPercent,
     psPlusDiscountPercent,
-    localizationName: raw.localization_name ?? null,
+    // Региональная локализация известна только когда backend кладёт её в regional_prices.
+    // Глобальный raw.localization_name — это язык UA-записи; нельзя подставлять его в TR/IN
+    // (баг: после обновления цен у Far Cry/GoW/AC Origins TR/IN показывали UA-локализацию).
+    localizationName: null,
   }
 }
 
@@ -154,7 +157,9 @@ function mergeRegionalPrice(
     hasDiscount: existing.hasDiscount || fallback.hasDiscount,
     discountPercent: existing.discountPercent ?? fallback.discountPercent,
     psPlusDiscountPercent: existing.psPlusDiscountPercent ?? fallback.psPlusDiscountPercent,
-    localizationName: existing.localizationName ?? fallback.localizationName,
+    // Не фоллбэчим локализацию: если бэк не вернул её для данного региона — у этого
+    // региона её действительно нет. Показываем "Язык не указан" (LocalizationBadge).
+    localizationName: existing.localizationName,
   }
 }
 

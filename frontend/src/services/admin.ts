@@ -69,7 +69,8 @@ export async function fetchAdminProducts(params: {
   category?: string
   sort?: string
   missing_region?: string
-  missing_localization?: boolean
+  // '' / 'any' / 'UA' / 'TR' / 'IN' — фильтр "язык не указан" по всему товару или конкретному региону.
+  missing_localization?: string
 }) {
   const response = await apiClient.get<AdminProductListResponse>('/site/admin/products', { params })
   return response.data

@@ -591,7 +591,7 @@ class SiteAdminService:
         category: Optional[str] = None,
         sort: Optional[str] = None,
         missing_region: Optional[str] = None,
-        missing_localization: Optional[bool] = None,
+        missing_localization: Optional[Any] = None,
     ) -> AdminProductListResponse:
         favorites_subquery = (
             db.query(
@@ -621,13 +621,27 @@ class SiteAdminService:
             query = query.filter(Product.region == region.strip().upper())
         if category:
             query = query.filter(Product.category == category.strip())
-        if missing_localization:
-            query = query.filter(
-                or_(
-                    Product.localization.is_(None),
-                    func.trim(Product.localization) == "",
-                )
+        # missing_localization: '' / None — выкл; 'any'/'true'/True — любая запись без языка;
+        # 'UA'/'TR'/'IN' — только запись соответствующего региона без языка.
+        loc_mode_raw = missing_localization
+        if loc_mode_raw is True:
+            loc_mode = "any"
+        elif loc_mode_raw is False or loc_mode_raw is None:
+            loc_mode = ""
+        else:
+            loc_mode = str(loc_mode_raw).strip().lower()
+            if loc_mode in ("true", "1", "yes", "missing"):
+                loc_mode = "any"
+
+        if loc_mode:
+            empty_loc = or_(
+                Product.localization.is_(None),
+                func.trim(Product.localization) == "",
             )
+            if loc_mode == "any":
+                query = query.filter(empty_loc)
+            elif loc_mode in ("ua", "tr", "in"):
+                query = query.filter(Product.region == loc_mode.upper()).filter(empty_loc)
 
         # Фильтр по отсутствующим регионам. Значения:
         #   "any" / "incomplete"  — у товара < 3 региональных строк;

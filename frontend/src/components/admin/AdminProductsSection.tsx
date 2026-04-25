@@ -332,7 +332,7 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
   const [regionFilter, setRegionFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [missingRegionFilter, setMissingRegionFilter] = useState('')
-  const [missingLocalizationFilter, setMissingLocalizationFilter] = useState(false)
+  const [missingLocalizationFilter, setMissingLocalizationFilter] = useState('')
   const [sort, setSort] = useState<AdminProductSortMode>('popular')
   const [isLoading, setIsLoading] = useState(true)
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
@@ -722,16 +722,19 @@ export function AdminProductsSection({ onDataChanged }: { onDataChanged: () => P
             </select>
 
             <select
-              value={missingLocalizationFilter ? 'missing' : ''}
+              value={missingLocalizationFilter}
               onChange={(event) => {
                 setPage(1)
-                setMissingLocalizationFilter(event.target.value === 'missing')
+                setMissingLocalizationFilter(event.target.value)
               }}
               className="auth-input"
-              title="Показать товары, у которых локализация не указана"
+              title="Показать товары, у которых локализация не указана (для всех или конкретного региона)"
             >
               <option value="">Язык: все</option>
-              <option value="missing">Язык не указан</option>
+              <option value="any">Язык не указан (любой регион)</option>
+              <option value="UA">Нет UA языка</option>
+              <option value="TR">Нет TR языка</option>
+              <option value="IN">Нет IN языка</option>
             </select>
           </div>
 

@@ -117,7 +117,7 @@ export function CatalogFilters({
           value={draftFilters.priceCurrency}
           options={PRICE_CURRENCY_OPTIONS}
           onChange={(priceCurrency) => onDraftChange({ priceCurrency })}
-          className="lg:col-span-2 xl:col-span-1"
+          className="min-w-[128px] lg:col-span-2 xl:col-span-1"
         />
 
         <label className="flex min-h-[46px] cursor-pointer items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-100 transition hover:border-brand-400/40 md:rounded-2xl lg:col-span-2 xl:col-span-1">

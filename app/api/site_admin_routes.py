@@ -148,7 +148,10 @@ def list_site_admin_products(
     category: str | None = Query(None),
     sort: str | None = Query("popular"),
     missing_region: str | None = Query(None),
-    missing_localization: bool | None = Query(None),
+    missing_localization: str | None = Query(
+        None,
+        description="'' / 'any' (любой регион без языка) / 'UA' / 'TR' / 'IN' / 'true' (alias для any)",
+    ),
     db: Session = Depends(get_db),
     current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
 ):
