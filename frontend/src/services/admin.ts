@@ -130,6 +130,35 @@ export async function sendAdminDiscountNotifications() {
   return response.data
 }
 
+export type AdminDiscountExpiryGroup = {
+  discount_end: string
+  products_count: number
+  rows_count: number
+}
+
+export type AdminDiscountExpiryClearResponse = {
+  products_cleared: number
+  product_cards_cleared: number
+  result_cache_cleared: number
+  matched_dates: string[]
+}
+
+export async function fetchAdminDiscountExpiryGroups() {
+  const response = await apiClient.get<{ groups: AdminDiscountExpiryGroup[] }>(
+    '/site/admin/discounts/expiry-groups',
+  )
+  return response.data.groups
+}
+
+export async function clearAdminDiscountsByDates(discountEnds: string[]) {
+  const response = await apiClient.post<AdminDiscountExpiryClearResponse>(
+    '/site/admin/discounts/expiry-clear',
+    { discount_ends: discountEnds, confirm: true },
+    { timeout: 0 },
+  )
+  return response.data
+}
+
 // ── Обновление цен ──────────────────────────────────────────────────────────
 export async function startAdminPriceUpdate(test: boolean) {
   const response = await apiClient.post<AdminPriceUpdateStatus>(

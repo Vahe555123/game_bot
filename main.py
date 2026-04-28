@@ -15,6 +15,10 @@ from app.api.site_favorite_routes import router as site_favorite_router
 from app.api.site_purchase_routes import router as site_purchase_router
 from app.api.payment_return_routes import router as payment_return_router
 from app.bot.main import setup_bot, shutdown_bot
+from app.database.discount_expiry import (
+    start_discount_expiry_loop,
+    stop_discount_expiry_loop,
+)
 from app.webapp.routes import router as webapp_router
 from config.settings import settings
 
@@ -34,6 +38,8 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("TELEGRAM_BOT_TOKEN is not set. Bot startup skipped.")
 
+    start_discount_expiry_loop()
+
     logger.info("=" * 60)
     logger.info("%s v%s started", settings.PROJECT_NAME, settings.VERSION)
     logger.info("API docs: http://%s:%s/api/docs", settings.HOST, settings.PORT)
@@ -43,6 +49,7 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down application...")
+    await stop_discount_expiry_loop()
     if settings.TELEGRAM_BOT_TOKEN:
         await shutdown_bot()
     logger.info("Application stopped")

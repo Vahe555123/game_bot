@@ -266,6 +266,33 @@ async def send_site_admin_discount_notifications(
         _raise_http_auth_error(error)
 
 
+@router.get("/discounts/expiry-groups", summary="List discount end-date groups")
+def list_site_admin_discount_expiry_groups(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    from app.database.discount_expiry import list_discount_end_groups
+
+    return {"groups": list_discount_end_groups()}
+
+
+@router.post("/discounts/expiry-clear", summary="Clear discounts ending on specific dates")
+def clear_site_admin_discounts_by_dates(
+    payload: dict,
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    from app.database.discount_expiry import clear_discounts_ending_on
+
+    discount_ends = payload.get("discount_ends") or []
+    confirm = bool(payload.get("confirm"))
+    if not isinstance(discount_ends, list) or not discount_ends:
+        raise HTTPException(status_code=400, detail={"message": "Укажите хотя бы одну дату discount_end."})
+    if not confirm:
+        raise HTTPException(status_code=400, detail={"message": "Подтвердите удаление флагом confirm=true."})
+
+    stats = clear_discounts_ending_on(discount_ends)
+    return stats.to_dict()
+
+
 # ── Обновление цен (по products.pkl) ──────────────────────────────────────────
 @router.post("/prices/update", summary="Start price update parser")
 async def start_site_admin_price_update(

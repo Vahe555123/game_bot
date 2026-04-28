@@ -1,7 +1,9 @@
-import { BadgePercent, ExternalLink, Pause, Play, PlayCircle, RefreshCw, Send, X } from 'lucide-react'
+import { BadgePercent, CalendarX, ExternalLink, Pause, Play, PlayCircle, RefreshCw, Send, Trash2, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   cancelAdminDiscountUpdate,
+  clearAdminDiscountsByDates,
+  fetchAdminDiscountExpiryGroups,
   fetchAdminDiscountProducts,
   fetchAdminDiscountUpdateStatus,
   pauseAdminDiscountUpdate,
@@ -9,6 +11,7 @@ import {
   sendAdminDiscountNotifications,
   startAdminDiscountUpdate,
 } from '../../services/admin'
+import type { AdminDiscountExpiryGroup } from '../../services/admin'
 import type { AdminDiscountUpdateStatus, AdminProduct } from '../../types/admin'
 import { getApiErrorMessage } from '../../utils/apiErrors'
 import {
@@ -40,6 +43,7 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
   const [isStarting, setIsStarting] = useState<'test' | 'full' | null>(null)
   const [isSendingNotifications, setIsSendingNotifications] = useState(false)
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
+  const [isExpiryModalOpen, setIsExpiryModalOpen] = useState(false)
 
   const isRunning = status?.status === 'pending' || status?.status === 'running'
   const isPaused = status?.status === 'paused'
@@ -108,8 +112,8 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
   async function handleStart(test: boolean) {
     const mode = test ? 'test' : 'full'
     const confirmText = test
-      ? 'Тестовый запуск очистит текущие скидки и обработает первые 10 товаров. Запустить?'
-      : 'Полное обновление очистит текущие скидки и заново соберёт весь sale-раздел. Запустить?'
+      ? 'Тестовый запуск UPSERT-нет первые 10 товаров sale-раздела. Старые скидки трогать не будет — истёкшие удалит фоновая задача. Запустить?'
+      : 'Полное обновление UPSERT-нет весь sale-раздел. Старые скидки с актуальной датой останутся, истёкшие удалит фоновая задача. Запустить?'
 
     if (!window.confirm(confirmText)) {
       return
@@ -170,6 +174,15 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
       description="Товары, у которых сейчас есть скидка в базе, и запуск отдельного процесса обновления скидок из PlayStation Store."
       action={
         <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={Boolean(isStarting) || isSendingNotifications || isActiveTask}
+            onClick={() => setIsExpiryModalOpen(true)}
+          >
+            <CalendarX size={16} />
+            Очистить по дате
+          </button>
           <button
             type="button"
             className="btn-secondary"
@@ -375,7 +388,188 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
           </button>
         </div>
       </div>
+
+      {isExpiryModalOpen ? (
+        <DiscountExpiryModal
+          onClose={() => setIsExpiryModalOpen(false)}
+          onCleared={async (response) => {
+            setNotice({
+              type: 'success',
+              message:
+                `Очищено: products=${response.products_cleared}, ` +
+                `product_cards=${response.product_cards_cleared}, ` +
+                `result.pkl=${response.result_cache_cleared}.`,
+            })
+            setIsExpiryModalOpen(false)
+            await loadProducts()
+            await onDataChanged()
+          }}
+        />
+      ) : null}
     </AdminSectionCard>
+  )
+}
+
+function DiscountExpiryModal({
+  onClose,
+  onCleared,
+}: {
+  onClose: () => void
+  onCleared: (response: Awaited<ReturnType<typeof clearAdminDiscountsByDates>>) => Promise<void> | void
+}) {
+  const [groups, setGroups] = useState<AdminDiscountExpiryGroup[]>([])
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [isLoading, setIsLoading] = useState(true)
+  const [isClearing, setIsClearing] = useState(false)
+  const [confirmStep, setConfirmStep] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await fetchAdminDiscountExpiryGroups()
+        if (!cancelled) setGroups(data)
+      } catch (err) {
+        if (!cancelled) setError(getApiErrorMessage(err, 'Не удалось загрузить группы скидок.'))
+      } finally {
+        if (!cancelled) setIsLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const totalProducts = groups
+    .filter((group) => selected.has(group.discount_end))
+    .reduce((sum, group) => sum + group.products_count, 0)
+  const totalRows = groups
+    .filter((group) => selected.has(group.discount_end))
+    .reduce((sum, group) => sum + group.rows_count, 0)
+
+  function toggle(date: string) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(date)) next.delete(date)
+      else next.add(date)
+      return next
+    })
+    setConfirmStep(false)
+  }
+
+  async function handleClear() {
+    if (!confirmStep) {
+      setConfirmStep(true)
+      return
+    }
+    setIsClearing(true)
+    setError(null)
+    try {
+      const response = await clearAdminDiscountsByDates(Array.from(selected))
+      await onCleared(response)
+    } catch (err) {
+      setError(getApiErrorMessage(err, 'Не удалось очистить скидки.'))
+      setConfirmStep(false)
+    } finally {
+      setIsClearing(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-8">
+      <div className="w-full max-w-2xl rounded-[24px] border border-white/10 bg-slate-950/95 p-6 shadow-2xl">
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Очистка скидок по дате окончания</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              Выберите одну или несколько дат `discount_end`. Очистятся только товары с этими метками
+              в `products`, `product_cards` и `result.pkl`. Остальные скидки не пострадают.
+            </p>
+          </div>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            <X size={16} />
+          </button>
+        </div>
+
+        {error ? (
+          <div className="mb-3 rounded-[12px] border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm text-rose-100">
+            {error}
+          </div>
+        ) : null}
+
+        {isLoading ? (
+          <div className="space-y-2">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="h-12 animate-pulse rounded-[12px] bg-white/[0.04]" />
+            ))}
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="rounded-[12px] border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-sm text-slate-400">
+            В каталоге нет скидок с заполненной датой окончания.
+          </div>
+        ) : (
+          <div className="max-h-80 space-y-2 overflow-auto pr-1">
+            {groups.map((group) => {
+              const checked = selected.has(group.discount_end)
+              return (
+                <label
+                  key={group.discount_end}
+                  className={`flex cursor-pointer items-center justify-between gap-3 rounded-[14px] border px-4 py-3 text-sm transition ${
+                    checked
+                      ? 'border-brand-400/60 bg-brand-500/10 text-white'
+                      : 'border-white/10 bg-white/[0.03] text-slate-200 hover:bg-white/[0.06]'
+                  }`}
+                >
+                  <span className="flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(group.discount_end)}
+                      className="h-4 w-4 accent-brand-400"
+                    />
+                    <span>
+                      <span className="font-mono text-sm">{group.discount_end}</span>
+                      <span className="ml-2 text-xs text-slate-400">UTC</span>
+                    </span>
+                  </span>
+                  <span className="text-xs text-slate-300">
+                    {group.products_count} товаров • {group.rows_count} строк
+                  </span>
+                </label>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-slate-300">
+            Выбрано дат: <span className="font-semibold text-white">{selected.size}</span>
+            {selected.size ? (
+              <>
+                {' '}
+                • товаров: <span className="font-semibold text-white">{totalProducts}</span>
+                {' '}• строк: <span className="font-semibold text-white">{totalRows}</span>
+              </>
+            ) : null}
+          </p>
+          <div className="flex gap-3">
+            <button type="button" className="btn-secondary" onClick={onClose} disabled={isClearing}>
+              Отмена
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={selected.size === 0 || isClearing}
+              onClick={handleClear}
+            >
+              {isClearing ? <RefreshCw size={16} className="animate-spin" /> : <Trash2 size={16} />}
+              {confirmStep ? 'Точно удалить?' : 'Удалить выбранные'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

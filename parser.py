@@ -6238,7 +6238,16 @@ async def run_discount_update(
     progress_callback=None,
     control: Optional[UpdateControl] = None,
 ) -> dict[str, Any]:
-    """Очищает старые скидки и обновляет их из sale-раздела PlayStation Store.
+    """Обновляет скидки из sale-раздела PlayStation Store через UPSERT.
+
+    Раньше функция массово зануляла все скидки в БД ПЕРЕД парсингом. Это ломало
+    ситуации, когда новые распродажи на PS Store появляются в среду, а старые
+    действуют до четверга: запуск в среду стирал ещё валидные скидки, а если
+    парсинг по любым причинам не завершался — каталог оставался без скидок.
+
+    Сейчас функция делает только UPSERT свежих данных. Зачистка истёкших скидок
+    выполняется отдельно фоновой задачей `expire_finished_discounts_loop` и/или
+    кнопкой в админке (`clear_discounts_ending_on`).
 
     control (UpdateControl) — опциональная пауза/возобновление/отмена. Парсер
     проверяет состояние перед каждым батчем и корректно завершается при cancel.
@@ -6272,39 +6281,24 @@ async def run_discount_update(
         ),
     )
 
-    # В тестовом режиме НЕ чистим скидки в БД — иначе пользователь теряет
-    # реальные скидки всего каталога ради прогона на 10 товарах.
-    # Тестовый режим только парсит первые N URL и точечно обновляет их.
-    if test_mode:
-        clear_stats = {"products_cleared": 0, "product_cards_cleared": 0, "skipped": "test_mode"}
-        existing_result = _load_manual_result_cache()
-        result_cache_cleared = 0
-        await _emit_discount_progress(
-            progress_callback,
-            _discount_progress_payload(
-                phase="clear",
-                message="Тестовый режим: пропускаем массовую очистку старых скидок.",
-                logs=["Тестовый режим: пропускаем массовую очистку старых скидок."],
-            ),
-        )
-    else:
-        clear_stats = await _clear_discount_fields_in_db(progress_callback)
-        existing_result = _load_manual_result_cache()
-        result_cache_cleared = _clear_discount_fields_in_records(existing_result)
-        if result_cache_cleared:
-            _save_manual_result_cache(existing_result)
-            await _emit_discount_progress(
-                progress_callback,
-                _discount_progress_payload(
-                    phase="clear",
-                    message=f"Скидки очищены в result.pkl: {result_cache_cleared} записей.",
-                    total=0,
-                    processed=0,
-                    saved=0,
-                    failed=0,
-                    logs=[f"Скидки очищены в result.pkl: {result_cache_cleared} записей."],
-                ),
-            )
+    # Массовую очистку убрали: старые скидки с актуальным discount_end оставляем
+    # как есть, а истёкшие удаляются фоновой задачей expire_finished_discounts_loop
+    # (или вручную из админки). Парсер только UPSERT-ит свежие записи.
+    clear_stats = {"products_cleared": 0, "product_cards_cleared": 0, "skipped": "upsert_only"}
+    existing_result = _load_manual_result_cache()
+    result_cache_cleared = 0
+    skip_clear_message = (
+        "Очистка старых скидок не выполняется — UPSERT обновит существующие. "
+        "Истёкшие скидки удалит фоновая задача."
+    )
+    await _emit_discount_progress(
+        progress_callback,
+        _discount_progress_payload(
+            phase="clear",
+            message=skip_clear_message,
+            logs=[skip_clear_message],
+        ),
+    )
 
     url_result = await collect_discount_product_urls(
         category_url=category_url,
