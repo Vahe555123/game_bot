@@ -1147,7 +1147,7 @@ export function ProductPage() {
             <div className="space-y-6">
               
 
-              <div className="panel-soft rounded-[28px] p-6">
+              {product.compound.length > 0 && <div className="panel-soft rounded-[28px] p-6">
                 <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Комплект</p>
                 <ul className="mt-4 space-y-3 text-sm text-slate-300">
                   {(product.compound.length
@@ -1158,7 +1158,7 @@ export function ProductPage() {
                     </li>
                   ))}
                 </ul>
-              </div>
+              </div>}
               <div className="panel-soft rounded-[28px] p-6">
                 <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Инфо</p>
                 <ul className="mt-4 space-y-3 text-sm text-slate-300">

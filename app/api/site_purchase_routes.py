@@ -9,7 +9,7 @@ from app.auth.dependencies import get_current_site_user
 from app.auth.exceptions import AuthServiceError
 from app.auth.schemas import SiteUserPublic
 from app.database.connection import get_db
-from app.site_orders.email_service import send_purchase_created_email, send_purchase_fulfilled_email
+from app.site_orders.email_service import send_purchase_fulfilled_email
 from app.site_orders.schemas import (
     AdminFulfillPurchaseRequest,
     AdminPurchaseListResponse,
@@ -31,7 +31,6 @@ def _raise_http_auth_error(error: AuthServiceError) -> None:
 @router.post("/checkout", response_model=PurchaseOrderResponse, summary="Создать заказ и получить ссылку на оплату")
 async def create_site_checkout(
     payload: PurchaseCheckoutRequest,
-    background_tasks: BackgroundTasks,
     current_user: SiteUserPublic = Depends(get_current_site_user),
     db: Session = Depends(get_db),
 ):
@@ -51,13 +50,6 @@ async def create_site_checkout(
         )
     except AuthServiceError as error:
         _raise_http_auth_error(error)
-
-    if current_user.email and email_is_configured():
-        background_tasks.add_task(
-            send_purchase_created_email,
-            email=current_user.email,
-            order_payload=order.model_dump(),
-        )
 
     return order
 
