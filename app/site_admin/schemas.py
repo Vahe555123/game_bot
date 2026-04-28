@@ -350,6 +350,25 @@ class AdminProductListResponse(BaseModel):
     limit: int
 
 
+class AdminFavoriteDiscountNotificationSummary(BaseModel):
+    candidates: int = 0
+    sent: int = 0
+    email_sent: int = 0
+    telegram_sent: int = 0
+    skipped_existing: int = 0
+    no_recipient: int = 0
+    failed: int = 0
+
+
+class AdminFavoriteDiscountNotificationResponse(BaseModel):
+    message: str
+    discounted_products: int = 0
+    force_resend: bool = False
+    summary: AdminFavoriteDiscountNotificationSummary = Field(
+        default_factory=AdminFavoriteDiscountNotificationSummary
+    )
+
+
 class AdminProductManualParseRequest(BaseModel):
     ua_url: Optional[str] = Field(None, max_length=1000)
     tr_url: Optional[str] = Field(None, max_length=1000)

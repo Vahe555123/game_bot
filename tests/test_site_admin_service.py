@@ -1,5 +1,7 @@
 import unittest
+import asyncio
 from datetime import datetime
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 from app.auth.exceptions import AuthServiceError
 from app.auth.service import build_public_user
 from app.database.connection import Base
-from app.models import User, UserFavoriteProduct
+from app.models import Product, User, UserFavoriteProduct
 from app.site_admin.schemas import (
     AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
@@ -267,6 +269,62 @@ class SiteAdminServiceTests(unittest.TestCase):
 
         with self.assertRaises(AuthServiceError):
             self.service.get_product(self.db, product_id="game-details", region="TR")
+
+    def test_send_discount_notifications_uses_current_discounted_products(self):
+        favorite_user = User(
+            email="buyer@example.com",
+            email_normalized="buyer@example.com",
+            email_verified=True,
+            telegram_id=777,
+            username="buyer",
+            preferred_region="TR",
+            payment_email="buyer@example.com",
+            is_active=True,
+            role="client",
+            created_at=datetime(2026, 4, 5, 12, 0, 0),
+            updated_at=datetime(2026, 4, 5, 12, 0, 0),
+        )
+        discounted_product = Product(
+            id="discount-game",
+            region="TR",
+            name="Discount Game",
+            main_name="Discount Game",
+            price_try=499,
+            old_price_try=999,
+            discount=50,
+            discount_percent=50,
+        )
+        self.db.add_all([favorite_user, discounted_product])
+        self.db.commit()
+        self.db.refresh(favorite_user)
+        self.db.add(
+            UserFavoriteProduct(
+                user_id=favorite_user.id,
+                product_id=discounted_product.id,
+                region=discounted_product.region,
+            )
+        )
+        self.db.commit()
+
+        notifier = AsyncMock(
+            return_value={
+                "candidates": 1,
+                "sent": 2,
+                "email_sent": 1,
+                "telegram_sent": 1,
+                "skipped_existing": 0,
+                "no_recipient": 0,
+                "failed": 0,
+            }
+        )
+        with patch("app.site_admin.service.notify_favorite_discounts_for_product_ids", notifier):
+            response = asyncio.run(self.service.send_discount_notifications())
+
+        self.assertEqual(response.discounted_products, 1)
+        self.assertTrue(response.force_resend)
+        self.assertEqual(response.summary.sent, 2)
+        self.assertIn("discount-game", notifier.await_args.args[1])
+        self.assertTrue(notifier.await_args.kwargs["force_resend"])
 
 
 if __name__ == "__main__":

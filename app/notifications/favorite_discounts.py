@@ -530,6 +530,7 @@ async def _notify_user_combined(
     user: User,
     games: list[dict],
     summary: FavoriteDiscountNotificationSummary,
+    force_resend: bool = False,
 ) -> None:
     if not games:
         return
@@ -556,7 +557,7 @@ async def _notify_user_combined(
 
     if telegram_id and settings.TELEGRAM_BOT_TOKEN:
         deliverable_channels += 1
-        if _already_sent_combined(db, user_id=user_id, signature=signature, channel="telegram"):
+        if not force_resend and _already_sent_combined(db, user_id=user_id, signature=signature, channel="telegram"):
             summary.skipped_existing += 1
         else:
             try:
@@ -604,7 +605,7 @@ async def _notify_user_combined(
 
     if email and email_is_configured():
         deliverable_channels += 1
-        if _already_sent_combined(db, user_id=user_id, signature=signature, channel="email"):
+        if not force_resend and _already_sent_combined(db, user_id=user_id, signature=signature, channel="email"):
             summary.skipped_existing += 1
         else:
             email_payload = _email_payload_from_games(
@@ -668,6 +669,8 @@ async def _notify_user_combined(
 async def notify_favorite_discounts_for_product_ids(
     db: Session,
     product_ids: Iterable[str] | None,
+    *,
+    force_resend: bool = False,
 ) -> dict[str, int]:
     """Send a single combined per-user message for all of their favorited & currently-discounted products.
 
@@ -675,6 +678,9 @@ async def notify_favorite_discounts_for_product_ids(
     output). We use it only to decide which users to notify. Each notified user gets
     the FULL list of their currently-discounted favorites, sorted by the most recent
     additions to their favorites first.
+
+    `force_resend=True` bypasses the duplicate-signature guard so admins can resend
+    the current digest manually from the admin panel.
     """
     _ensure_notification_table(db)
     summary = FavoriteDiscountNotificationSummary()
@@ -716,7 +722,13 @@ async def notify_favorite_discounts_for_product_ids(
         if not games:
             continue
 
-        await _notify_user_combined(db, user=user, games=games, summary=summary)
+        await _notify_user_combined(
+            db,
+            user=user,
+            games=games,
+            summary=summary,
+            force_resend=force_resend,
+        )
 
     return summary.to_dict()
 
@@ -724,21 +736,43 @@ async def notify_favorite_discounts_for_product_ids(
 async def notify_favorite_discounts_for_products(
     db: Session,
     products: Iterable[Product],
+    *,
+    force_resend: bool = False,
 ) -> dict[str, int]:
     """Compatibility shim for callers that pass Product objects (e.g. admin manual edits)."""
     product_ids = sorted({(product.id or "").strip() for product in products if product and product.id})
-    return await notify_favorite_discounts_for_product_ids(db, product_ids)
+    return await notify_favorite_discounts_for_product_ids(
+        db,
+        product_ids,
+        force_resend=force_resend,
+    )
 
 
 def notify_favorite_discounts_for_products_sync(
     db: Session,
     products: Iterable[Product],
+    *,
+    force_resend: bool = False,
 ) -> dict[str, int]:
-    return asyncio.run(notify_favorite_discounts_for_products(db, products))
+    return asyncio.run(
+        notify_favorite_discounts_for_products(
+            db,
+            products,
+            force_resend=force_resend,
+        )
+    )
 
 
 def notify_favorite_discounts_for_product_ids_sync(
     db: Session,
     product_ids: Iterable[str] | None,
+    *,
+    force_resend: bool = False,
 ) -> dict[str, int]:
-    return asyncio.run(notify_favorite_discounts_for_product_ids(db, product_ids))
+    return asyncio.run(
+        notify_favorite_discounts_for_product_ids(
+            db,
+            product_ids,
+            force_resend=force_resend,
+        )
+    )

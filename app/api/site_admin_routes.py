@@ -11,6 +11,7 @@ from app.database.connection import get_db
 from app.site_admin.schemas import (
     AdminActionResponse,
     AdminDashboardResponse,
+    AdminFavoriteDiscountNotificationResponse,
     AdminHelpContentResponse,
     AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
@@ -246,6 +247,21 @@ async def cancel_site_admin_discount_update(
     service = get_site_admin_service()
     try:
         return await service.cancel_discount_update()
+    except AuthServiceError as error:
+        _raise_http_auth_error(error)
+
+
+@router.post(
+    "/discounts/notify",
+    response_model=AdminFavoriteDiscountNotificationResponse,
+    summary="Send favorite discount notifications manually",
+)
+async def send_site_admin_discount_notifications(
+    current_admin: SiteUserPublic = Depends(get_current_admin_site_user),
+):
+    service = get_site_admin_service()
+    try:
+        return await service.send_discount_notifications(force_resend=True)
     except AuthServiceError as error:
         _raise_http_auth_error(error)
 

@@ -1,4 +1,4 @@
-import { BadgePercent, ExternalLink, Pause, Play, PlayCircle, RefreshCw, X } from 'lucide-react'
+import { BadgePercent, ExternalLink, Pause, Play, PlayCircle, RefreshCw, Send, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import {
   cancelAdminDiscountUpdate,
@@ -6,6 +6,7 @@ import {
   fetchAdminDiscountUpdateStatus,
   pauseAdminDiscountUpdate,
   resumeAdminDiscountUpdate,
+  sendAdminDiscountNotifications,
   startAdminDiscountUpdate,
 } from '../../services/admin'
 import type { AdminDiscountUpdateStatus, AdminProduct } from '../../types/admin'
@@ -37,6 +38,7 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
   const [status, setStatus] = useState<AdminDiscountUpdateStatus | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isStarting, setIsStarting] = useState<'test' | 'full' | null>(null)
+  const [isSendingNotifications, setIsSendingNotifications] = useState(false)
   const [notice, setNotice] = useState<AdminNoticeState>(EMPTY_ADMIN_NOTICE)
 
   const isRunning = status?.status === 'pending' || status?.status === 'running'
@@ -132,6 +134,33 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
     }
   }
 
+  async function handleSendNotifications() {
+    if (
+      !window.confirm(
+        'Отправить уведомления по текущим скидкам вручную? Кнопка выполнит повторную отправку для email и Telegram.',
+      )
+    ) {
+      return
+    }
+
+    setIsSendingNotifications(true)
+    setNotice(EMPTY_ADMIN_NOTICE)
+    try {
+      const response = await sendAdminDiscountNotifications()
+      setNotice({
+        type: response.summary.failed ? 'info' : 'success',
+        message: response.message,
+      })
+    } catch (error) {
+      setNotice({
+        type: 'error',
+        message: getApiErrorMessage(error, 'Не удалось отправить уведомления по скидкам.'),
+      })
+    } finally {
+      setIsSendingNotifications(false)
+    }
+  }
+
   const totalPages = Math.max(Math.ceil(total / limit), 1)
 
   return (
@@ -141,6 +170,19 @@ export function AdminDiscountsSection({ onDataChanged }: { onDataChanged: () => 
       description="Товары, у которых сейчас есть скидка в базе, и запуск отдельного процесса обновления скидок из PlayStation Store."
       action={
         <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={Boolean(isStarting) || isSendingNotifications || isActiveTask}
+            onClick={handleSendNotifications}
+          >
+            {isSendingNotifications ? (
+              <RefreshCw size={16} className="animate-spin" />
+            ) : (
+              <Send size={16} />
+            )}
+            Отправить уведомления
+          </button>
           {isActiveTask ? (
             <>
               {isPaused ? (

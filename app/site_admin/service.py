@@ -42,6 +42,8 @@ from config.settings import settings
 
 from .schemas import (
     AdminDashboardResponse,
+    AdminFavoriteDiscountNotificationResponse,
+    AdminFavoriteDiscountNotificationSummary,
     AdminHelpContentResponse,
     AdminHelpContentUpdateRequest,
     AdminProductCreateRequest,
@@ -787,6 +789,78 @@ class SiteAdminService:
             total=total,
             page=page,
             limit=limit,
+        )
+
+    def _list_discounted_product_ids(self, db: Session) -> list[str]:
+        discount_value = func.coalesce(
+            func.nullif(Product.discount_percent, 0),
+            func.nullif(Product.discount, 0),
+            0,
+        )
+        product_ids = (
+            db.query(Product.id)
+            .filter(discount_value > 0)
+            .distinct()
+            .all()
+        )
+        return sorted(
+            {
+                str(product_id).strip()
+                for (product_id,) in product_ids
+                if product_id and str(product_id).strip()
+            }
+        )
+
+    async def send_discount_notifications(
+        self,
+        *,
+        force_resend: bool = True,
+    ) -> AdminFavoriteDiscountNotificationResponse:
+        active_task_id = _get_active_discount_update_task_id()
+        if active_task_id:
+            raise AuthServiceError(
+                409,
+                "Дождитесь завершения обновления скидок, затем запустите ручную отправку.",
+            )
+
+        with self._session() as db:
+            discounted_product_ids = self._list_discounted_product_ids(db)
+            if not discounted_product_ids:
+                return AdminFavoriteDiscountNotificationResponse(
+                    message="Сейчас в базе нет активных скидок для ручной отправки.",
+                    discounted_products=0,
+                    force_resend=force_resend,
+                    summary=AdminFavoriteDiscountNotificationSummary(),
+                )
+
+            try:
+                summary_dict = await notify_favorite_discounts_for_product_ids(
+                    db,
+                    discounted_product_ids,
+                    force_resend=force_resend,
+                )
+            except Exception as error:
+                logger.exception("Manual favorite discount notification send failed")
+                raise AuthServiceError(
+                    500,
+                    f"Не удалось отправить уведомления по скидкам: {type(error).__name__}: {error}",
+                ) from error
+
+        summary = AdminFavoriteDiscountNotificationSummary(**summary_dict)
+        message = (
+            "Ручная отправка уведомлений завершена: "
+            f"игр со скидкой {len(discounted_product_ids)}, "
+            f"отправлено {summary.sent}, "
+            f"email {summary.email_sent}, "
+            f"Telegram {summary.telegram_sent}, "
+            f"без контакта {summary.no_recipient}, "
+            f"ошибок {summary.failed}."
+        )
+        return AdminFavoriteDiscountNotificationResponse(
+            message=message,
+            discounted_products=len(discounted_product_ids),
+            force_resend=force_resend,
+            summary=summary,
         )
 
     def get_product(self, db: Session, *, product_id: str, region: str) -> AdminProductDetailsResponse:

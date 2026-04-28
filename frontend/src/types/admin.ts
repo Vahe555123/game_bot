@@ -119,6 +119,23 @@ export type AdminDiscountUpdateLogEntry = {
   message: string
 }
 
+export type AdminFavoriteDiscountNotificationSummary = {
+  candidates: number
+  sent: number
+  email_sent: number
+  telegram_sent: number
+  skipped_existing: number
+  no_recipient: number
+  failed: number
+}
+
+export type AdminFavoriteDiscountNotificationResponse = {
+  message: string
+  discounted_products: number
+  force_resend: boolean
+  summary: AdminFavoriteDiscountNotificationSummary
+}
+
 export type AdminDiscountUpdateStatus = {
   task_id?: string | null
   status: 'idle' | 'pending' | 'running' | 'paused' | 'cancelled' | 'completed' | 'failed'

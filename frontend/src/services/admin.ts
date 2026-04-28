@@ -1,5 +1,6 @@
 import type {
   AdminDashboard,
+  AdminFavoriteDiscountNotificationResponse,
   AdminDiscountUpdateStatus,
   AdminFullParseStatus,
   AdminHelpContent,
@@ -117,6 +118,15 @@ export async function resumeAdminDiscountUpdate() {
 
 export async function cancelAdminDiscountUpdate() {
   const response = await apiClient.post<AdminDiscountUpdateStatus>('/site/admin/discounts/update/cancel')
+  return response.data
+}
+
+export async function sendAdminDiscountNotifications() {
+  const response = await apiClient.post<AdminFavoriteDiscountNotificationResponse>(
+    '/site/admin/discounts/notify',
+    undefined,
+    { timeout: 0 },
+  )
   return response.data
 }
 
