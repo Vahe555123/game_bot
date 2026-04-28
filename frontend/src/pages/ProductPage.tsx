@@ -550,16 +550,6 @@ function CheckoutDialog({
             </>
           ) : (
             <>
-              <div className="rounded-[24px] border border-emerald-400/15 bg-emerald-500/10 p-4">
-                <div>
-                  <p className="text-sm text-emerald-100/80">Номер заказа</p>
-                  <p className="mt-1 text-2xl font-semibold text-white">{checkoutOrder.order_number}</p>
-                  <p className="mt-2 text-sm leading-7 text-emerald-50/90">
-                    Откройте страницу оплаты и завершите покупку. Данные для заказа уже сохранены в профиле.
-                  </p>
-                </div>
-              </div>
-
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
                   <p className="text-sm text-slate-400">Регион</p>
@@ -977,7 +967,7 @@ export function ProductPage() {
         backup_code: checkoutRegion === 'UA' ? checkoutForm.backupCode.trim() || undefined : undefined,
       })
       setCheckoutOrder(order)
-      setCheckoutMessage('Заказ создан. Данные для покупки сохранены в профиле.')
+      setCheckoutMessage('Заказ создан. Нажмите на кнопку Перейти к Оплате.')
 
       const [profileResponse] = await Promise.all([
         getProfile().catch(() => null),
@@ -1162,7 +1152,7 @@ export function ProductPage() {
                 <ul className="mt-4 space-y-3 text-sm text-slate-300">
                   {(product.compound.length
                     ? product.compound
-                    : ['Состав издания и бонусов появится здесь, как только API отдаст подробности.']).map((item) => (
+                    : []).map((item) => (
                     <li key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                       {item}
                     </li>
