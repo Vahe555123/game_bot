@@ -550,6 +550,15 @@ function CheckoutDialog({
             </>
           ) : (
             <>
+              <div className="rounded-[24px] border border-emerald-400/15 bg-emerald-500/10 p-4">
+                <div>
+                  <p className="text-sm text-emerald-100/80"></p>
+                  <p className="mt-1 text-2xl font-semibold text-white">{checkoutOrder.order_number}</p>
+                  <p className="mt-2 text-sm leading-7 text-emerald-50/90">
+                  </p>
+                </div>
+              </div>
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="rounded-[24px] border border-white/10 bg-[#0d1828] p-4">
                   <p className="text-sm text-slate-400">Регион</p>
@@ -1147,7 +1156,7 @@ export function ProductPage() {
             <div className="space-y-6">
               
 
-              {product.compound.length > 0 && <div className="panel-soft rounded-[28px] p-6">
+                   {product.compound.length > 0 && <div className="panel-soft rounded-[28px] p-6">
                 <p className="text-xs uppercase tracking-[0.34em] text-brand-200/80">Комплект</p>
                 <ul className="mt-4 space-y-3 text-sm text-slate-300">
                   {(product.compound.length
