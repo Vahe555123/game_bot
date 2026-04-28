@@ -471,6 +471,107 @@ def send_purchase_fulfilled_email(*, email: str, order_payload: dict) -> None:
         raise EmailDeliveryError("Не удалось отправить письмо с данными заказа.") from error
 
 
+def _render_combined_game_card(game: dict) -> str:
+    name = str(game.get("name") or "Игра")
+    url = game.get("url") or ""
+    discount_text = str(game.get("discount_text") or "")
+    region_lines: list[str] = []
+    for region in game.get("regions") or []:
+        flag = str(region.get("flag") or "")
+        current = str(region.get("current") or "")
+        old = str(region.get("old") or "")
+        if old:
+            line = f"{html.escape(flag)} {html.escape(current)} <span style=\"color:#94a3b8;text-decoration:line-through\">{html.escape(old)}</span>"
+        else:
+            line = f"{html.escape(flag)} {html.escape(current)}"
+        region_lines.append(f"<div style=\"margin-top:4px\">{line}</div>")
+
+    title_html = (
+        f"<a href=\"{html.escape(url, quote=True)}\" style=\"color:#1cb5ff;text-decoration:none;font-weight:700\">{html.escape(name)}</a>"
+        if url
+        else f"<span style=\"font-weight:700\">{html.escape(name)}</span>"
+    )
+    discount_badge = (
+        f" <span style=\"color:#facc15;font-weight:700\">{html.escape(discount_text)}</span>"
+        if discount_text
+        else ""
+    )
+    return f"""
+      <div class=\"email-item\">
+        <div style=\"font-size:15px;line-height:1.5\">{title_html}{discount_badge}</div>
+        {''.join(region_lines)}
+      </div>
+    """
+
+
+def send_favorite_discount_combined_email(*, email: str, payload: dict) -> None:
+    if not email_is_configured():
+        raise EmailDeliveryError("SMTP не настроен. Укажите SMTP_USERNAME и SMTP_APP_PASSWORD.")
+
+    games = list(payload.get("games") or [])
+    games_count = int(payload.get("games_count") or len(games))
+    favorites_url = payload.get("favorites_url") or ""
+    discount_end_text = payload.get("discount_end_text") or ""
+    title = f"Подешевели {games_count} игр из Избранного"
+    intro = "Подборка скидок по играм из вашего Избранного. Цены актуальны на момент обновления."
+
+    items_html = "".join(_render_combined_game_card(game) for game in games)
+    body_parts = [f"<div class=\"email-items\">{items_html}</div>"] if items_html else []
+    if discount_end_text:
+        body_parts.append(
+            f"""
+            <div class=\"email-card email-card-info\">
+              <div class=\"email-card-text\">🏁 {html.escape(discount_end_text)}</div>
+            </div>
+            """
+        )
+
+    plain_lines = [title, ""]
+    for game in games:
+        name = str(game.get("name") or "Игра")
+        discount_text = str(game.get("discount_text") or "")
+        url = game.get("url") or ""
+        plain_lines.append(f"• {name} {discount_text}".strip())
+        if url:
+            plain_lines.append(url)
+        for region in game.get("regions") or []:
+            current = str(region.get("current") or "")
+            old = str(region.get("old") or "")
+            flag = str(region.get("flag") or "")
+            line = f"{flag} {current}"
+            if old:
+                line += f" (было {old})"
+            plain_lines.append(line)
+        plain_lines.append("")
+    if discount_end_text:
+        plain_lines.append(discount_end_text)
+    if favorites_url:
+        plain_lines.append(f"Избранное: {favorites_url}")
+
+    message = EmailMessage()
+    message["Subject"] = title
+    message["From"] = formataddr((settings.SMTP_FROM_NAME, settings.SMTP_FROM_EMAIL))
+    message["To"] = email
+    message.set_content("\n".join(plain_lines), charset="utf-8")
+    message.add_alternative(
+        _build_shell(
+            title,
+            intro,
+            "".join(body_parts),
+            button_url=favorites_url or None,
+            button_text="Открыть моё ИЗБРАННОЕ" if favorites_url else None,
+        ),
+        subtype="html",
+        charset="utf-8",
+    )
+
+    try:
+        _send_message(message)
+    except Exception as error:
+        logger.exception("Failed to send combined favorite discount email to %s", email)
+        raise EmailDeliveryError("Не удалось отправить письмо о скидках на избранные товары.") from error
+
+
 def send_favorite_discount_email(*, email: str, notification_payload: dict) -> None:
     if not email_is_configured():
         raise EmailDeliveryError("SMTP не настроен. Укажите SMTP_USERNAME и SMTP_APP_PASSWORD.")

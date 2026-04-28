@@ -5271,26 +5271,67 @@ def _find_existing_result_index(existing_result: list[dict], record: dict) -> Op
     return matches[0][0] if matches else None
 
 
-def _update_manual_result_cache(existing_result: list[dict], final_records: list[dict]) -> tuple[int, int, int, int]:
+_DISCOUNT_ONLY_RESULT_FIELDS = (
+    "price",
+    "old_price",
+    "ps_price",
+    "price_uah",
+    "old_price_uah",
+    "ps_plus_price_uah",
+    "price_try",
+    "old_price_try",
+    "ps_plus_price_try",
+    "price_inr",
+    "old_price_inr",
+    "ps_plus_price_inr",
+    "price_rub",
+    "price_rub_region",
+    "discount",
+    "discount_percent",
+    "discount_end",
+    "ps_plus",
+    "ea_access",
+    "ps_plus_collection",
+    "updated_at",
+)
+
+
+def _update_manual_result_cache(
+    existing_result: list[dict],
+    final_records: list[dict],
+    *,
+    discount_only: bool = False,
+) -> tuple[int, int, int, int]:
     updated_count = 0
     added_count = 0
 
     for record in final_records:
         existing_index = _find_existing_result_index(existing_result, record)
         if existing_index is None:
+            # Новый товар добавляется целиком — иначе мы не сохраним даже его регион/имя.
             existing_result.append(record)
             added_count += 1
-        else:
-            current_record = existing_result[existing_index]
-            merged_record = dict(current_record)
-            merged_record.update(record)
+            continue
 
+        current_record = existing_result[existing_index]
+        merged_record = dict(current_record)
+
+        if discount_only:
+            # Обновление скидок: трогаем ТОЛЬКО цены/скидку. Имя, локализацию,
+            # описание, регион, картинку и прочее не перезаписываем — иначе
+            # discount-парсер (sale-категория) затрёт данные основного парсинга.
+            for field in _DISCOUNT_ONLY_RESULT_FIELDS:
+                if field not in record:
+                    continue
+                merged_record[field] = record.get(field)
+        else:
+            merged_record.update(record)
             # Не даём ручному парсингу затереть уже сохранённую картинку пустой строкой.
             if not (record.get("image") or "").strip() and (current_record.get("image") or "").strip():
                 merged_record["image"] = current_record.get("image")
 
-            existing_result[existing_index] = merged_record
-            updated_count += 1
+        existing_result[existing_index] = merged_record
+        updated_count += 1
 
     before_dedupe = len(existing_result)
     uni(existing_result)
@@ -6382,7 +6423,7 @@ async def run_discount_update(
                 saved = await save_discount_batch_to_db(records_to_save, promo)
                 product_ids = [record.get("id") for record in records_to_save if record.get("id")]
                 await refresh_product_cards_after_save(product_ids, full_rebuild=False)
-                _update_manual_result_cache(existing_result, records_to_save)
+                _update_manual_result_cache(existing_result, records_to_save, discount_only=True)
                 saved_total += saved
 
             log_line = (
@@ -6412,7 +6453,7 @@ async def run_discount_update(
             saved = await save_discount_batch_to_db(pending_save_records, promo)
             product_ids = [r.get("id") for r in pending_save_records if r.get("id")]
             await refresh_product_cards_after_save(product_ids, full_rebuild=False)
-            _update_manual_result_cache(existing_result, pending_save_records)
+            _update_manual_result_cache(existing_result, pending_save_records, discount_only=True)
             saved_total += saved
             pending_save_records = []
 
@@ -6706,7 +6747,7 @@ async def run_price_update(
                 saved = await save_discount_batch_to_db(records_to_save, promo)
                 product_ids = [r.get("id") for r in records_to_save if r.get("id")]
                 await refresh_product_cards_after_save(product_ids, full_rebuild=False)
-                _update_manual_result_cache(existing_result, records_to_save)
+                _update_manual_result_cache(existing_result, records_to_save, discount_only=True)
                 saved_total += saved
 
             log_line = (
@@ -6736,7 +6777,7 @@ async def run_price_update(
             saved = await save_discount_batch_to_db(pending_save_records, promo)
             product_ids = [r.get("id") for r in pending_save_records if r.get("id")]
             await refresh_product_cards_after_save(product_ids, full_rebuild=False)
-            _update_manual_result_cache(existing_result, pending_save_records)
+            _update_manual_result_cache(existing_result, pending_save_records, discount_only=True)
             saved_total += saved
             pending_save_records = []
 

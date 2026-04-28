@@ -2,36 +2,45 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import html
 import logging
 from dataclasses import asdict, dataclass
-from typing import Iterable, Sequence
-from urllib.parse import quote
+from datetime import datetime
+from pathlib import Path
+from typing import Iterable, Optional, Sequence
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.auth.email_service import email_is_configured
 from app.models import (
     FavoriteDiscountNotification,
     Product,
     SitePurchaseOrder,
+    User,
     UserFavoriteProduct,
 )
-from app.site_orders.email_service import send_favorite_discount_email
+from app.site_orders.email_service import send_favorite_discount_combined_email
 from app.utils.time import utcnow
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-REGION_LABELS = {
-    "UA": "Украина",
-    "TR": "Турция",
-    "IN": "Индия",
+REGION_FLAG = {"UA": "🇺🇦", "TR": "🇹🇷", "IN": "🇮🇳"}
+REGION_PRICE_FIELDS = {
+    "UA": ("price_uah", "old_price_uah", "₴"),
+    "TR": ("price_try", "old_price_try", "₺"),
+    "IN": ("price_inr", "old_price_inr", "₹"),
 }
+REGION_RATE_FROM_RUB = {"UA": "UAH", "TR": "TRY", "IN": "INR"}
+REGION_DISPLAY_ORDER = ("TR", "IN", "UA")
+COMBINED_BATCH_PRODUCT_ID = "<favorites-batch>"
+TG_TEXT_LIMIT = 4096
+MAX_GAMES_PER_MESSAGE = 25
+MIN_GAMES_PER_MESSAGE = 10
 
-REGION_CURRENCY = {
-    "UA": ("price_uah", "old_price_uah", "UAH"),
-    "TR": ("price_try", "old_price_try", "TRY"),
-    "IN": ("price_inr", "old_price_inr", "INR"),
+RU_MONTHS_GENITIVE = {
+    1: "января", 2: "февраля", 3: "марта", 4: "апреля", 5: "мая", 6: "июня",
+    7: "июля", 8: "августа", 9: "сентября", 10: "октября", 11: "ноября", 12: "декабря",
 }
 
 
@@ -75,140 +84,325 @@ def _region(product: Product) -> str:
     return (product.region or "").strip().upper()
 
 
-def _price_values(product: Product) -> tuple[float | None, float | None, str]:
-    region = _region(product)
-    price_field, old_price_field, currency = REGION_CURRENCY.get(region, ("price", "old_price", "RUB"))
-    current_price = _positive_float(getattr(product, price_field, None)) or _positive_float(product.price)
-    old_price = _positive_float(getattr(product, old_price_field, None)) or _positive_float(product.old_price)
-    return current_price, old_price, currency
-
-
 def _discount_percent(product: Product) -> int | None:
-    for value in (product.discount, getattr(product, "discount_percent", None)):
+    for value in (getattr(product, "discount_percent", None), product.discount):
         parsed = _positive_float(value)
         if parsed:
             return int(round(parsed))
 
-    current_price, old_price, _currency = _price_values(product)
-    if current_price and old_price and old_price > current_price:
-        return int(round(((old_price - current_price) / old_price) * 100))
+    region = _region(product)
+    fields = REGION_PRICE_FIELDS.get(region)
+    if fields:
+        price_field, old_price_field, _symbol = fields
+        current = _positive_float(getattr(product, price_field, None))
+        old = _positive_float(getattr(product, old_price_field, None))
+        if current and old and old > current:
+            return int(round(((old - current) / old) * 100))
     return None
 
 
-def _is_discounted(product: Product) -> bool:
-    current_price, old_price, _currency = _price_values(product)
+def _is_discounted_product(product: Product) -> bool:
     discount = _discount_percent(product)
-    if not current_price:
-        return False
     if discount and discount > 0:
         return True
-    return bool(old_price and old_price > current_price)
+    region = _region(product)
+    fields = REGION_PRICE_FIELDS.get(region)
+    if not fields:
+        return False
+    price_field, old_price_field, _symbol = fields
+    current = _positive_float(getattr(product, price_field, None))
+    old = _positive_float(getattr(product, old_price_field, None))
+    return bool(current and old and old > current)
 
 
-def _discount_signature(product: Product) -> str:
-    current_price, old_price, currency = _price_values(product)
-    parts = [
-        product.id,
-        _region(product),
-        str(_discount_percent(product) or ""),
-        str(product.discount_end or ""),
-        str(current_price or ""),
-        str(old_price or ""),
-        str(product.price_rub or ""),
-        currency,
-    ]
-    raw = "|".join(parts)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:40]
+def _format_int_amount(value: float, symbol: str) -> str:
+    return f"{int(round(value))}{symbol}"
 
 
-def _product_url(product: Product) -> str:
-    base_url = (settings.PUBLIC_APP_URL or settings.WEBAPP_URL or "").rstrip("/")
-    if not base_url:
-        base_url = "http://localhost:5173"
-    return f"{base_url}/catalog/{quote(product.id or '', safe='')}?region={quote(_region(product), safe='')}"
+def _convert_to_rub(local_value: float, region: str) -> float | None:
+    """Best-effort conversion local -> RUB.
 
-
-def _format_price(product: Product, *, old: bool = False) -> str | None:
-    current_price, old_price, currency = _price_values(product)
-    value = old_price if old else current_price
-    if value is None:
+    Avoids an import cycle: parser-side currency_converter is loaded lazily.
+    """
+    rate_currency = REGION_RATE_FROM_RUB.get(region)
+    if not rate_currency:
         return None
-    return f"{value:.2f} {currency}"
+    try:
+        from parser import currency_converter  # type: ignore
+        return float(currency_converter.convert(local_value, rate_currency, "RUB"))
+    except Exception:
+        return None
 
 
-def _notification_payload(product: Product) -> dict[str, str | None]:
-    discount = _discount_percent(product)
+def _region_price_block(product: Product) -> dict | None:
+    """Returns a region price block for one product row (single region in DB).
+
+    The block is rendered for the user's notification. If the product row has no
+    price data for its region, returns None — so the caller skips this region
+    (we never substitute another region as a default).
+    """
+    region = _region(product)
+    fields = REGION_PRICE_FIELDS.get(region)
+    if not fields:
+        return None
+    price_field, old_price_field, symbol = fields
+    current_local = _positive_float(getattr(product, price_field, None))
+    if not current_local:
+        return None
+    old_local = _positive_float(getattr(product, old_price_field, None))
+
+    current_rub = _positive_float(getattr(product, "price_rub", None)) or _convert_to_rub(current_local, region)
+    old_rub = _convert_to_rub(old_local, region) if old_local else None
+
+    has_old = bool(old_local and old_local > current_local)
     return {
-        "product_id": product.id,
-        "product_name": product.get_display_name(),
-        "region": _region(product),
-        "region_label": f"{REGION_LABELS.get(_region(product), _region(product))} ({_region(product)})",
-        "discount_text": f"-{discount}%" if discount else "Скидка",
-        "price_text": _format_price(product),
-        "old_price_text": _format_price(product, old=True),
-        "discount_end": product.discount_end,
-        "product_url": _product_url(product),
+        "region": region,
+        "flag": REGION_FLAG.get(region, ""),
+        "current_local_text": _format_int_amount(current_local, symbol),
+        "old_local_text": _format_int_amount(old_local, symbol) if has_old else None,
+        "current_rub_text": _format_int_amount(current_rub, "₽") if current_rub else None,
+        "old_rub_text": _format_int_amount(old_rub, "₽") if has_old and old_rub else None,
+        "discount_end": (product.discount_end or "").strip() or None,
     }
 
 
-def _telegram_text(payload: dict[str, str | None]) -> str:
-    lines = [
-        "Скидка на игру из избранного",
-        "",
-        str(payload.get("product_name") or "Товар"),
-        f"Регион: {payload.get('region_label') or payload.get('region') or '-'}",
-        f"Скидка: {payload.get('discount_text') or '-'}",
-        f"Цена сейчас: {payload.get('price_text') or '-'}",
-    ]
-    if payload.get("old_price_text"):
-        lines.append(f"Цена до скидки: {payload['old_price_text']}")
-    if payload.get("discount_end"):
-        lines.append(f"Действует до: {payload['discount_end']}")
-    if payload.get("product_url"):
-        lines.extend(["", str(payload["product_url"])])
-    return "\n".join(lines)
+def _favorites_url() -> str:
+    base_url = (settings.PUBLIC_APP_URL or settings.WEBAPP_URL or "").rstrip("/") or "http://localhost:5173"
+    return f"{base_url}/favorites"
 
 
-def _select_best_discounted_products(products: Iterable[Product]) -> dict[str, Product]:
-    best_by_product_id: dict[str, Product] = {}
-    for product in products:
-        if not product.id or not _is_discounted(product):
+def _product_url(product_id: str, region: str | None) -> str:
+    base_url = (settings.PUBLIC_APP_URL or settings.WEBAPP_URL or "").rstrip("/") or "http://localhost:5173"
+    region_part = (region or "").strip().upper()
+    suffix = f"?region={region_part}" if region_part else ""
+    from urllib.parse import quote
+    return f"{base_url}/catalog/{quote(product_id, safe='')}{suffix}"
+
+
+def _banner_url() -> str | None:
+    base_url = (settings.PUBLIC_APP_URL or "").rstrip("/")
+    if not base_url:
+        return None
+    banner_path = Path(__file__).resolve().parents[2] / "static" / "images" / "favorite_discount_banner.png"
+    if not banner_path.exists():
+        return None
+    return f"{base_url}/static/images/favorite_discount_banner.png"
+
+
+def _format_discount_end(discount_end: str | None) -> str | None:
+    if not discount_end:
+        return None
+    text = discount_end.strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            month = RU_MONTHS_GENITIVE.get(parsed.month)
+            if month:
+                return f"Распродажа закончится {parsed.day} {month}."
+        except ValueError:
+            continue
+    return f"Распродажа закончится {text}."
+
+
+def _latest_discount_end(games: list[dict]) -> str | None:
+    candidates: list[str] = []
+    for game in games:
+        for region in game.get("regions") or []:
+            end = region.get("discount_end")
+            if end:
+                candidates.append(end)
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return _format_discount_end(candidates[0])
+
+
+def _build_user_games(
+    *,
+    favorites_in_order: list[UserFavoriteProduct],
+    products_by_id: dict[str, list[Product]],
+) -> list[dict]:
+    """Build per-product game blocks for one user, sorted by favorited_at desc.
+
+    Includes a product only if at least one regional row is currently discounted.
+    """
+    games: list[dict] = []
+    seen_ids: set[str] = set()
+    for favorite in favorites_in_order:
+        product_id = (favorite.product_id or "").strip()
+        if not product_id or product_id in seen_ids:
+            continue
+        regional_rows = products_by_id.get(product_id) or []
+        if not regional_rows:
             continue
 
-        existing = best_by_product_id.get(product.id)
-        if existing is None:
-            best_by_product_id[product.id] = product
+        any_discount = any(_is_discounted_product(product) for product in regional_rows)
+        if not any_discount:
             continue
 
-        current_discount = _discount_percent(product) or 0
-        existing_discount = _discount_percent(existing) or 0
-        if current_discount > existing_discount:
-            best_by_product_id[product.id] = product
+        seen_ids.add(product_id)
 
-    return best_by_product_id
+        # Choose representative product for name/url — pick the row with the deepest discount.
+        regional_rows_sorted = sorted(
+            regional_rows,
+            key=lambda product: (_discount_percent(product) or 0),
+            reverse=True,
+        )
+        representative = regional_rows_sorted[0]
+        name = (representative.get_display_name() if hasattr(representative, "get_display_name") else None) or representative.name or product_id
+
+        max_discount = max(((_discount_percent(product) or 0) for product in regional_rows), default=0)
+        discount_text = f"(-{max_discount}%)" if max_discount else ""
+
+        # Region rows in display order. Skip region if no price data for that region.
+        region_blocks: list[dict] = []
+        rows_by_region = {_region(product): product for product in regional_rows}
+        for region_code in REGION_DISPLAY_ORDER:
+            product = rows_by_region.get(region_code)
+            if product is None:
+                continue
+            block = _region_price_block(product)
+            if block is None:
+                continue
+            region_blocks.append(block)
+
+        if not region_blocks:
+            continue
+
+        games.append(
+            {
+                "product_id": product_id,
+                "name": name,
+                "url": _product_url(product_id, _region(representative)),
+                "discount_percent": max_discount or None,
+                "discount_text": discount_text,
+                "regions": region_blocks,
+            }
+        )
+    return games
+
+
+def _telegram_text(*, games: list[dict], total_count: int, favorites_url: str, discount_end_text: str | None) -> str:
+    header = (
+        f"🗣 <b><a href=\"{html.escape(favorites_url, quote=True)}\">"
+        f"Подешевели {total_count} игр из Избранного</a></b>"
+    )
+    blocks: list[str] = [header, ""]
+    for game in games:
+        title_html = (
+            f"• <a href=\"{html.escape(game['url'], quote=True)}\">"
+            f"<b>{html.escape(game['name'])}</b></a>"
+        )
+        if game.get("discount_text"):
+            title_html += f" {html.escape(game['discount_text'])}"
+        blocks.append(title_html)
+        for region in game["regions"]:
+            rub_pieces: list[str] = []
+            if region.get("current_rub_text"):
+                rub_pieces.append(html.escape(region["current_rub_text"]))
+            if region.get("old_rub_text"):
+                rub_pieces.append(f"<s>{html.escape(region['old_rub_text'])}</s>")
+            local_pieces: list[str] = [html.escape(region["current_local_text"])]
+            if region.get("old_local_text"):
+                local_pieces.append(f"<s>{html.escape(region['old_local_text'])}</s>")
+            row = html.escape(region["flag"])
+            if rub_pieces:
+                row += " " + " ".join(rub_pieces) + " / " + " ".join(local_pieces)
+            else:
+                row += " " + " ".join(local_pieces)
+            blocks.append(row)
+        blocks.append("")
+    if discount_end_text:
+        blocks.append(f"🏁 {html.escape(discount_end_text)}")
+        blocks.append("")
+    blocks.append(
+        f"·••• <a href=\"{html.escape(favorites_url, quote=True)}\">"
+        f"Открыть моё ИЗБРАННОЕ</a> •••·"
+    )
+    return "\n".join(blocks)
+
+
+def _trim_to_telegram_limit(games: list[dict], *, total_count: int, favorites_url: str, discount_end_text: str | None) -> tuple[str, int]:
+    """Renders text and shrinks games list until it fits TG_TEXT_LIMIT."""
+    truncated: list[dict] = list(games)
+    text = _telegram_text(
+        games=truncated,
+        total_count=total_count,
+        favorites_url=favorites_url,
+        discount_end_text=discount_end_text,
+    )
+    while len(text) > TG_TEXT_LIMIT and len(truncated) > 1:
+        truncated.pop()
+        text = _telegram_text(
+            games=truncated,
+            total_count=total_count,
+            favorites_url=favorites_url,
+            discount_end_text=discount_end_text,
+        )
+    return text, len(truncated)
+
+
+def _combined_signature(games: list[dict]) -> str:
+    payload_parts: list[str] = []
+    for game in games:
+        regions_part = "|".join(
+            f"{r['region']}:{r.get('current_local_text') or ''}/{r.get('old_local_text') or ''}/{r.get('discount_end') or ''}"
+            for r in game.get("regions") or []
+        )
+        payload_parts.append(f"{game['product_id']}#{game.get('discount_percent') or 0}#{regions_part}")
+    raw = "||".join(sorted(payload_parts))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:48]
 
 
 def _ensure_notification_table(db: Session) -> None:
     FavoriteDiscountNotification.__table__.create(bind=db.get_bind(), checkfirst=True)
 
 
-def _already_sent(
+def _already_sent_combined(
     db: Session,
     *,
     user_id: int,
-    product_id: str,
     signature: str,
-    channel: str | None = None,
+    channel: str,
 ) -> bool:
-    query = db.query(FavoriteDiscountNotification.id).filter(
-        FavoriteDiscountNotification.user_id == user_id,
-        FavoriteDiscountNotification.product_id == product_id,
-        FavoriteDiscountNotification.discount_signature == signature,
-        FavoriteDiscountNotification.status == "sent",
+    return bool(
+        db.query(FavoriteDiscountNotification.id)
+        .filter(
+            FavoriteDiscountNotification.user_id == user_id,
+            FavoriteDiscountNotification.product_id == COMBINED_BATCH_PRODUCT_ID,
+            FavoriteDiscountNotification.discount_signature == signature,
+            FavoriteDiscountNotification.channel == channel,
+            FavoriteDiscountNotification.status == "sent",
+        )
+        .first()
     )
-    if channel:
-        query = query.filter(FavoriteDiscountNotification.channel == channel)
-    return bool(query.first())
+
+
+def _record_combined_notification(
+    db: Session,
+    *,
+    user_id: int,
+    signature: str,
+    channel: str,
+    recipient: str | None,
+    status: str,
+    error_message: str | None = None,
+) -> None:
+    db.add(
+        FavoriteDiscountNotification(
+            user_id=user_id,
+            product_id=COMBINED_BATCH_PRODUCT_ID,
+            region=None,
+            discount_signature=signature,
+            channel=channel,
+            recipient=recipient,
+            status=status,
+            error_message=error_message,
+            sent_at=utcnow() if status == "sent" else None,
+            created_at=utcnow(),
+        )
+    )
+    db.commit()
 
 
 def _latest_purchase_email(db: Session, user_id: int) -> str | None:
@@ -225,7 +419,7 @@ def _latest_purchase_email(db: Session, user_id: int) -> str | None:
     return _clean_email(order.payment_email if order else None)
 
 
-def _preferred_email(db: Session, user) -> str | None:
+def _preferred_email(db: Session, user: User) -> str | None:
     return (
         _clean_email(getattr(user, "payment_email", None))
         or _latest_purchase_email(db, int(user.id))
@@ -233,222 +427,307 @@ def _preferred_email(db: Session, user) -> str | None:
     )
 
 
-async def _send_telegram(chat_id: int, text: str) -> None:
+async def _send_telegram_combined(
+    *,
+    chat_id: int,
+    text: str,
+    banner_url: str | None,
+) -> None:
     from aiogram import Bot
+    from aiogram.types import LinkPreviewOptions
+
+    link_preview = LinkPreviewOptions(
+        is_disabled=False,
+        url=banner_url or None,
+        prefer_large_media=bool(banner_url),
+        show_above_text=True,
+    )
 
     bot = Bot(token=settings.TELEGRAM_BOT_TOKEN)
     try:
-        await bot.send_message(chat_id=chat_id, text=text, disable_web_page_preview=False)
+        await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode="HTML",
+            link_preview_options=link_preview,
+        )
     finally:
         await bot.session.close()
 
 
-async def _send_email(email: str, payload: dict[str, str | None]) -> None:
+async def _send_email_combined(email: str, payload: dict) -> None:
     await asyncio.to_thread(
-        send_favorite_discount_email,
+        send_favorite_discount_combined_email,
         email=email,
-        notification_payload=payload,
+        payload=payload,
     )
 
 
-def _record_notification(
-    db: Session,
-    *,
-    user_id: int,
-    product: Product,
-    signature: str,
-    channel: str,
-    recipient: str | None,
-    status: str,
-    error_message: str | None = None,
-) -> None:
-    db.add(
-        FavoriteDiscountNotification(
-            user_id=user_id,
-            product_id=product.id,
-            region=_region(product) or None,
-            discount_signature=signature,
-            channel=channel,
-            recipient=recipient,
-            status=status,
-            error_message=error_message,
-            sent_at=utcnow() if status == "sent" else None,
-            created_at=utcnow(),
+def _email_payload_from_games(games: list[dict], *, favorites_url: str, discount_end_text: str | None, total_count: int) -> dict:
+    rendered_games = []
+    for game in games:
+        regions = []
+        for region in game["regions"]:
+            current_text = region["current_local_text"]
+            current_rub = region.get("current_rub_text")
+            full_current = current_text if not current_rub else f"{current_text} • {current_rub}"
+            old_text = region.get("old_local_text")
+            old_rub = region.get("old_rub_text")
+            full_old = None
+            if old_text and old_rub:
+                full_old = f"{old_text} • {old_rub}"
+            elif old_text:
+                full_old = old_text
+            regions.append(
+                {
+                    "flag": region["flag"],
+                    "current": full_current,
+                    "old": full_old,
+                }
+            )
+        rendered_games.append(
+            {
+                "name": game["name"],
+                "url": game["url"],
+                "discount_text": game.get("discount_text"),
+                "regions": regions,
+            }
         )
-    )
-    db.commit()
+    return {
+        "games": rendered_games,
+        "games_count": total_count,
+        "favorites_url": favorites_url,
+        "discount_end_text": discount_end_text,
+    }
 
 
-async def notify_favorite_discounts_for_products(
-    db: Session,
-    products: Iterable[Product],
-) -> dict[str, int]:
-    _ensure_notification_table(db)
-    summary = FavoriteDiscountNotificationSummary()
-    discounted_products = _select_best_discounted_products(products)
-    if not discounted_products:
-        return summary.to_dict()
-
-    favorites = (
+def _user_favorites_in_order(db: Session, user_id: int) -> list[UserFavoriteProduct]:
+    return (
         db.query(UserFavoriteProduct)
-        .options(joinedload(UserFavoriteProduct.user))
-        .filter(UserFavoriteProduct.product_id.in_(list(discounted_products.keys())))
+        .filter(UserFavoriteProduct.user_id == user_id)
+        .order_by(UserFavoriteProduct.created_at.desc(), UserFavoriteProduct.id.desc())
         .all()
     )
 
-    for favorite in favorites:
-        user = favorite.user
-        product = discounted_products.get(favorite.product_id)
-        if user is None or product is None:
-            continue
 
-        summary.candidates += 1
-        signature = _discount_signature(product)
+def _products_by_id(db: Session, product_ids: Sequence[str]) -> dict[str, list[Product]]:
+    grouped: dict[str, list[Product]] = {}
+    if not product_ids:
+        return grouped
+    sorted_ids = sorted({pid for pid in product_ids if pid})
+    for chunk in _chunks(sorted_ids):
+        rows = db.query(Product).filter(Product.id.in_(chunk)).all()
+        for product in rows:
+            if not product.id:
+                continue
+            grouped.setdefault(product.id, []).append(product)
+    return grouped
 
-        payload = _notification_payload(product)
-        user_id = int(user.id)
-        email = _preferred_email(db, user)
-        telegram_id = getattr(user, "telegram_id", None)
-        deliverable_channels = 0
 
-        if email and email_is_configured():
-            deliverable_channels += 1
-            if _already_sent(
-                db,
-                user_id=user_id,
-                product_id=product.id,
-                signature=signature,
-                channel="email",
-            ):
-                summary.skipped_existing += 1
+async def _notify_user_combined(
+    db: Session,
+    *,
+    user: User,
+    games: list[dict],
+    summary: FavoriteDiscountNotificationSummary,
+) -> None:
+    if not games:
+        return
+
+    favorites_url = _favorites_url()
+    discount_end_text = _latest_discount_end(games)
+    total_count = len(games)
+    text, fitted_count = _trim_to_telegram_limit(
+        games[:MAX_GAMES_PER_MESSAGE],
+        total_count=total_count,
+        favorites_url=favorites_url,
+        discount_end_text=discount_end_text,
+    )
+
+    signature_games = games[:MAX_GAMES_PER_MESSAGE]
+    signature = _combined_signature(signature_games)
+
+    user_id = int(user.id)
+    telegram_id = getattr(user, "telegram_id", None)
+    email = _preferred_email(db, user)
+    deliverable_channels = 0
+
+    summary.candidates += 1
+
+    if telegram_id and settings.TELEGRAM_BOT_TOKEN:
+        deliverable_channels += 1
+        if _already_sent_combined(db, user_id=user_id, signature=signature, channel="telegram"):
+            summary.skipped_existing += 1
+        else:
+            try:
+                await _send_telegram_combined(
+                    chat_id=int(telegram_id),
+                    text=text,
+                    banner_url=_banner_url(),
+                )
+            except Exception as error:
+                logger.exception(
+                    "Failed to send combined Telegram favorite-discount notification user_id=%s",
+                    user_id,
+                )
+                summary.failed += 1
+                try:
+                    _record_combined_notification(
+                        db,
+                        user_id=user_id,
+                        signature=signature,
+                        channel="telegram",
+                        recipient=str(telegram_id),
+                        status="failed",
+                        error_message=f"{type(error).__name__}: {error}",
+                    )
+                except Exception:
+                    logger.exception("Failed to record combined Telegram notification failure")
+                    db.rollback()
             else:
                 try:
-                    await _send_email(email, payload)
-                except Exception as error:
-                    logger.exception(
-                        "Failed to send email favorite discount notification user_id=%s product_id=%s",
-                        user.id,
-                        product.id,
+                    _record_combined_notification(
+                        db,
+                        user_id=user_id,
+                        signature=signature,
+                        channel="telegram",
+                        recipient=str(telegram_id),
+                        status="sent",
                     )
+                except Exception:
+                    logger.exception("Failed to record combined Telegram notification success")
+                    db.rollback()
                     summary.failed += 1
-                    try:
-                        _record_notification(
-                            db,
-                            user_id=user_id,
-                            product=product,
-                            signature=signature,
-                            channel="email",
-                            recipient=email,
-                            status="failed",
-                            error_message=f"{type(error).__name__}: {error}",
-                        )
-                    except Exception:
-                        logger.exception("Failed to record email discount notification failure")
-                        db.rollback()
                 else:
-                    try:
-                        _record_notification(
-                            db,
-                            user_id=user_id,
-                            product=product,
-                            signature=signature,
-                            channel="email",
-                            recipient=email,
-                            status="sent",
-                        )
-                    except Exception:
-                        logger.exception("Failed to record email discount notification success")
-                        db.rollback()
-                        summary.failed += 1
-                    else:
-                        summary.sent += 1
-                        summary.email_sent += 1
+                    summary.sent += 1
+                    summary.telegram_sent += 1
 
-        if telegram_id and settings.TELEGRAM_BOT_TOKEN:
-            deliverable_channels += 1
-            if _already_sent(
-                db,
-                user_id=user_id,
-                product_id=product.id,
-                signature=signature,
-                channel="telegram",
-            ):
-                summary.skipped_existing += 1
+    if email and email_is_configured():
+        deliverable_channels += 1
+        if _already_sent_combined(db, user_id=user_id, signature=signature, channel="email"):
+            summary.skipped_existing += 1
+        else:
+            email_payload = _email_payload_from_games(
+                signature_games,
+                favorites_url=favorites_url,
+                discount_end_text=discount_end_text,
+                total_count=total_count,
+            )
+            try:
+                await _send_email_combined(email, email_payload)
+            except Exception as error:
+                logger.exception(
+                    "Failed to send combined favorite-discount email user_id=%s",
+                    user_id,
+                )
+                summary.failed += 1
+                try:
+                    _record_combined_notification(
+                        db,
+                        user_id=user_id,
+                        signature=signature,
+                        channel="email",
+                        recipient=email,
+                        status="failed",
+                        error_message=f"{type(error).__name__}: {error}",
+                    )
+                except Exception:
+                    logger.exception("Failed to record combined email notification failure")
+                    db.rollback()
             else:
                 try:
-                    await _send_telegram(int(telegram_id), _telegram_text(payload))
-                except Exception as error:
-                    logger.exception(
-                        "Failed to send Telegram favorite discount notification user_id=%s product_id=%s",
-                        user.id,
-                        product.id,
+                    _record_combined_notification(
+                        db,
+                        user_id=user_id,
+                        signature=signature,
+                        channel="email",
+                        recipient=email,
+                        status="sent",
                     )
+                except Exception:
+                    logger.exception("Failed to record combined email notification success")
+                    db.rollback()
                     summary.failed += 1
-                    try:
-                        _record_notification(
-                            db,
-                            user_id=user_id,
-                            product=product,
-                            signature=signature,
-                            channel="telegram",
-                            recipient=str(telegram_id),
-                            status="failed",
-                            error_message=f"{type(error).__name__}: {error}",
-                        )
-                    except Exception:
-                        logger.exception("Failed to record Telegram discount notification failure")
-                        db.rollback()
                 else:
-                    try:
-                        _record_notification(
-                            db,
-                            user_id=user_id,
-                            product=product,
-                            signature=signature,
-                            channel="telegram",
-                            recipient=str(telegram_id),
-                            status="sent",
-                        )
-                    except Exception:
-                        logger.exception("Failed to record Telegram discount notification success")
-                        db.rollback()
-                        summary.failed += 1
-                    else:
-                        summary.sent += 1
-                        summary.telegram_sent += 1
+                    summary.sent += 1
+                    summary.email_sent += 1
 
-        if deliverable_channels == 0:
-            summary.no_recipient += 1
+    # diagnostics: tweak fitted_count visibility
+    if fitted_count != total_count:
+        logger.info(
+            "Combined favorite-discount: trimmed list for user_id=%s from %s to %s games (TG limit)",
+            user_id,
+            total_count,
+            fitted_count,
+        )
 
-    return summary.to_dict()
+    if deliverable_channels == 0:
+        summary.no_recipient += 1
 
 
 async def notify_favorite_discounts_for_product_ids(
     db: Session,
     product_ids: Iterable[str] | None,
 ) -> dict[str, int]:
-    _ensure_notification_table(db)
+    """Send a single combined per-user message for all of their favorited & currently-discounted products.
 
-    favorite_ids = {
+    `product_ids` is the set of products that triggered the run (e.g. discount-update
+    output). We use it only to decide which users to notify. Each notified user gets
+    the FULL list of their currently-discounted favorites, sorted by the most recent
+    additions to their favorites first.
+    """
+    _ensure_notification_table(db)
+    summary = FavoriteDiscountNotificationSummary()
+
+    trigger_ids = {str(pid).strip() for pid in (product_ids or []) if str(pid).strip()}
+    if not trigger_ids:
+        return summary.to_dict()
+
+    affected_user_ids = {
         row[0]
-        for row in db.query(UserFavoriteProduct.product_id).distinct().all()
+        for row in db.query(UserFavoriteProduct.user_id)
+        .filter(UserFavoriteProduct.product_id.in_(list(trigger_ids)))
+        .distinct()
+        .all()
         if row[0]
     }
-    if not favorite_ids:
-        return FavoriteDiscountNotificationSummary().to_dict()
+    if not affected_user_ids:
+        return summary.to_dict()
 
-    normalized_ids = {str(product_id).strip() for product_id in (product_ids or []) if str(product_id).strip()}
-    if normalized_ids:
-        favorite_ids &= normalized_ids
-    if not favorite_ids:
-        return FavoriteDiscountNotificationSummary().to_dict()
+    users = (
+        db.query(User)
+        .filter(User.id.in_(list(affected_user_ids)))
+        .all()
+    )
+    if not users:
+        return summary.to_dict()
 
-    products: list[Product] = []
-    sorted_ids = sorted(favorite_ids)
-    for chunk in _chunks(sorted_ids):
-        products.extend(db.query(Product).filter(Product.id.in_(chunk)).all())
+    for user in users:
+        favorites = _user_favorites_in_order(db, int(user.id))
+        if not favorites:
+            continue
+        product_ids_for_user = [favorite.product_id for favorite in favorites if favorite.product_id]
+        products_by_id = _products_by_id(db, product_ids_for_user)
 
-    return await notify_favorite_discounts_for_products(db, products)
+        games = _build_user_games(
+            favorites_in_order=favorites,
+            products_by_id=products_by_id,
+        )
+        if not games:
+            continue
+
+        await _notify_user_combined(db, user=user, games=games, summary=summary)
+
+    return summary.to_dict()
+
+
+async def notify_favorite_discounts_for_products(
+    db: Session,
+    products: Iterable[Product],
+) -> dict[str, int]:
+    """Compatibility shim for callers that pass Product objects (e.g. admin manual edits)."""
+    product_ids = sorted({(product.id or "").strip() for product in products if product and product.id})
+    return await notify_favorite_discounts_for_product_ids(db, product_ids)
 
 
 def notify_favorite_discounts_for_products_sync(

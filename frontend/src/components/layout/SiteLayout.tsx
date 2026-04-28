@@ -258,6 +258,27 @@ export function SiteLayout() {
   const showCatalogControls = !isCatalogPage && !location.pathname.startsWith('/admin')
 
   useEffect(() => {
+    if (!isSupportOpen || typeof document === 'undefined') {
+      return
+    }
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsSupportOpen(false)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isSupportOpen])
+
+  useEffect(() => {
     setGlobalSearch(new URLSearchParams(location.search).get('search') || '')
   }, [location.search])
 
@@ -587,24 +608,6 @@ export function SiteLayout() {
 
       {questionSupportLinks.length ? (
         <div className="fixed bottom-3 right-3 z-40 flex flex-col items-end gap-2.5 sm:bottom-5 sm:right-5 sm:gap-3">
-          {isSupportOpen ? (
-            <div className="w-[220px] rounded-[22px] border border-white/10 bg-slate-950/95 p-3 shadow-card backdrop-blur-xl sm:rounded-[24px]">
-              <p className="px-2 pb-2 text-xs uppercase tracking-[0.24em] text-slate-500">Задать вопрос</p>
-              <div className="space-y-2">
-                {questionSupportLinks.map((item) => (
-                  <ActionLink
-                    key={item.label}
-                    href={item.url}
-                    external
-                    className="flex min-h-[44px] items-center justify-center rounded-[18px] border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-medium text-slate-100 transition hover:border-brand-300/50 hover:bg-brand-500/10"
-                  >
-                    {item.label}
-                  </ActionLink>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
           <button
             type="button"
             onClick={() => setIsSupportOpen((value) => !value)}
@@ -613,6 +616,49 @@ export function SiteLayout() {
             <MessageCircle size={18} />
             Задать вопрос
           </button>
+        </div>
+      ) : null}
+
+      {isSupportOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-md sm:px-6"
+          onClick={() => setIsSupportOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-[28px] border border-white/15 bg-gradient-to-br from-slate-900/95 via-slate-900/90 to-[#0d1c31]/95 p-5 shadow-[0_32px_80px_rgba(0,0,0,0.5)] ring-1 ring-brand-300/20 sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-brand-200/85">Помощь</p>
+                <h3 className="mt-2 text-2xl text-white">Связаться с нами</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-300">
+                  Выберите удобный способ связи, и мы поможем с покупкой или заказом.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSupportOpen(false)}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.04] text-slate-200 transition hover:border-brand-300/50 hover:bg-brand-500/15"
+                aria-label="Закрыть окно помощи"
+              >
+                x
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-2.5">
+              {questionSupportLinks.map((item) => (
+                <ActionLink
+                  key={item.label}
+                  href={item.url}
+                  external
+                  className="flex min-h-[46px] items-center justify-center rounded-[16px] border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-medium text-slate-100 transition hover:border-brand-300/60 hover:bg-brand-500/12"
+                >
+                  {item.label}
+                </ActionLink>
+              ))}
+            </div>
+          </div>
         </div>
       ) : null}
 

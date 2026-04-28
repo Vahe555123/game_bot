@@ -247,7 +247,7 @@ export function CatalogPage() {
       return undefined
     }
 
-    const SCROLL_DELTA_THRESHOLD = 10
+    const FILTER_HIDE_SCROLL_THRESHOLD = 300
 
     const handleScroll = () => {
       if (window.innerWidth < 1024) {
@@ -256,24 +256,16 @@ export function CatalogPage() {
 
       const currentScrollY = window.scrollY
       const previousScrollY = lastScrollYRef.current
-      const scrollDelta = currentScrollY - previousScrollY
 
-      // Keep filters visible near top to avoid jumpy behavior.
-      if (currentScrollY <= 24) {
-        if (!isFiltersOpen) {
-          setIsFiltersOpen(true)
-        }
-        lastScrollYRef.current = currentScrollY
-        return
-      }
-
-      if (Math.abs(scrollDelta) < SCROLL_DELTA_THRESHOLD) {
-        return
-      }
-
-      if (scrollDelta > 0 && isFiltersOpen) {
+      if (
+        previousScrollY < FILTER_HIDE_SCROLL_THRESHOLD &&
+        currentScrollY >= FILTER_HIDE_SCROLL_THRESHOLD &&
+        isFiltersOpen
+      ) {
         setIsFiltersOpen(false)
-      } else if (scrollDelta < 0 && !isFiltersOpen) {
+      }
+
+      if (previousScrollY > 0 && currentScrollY <= 0 && !isFiltersOpen) {
         setIsFiltersOpen(true)
       }
 
