@@ -93,6 +93,29 @@ def _sqlite_db_path() -> str:
     return str(project_root / "products.db")
 
 
+def _connect() -> sqlite3.Connection:
+    """Open a raw SQLite connection with `normalize_search` registered.
+
+    The `products` and `product_cards` tables have AFTER UPDATE triggers that
+    invoke `normalize_search()` (defined in app.database.connection) for the FTS
+    indexes. Without registering the function on this connection any UPDATE
+    against those tables fails with `no such function: normalize_search`.
+    """
+    connection = sqlite3.connect(_sqlite_db_path())
+    try:
+        from app.database.connection import _normalize_search_text  # type: ignore
+        try:
+            connection.create_function(
+                "normalize_search", 1, _normalize_search_text, deterministic=True
+            )
+        except TypeError:
+            # SQLite < 3.8.3 / pre-3.8 builds don't support deterministic=True.
+            connection.create_function("normalize_search", 1, _normalize_search_text)
+    except Exception:
+        logger.exception("Failed to register normalize_search on cleanup connection")
+    return connection
+
+
 def _now_utc_string() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -155,12 +178,11 @@ def _clear_db_by_predicate(predicate_sql: str, params: Iterable) -> tuple[int, i
 
     Returns (products_cleared, product_cards_cleared, matched_end_dates).
     """
-    db_path = _sqlite_db_path()
     products_cleared = 0
     product_cards_cleared = 0
     matched_dates: list[str] = []
 
-    with closing(sqlite3.connect(db_path)) as connection:
+    with closing(_connect()) as connection:
         connection.isolation_level = None  # autocommit
 
         cursor = connection.execute(
@@ -284,8 +306,7 @@ def _refresh_product_cards_for_ids(product_ids: list[str]) -> None:
 
 
 def _affected_product_ids_for_predicate(predicate_sql: str, params: Iterable) -> list[str]:
-    db_path = _sqlite_db_path()
-    with closing(sqlite3.connect(db_path)) as connection:
+    with closing(_connect()) as connection:
         cursor = connection.execute(
             f"SELECT DISTINCT id FROM products WHERE {predicate_sql} AND {_PRODUCTS_DISCOUNT_HAS}",
             list(params),
@@ -335,8 +356,7 @@ def list_discount_end_groups() -> list[dict]:
 
     Used by the admin UI to let an operator pick which sale wave to wipe.
     """
-    db_path = _sqlite_db_path()
-    with closing(sqlite3.connect(db_path)) as connection:
+    with closing(_connect()) as connection:
         cursor = connection.execute(
             f"""
             SELECT discount_end, COUNT(DISTINCT id) AS product_count, COUNT(*) AS rows_count

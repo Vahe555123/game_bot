@@ -44,6 +44,31 @@ def _resolve_db_path() -> str:
     return str(PROJECT_ROOT / "products.db")
 
 
+def _open_connection(db_path: str) -> sqlite3.Connection:
+    """Open a raw SQLite connection with `normalize_search` registered.
+
+    Triggers on `products` / `product_cards` rebuild FTS indexes via this
+    Python-defined function on every UPDATE. Without registering it the script
+    crashes with `no such function: normalize_search`.
+    """
+    connection = sqlite3.connect(db_path)
+    connection.isolation_level = None  # autocommit
+    if str(PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(PROJECT_ROOT))
+    try:
+        from app.database.connection import _normalize_search_text  # type: ignore
+    except Exception as exc:  # pragma: no cover — environment-dependent
+        print(f"[!] Не удалось импортировать app.database.connection: {exc}", file=sys.stderr)
+        return connection
+    try:
+        connection.create_function(
+            "normalize_search", 1, _normalize_search_text, deterministic=True
+        )
+    except TypeError:
+        connection.create_function("normalize_search", 1, _normalize_search_text)
+    return connection
+
+
 def _print_current_state(connection: sqlite3.Connection, product_id: str) -> None:
     cursor = connection.execute(
         """
@@ -115,24 +140,51 @@ def _seed_products(
     factor = (100 - percent) / 100.0
     cursor = connection.execute(
         """
-        UPDATE products
-        SET discount = ?,
-            discount_percent = ?,
-            discount_end = ?,
-            old_price_uah = CASE WHEN COALESCE(price_uah, 0) > 0 AND COALESCE(old_price_uah, 0) <= 0
-                                 THEN ROUND(price_uah / ?, 2) ELSE old_price_uah END,
-            old_price_try = CASE WHEN COALESCE(price_try, 0) > 0 AND COALESCE(old_price_try, 0) <= 0
-                                 THEN ROUND(price_try / ?, 2) ELSE old_price_try END,
-            old_price_inr = CASE WHEN COALESCE(price_inr, 0) > 0 AND COALESCE(old_price_inr, 0) <= 0
-                                 THEN ROUND(price_inr / ?, 2) ELSE old_price_inr END,
-            old_price = CASE WHEN COALESCE(price_rub, 0) > 0 AND COALESCE(old_price, 0) <= 0
-                             THEN ROUND(price_rub / ?, 2) ELSE old_price END,
-            updated_at = CURRENT_TIMESTAMP
+        SELECT rowid, price_uah, old_price_uah, price_try, old_price_try,
+               price_inr, old_price_inr, price_rub, old_price
+        FROM products
         WHERE id = ?
         """,
-        (percent, percent, discount_end, factor, factor, factor, factor, product_id),
+        (product_id,),
     )
-    return cursor.rowcount
+    rows = cursor.fetchall()
+    if not rows:
+        return 0
+
+    updated = 0
+    for row in rows:
+        rowid = row[0]
+        price_uah, old_uah = (row[1] or 0.0), (row[2] or 0.0)
+        price_try, old_try = (row[3] or 0.0), (row[4] or 0.0)
+        price_inr, old_inr = (row[5] or 0.0), (row[6] or 0.0)
+        price_rub, old_rub = (row[7] or 0.0), (row[8] or 0.0)
+
+        new_old_uah = round(price_uah / factor, 2) if price_uah > 0 and old_uah <= 0 else old_uah
+        new_old_try = round(price_try / factor, 2) if price_try > 0 and old_try <= 0 else old_try
+        new_old_inr = round(price_inr / factor, 2) if price_inr > 0 and old_inr <= 0 else old_inr
+        new_old_rub = round(price_rub / factor, 2) if price_rub > 0 and old_rub <= 0 else old_rub
+
+        connection.execute(
+            """
+            UPDATE products
+            SET discount = ?,
+                discount_percent = ?,
+                discount_end = ?,
+                old_price_uah = ?,
+                old_price_try = ?,
+                old_price_inr = ?,
+                old_price = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE rowid = ?
+            """,
+            (
+                percent, percent, discount_end,
+                new_old_uah, new_old_try, new_old_inr, new_old_rub,
+                rowid,
+            ),
+        )
+        updated += 1
+    return updated
 
 
 def _seed_product_cards(
@@ -196,9 +248,7 @@ def main() -> int:
     print(f"Discount end: {args.discount_end}  (UTC)")
     print(f"Percent: {args.percent}%")
 
-    with closing(sqlite3.connect(args.db)) as connection:
-        connection.isolation_level = None  # autocommit
-
+    with closing(_open_connection(args.db)) as connection:
         print("\n=== ДО ===")
         _print_current_state(connection, args.product_id)
 
@@ -229,10 +279,10 @@ def main() -> int:
 
     print(
         "\nГотово. Теперь:\n"
-        "  • Открой админку → раздел «Скидки» → кнопка «Очистить по дате» — должна\n"
-        f"    появиться дата {args.discount_end} с этим товаром.\n"
-        "  • Или подожди до 5 минут — фоновая задача сама очистит (если дата в прошлом).\n"
-        "  • Перезапусти этот скрипт с --show-only, чтобы увидеть, что скидки занулились."
+        "  - Открой админку, раздел 'Скидки', кнопка 'Очистить по дате' -\n"
+        f"    должна появиться дата {args.discount_end} с этим товаром.\n"
+        "  - Или подожди до 5 минут - фоновая задача сама очистит (если дата в прошлом).\n"
+        "  - Перезапусти этот скрипт с --show-only, чтобы увидеть, что скидки занулились."
     )
     return 0
 
